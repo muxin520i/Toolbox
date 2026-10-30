@@ -51,6 +51,7 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate {
 
     private var timers: [UUID: Timer] = [:]
     private var live: [ObjectIdentifier: DownloadItem] = [:]
+    private var sessions: [UUID: URLSessionDownloadTask] = [:]
 
     private static let storeKey = "browser.downloads.v1"
 
@@ -128,6 +129,92 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate {
     private func stopTimer(_ id: UUID) {
         timers[id]?.invalidate()
         timers.removeValue(forKey: id)
+    }
+
+    // MARK: 直接下载（首页 / 播放页）
+
+    private static let mobileUA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
+        + "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
+
+    /// m3u8/mpd 这类是播放列表，不是一个整文件，下载下来也放不了
+    static func isStream(_ urlString: String) -> Bool {
+        let lower = urlString.lowercased()
+        if lower.hasPrefix("blob:") || lower.hasPrefix("data:") { return true }
+        guard let url = URL(string: urlString) else { return true }
+        return ["m3u8", "m3u", "mpd", "ism", "ts"].contains(url.pathExtension.lowercased())
+    }
+
+    /// 直接按链接下一个文件，返回这一条记录（失败返回 nil）
+    @discardableResult
+    func start(from urlString: String, title: String? = nil) -> DownloadItem? {
+        let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !Self.isStream(trimmed), let url = URL(string: trimmed) else { return nil }
+        guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return nil }
+
+        var name = (title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if name.isEmpty {
+            name = url.lastPathComponent.removingPercentEncoding ?? ""
+        }
+        if name.isEmpty { name = "video" }
+        if (name as NSString).pathExtension.isEmpty { name += ".mp4" }
+
+        let dest = Self.unique(in: Self.directory(), name: name)
+
+        let item = DownloadItem(fileName: dest.lastPathComponent, source: trimmed)
+        item.localPath = dest.path
+
+        items.insert(item, at: 0)
+        items = Array(items.prefix(60))
+
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 30
+        request.setValue(Self.mobileUA, forHTTPHeaderField: "User-Agent")
+        if let host = url.host {
+            request.setValue("\(scheme)://\(host)/", forHTTPHeaderField: "Referer")
+        }
+
+        let task = URLSession.shared.downloadTask(with: request) { tempURL, _, error in
+            DispatchQueue.main.async {
+                self.stopTimer(item.id)
+                self.sessions.removeValue(forKey: item.id)
+
+                guard let tempURL = tempURL, error == nil else {
+                    item.state = .failed
+                    self.save()
+                    return
+                }
+                do {
+                    try? FileManager.default.removeItem(at: dest)
+                    try FileManager.default.moveItem(at: tempURL, to: dest)
+                    item.progress = 1
+                    item.state = .finished
+                } catch {
+                    item.state = .failed
+                }
+                self.save()
+            }
+        }
+
+        sessions[item.id] = task
+        startTimer(task: task, item: item)
+        task.resume()
+        return item
+    }
+
+    private func startTimer(task: URLSessionDownloadTask, item: DownloadItem) {
+        let timer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: true) { [weak self, weak item] _ in
+            guard let self = self, let item = item else { return }
+            let value = task.progress.fractionCompleted
+            if value.isFinite {
+                DispatchQueue.main.async {
+                    item.progress = min(max(value, 0), 1)
+                }
+            }
+            if item.state != .running {
+                self.stopTimer(item.id)
+            }
+        }
+        timers[item.id] = timer
     }
 
     // MARK: 增删

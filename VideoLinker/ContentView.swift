@@ -17,6 +17,10 @@ struct ContentView: View {
     @State private var showPlaylistPicker = false
     @State private var showNoPlaylistAlert = false
 
+    @ObservedObject private var downloads = DownloadManager.shared
+    @State private var showDownloads = false
+    @State private var downloadHint: String?
+
     var body: some View {
         ZStack {
             BackgroundView()
@@ -25,6 +29,7 @@ struct ContentView: View {
                 VStack(alignment: .leading, spacing: 20) {
                     header
                     inputCard
+                    downloadEntry
                     if !items.isEmpty { historySection }
                     footer
                 }
@@ -59,6 +64,17 @@ struct ContentView: View {
         }
         .fullScreenCover(item: $request) { req in
             PlayerScreen(request: req)
+        }
+        .sheet(isPresented: $showDownloads) {
+            DownloadsView { url in
+                showDownloads = false
+                request = PlayRequest(url: url)
+            }
+        }
+        .alert("下载", isPresented: hintBinding) {
+            Button("知道了", role: .cancel) { downloadHint = nil }
+        } message: {
+            Text(downloadHint ?? "")
         }
         .onReceive(Router.shared.$pending) { req in
             guard let req = req else { return }
@@ -136,20 +152,41 @@ struct ContentView: View {
                     .strokeBorder(inputFocused ? theme.accent.opacity(0.6) : theme.cardStroke, lineWidth: 1)
             )
 
-            Button(action: playCurrent) {
-                HStack(spacing: 8) {
-                    Image(systemName: "play.fill").font(.system(size: 14, weight: .bold))
-                    Text("开始播放").font(.system(size: 16, weight: .semibold))
+            HStack(spacing: 10) {
+                Button(action: playCurrent) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "play.fill").font(.system(size: 14, weight: .bold))
+                        Text("开始播放").font(.system(size: 16, weight: .semibold))
+                    }
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 52)
+                    .background(theme.gradient,
+                                in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .opacity(resolvedURL == nil ? 0.4 : 1)
                 }
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity)
-                .frame(height: 52)
-                .background(theme.gradient,
-                            in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .opacity(resolvedURL == nil ? 0.4 : 1)
+                .buttonStyle(.plain)
+                .disabled(resolvedURL == nil)
+
+                Button(action: downloadCurrent) {
+                    VStack(spacing: 3) {
+                        Image(systemName: "arrow.down.circle")
+                            .font(.system(size: 17, weight: .semibold))
+                        Text("下载")
+                            .font(.system(size: 11, weight: .semibold))
+                    }
+                    .foregroundStyle(theme.accent)
+                    .frame(width: 76, height: 52)
+                    .background(theme.field, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .strokeBorder(theme.accent.opacity(0.35), lineWidth: 1)
+                    )
+                    .opacity(resolvedURL == nil ? 0.4 : 1)
+                }
+                .buttonStyle(.plain)
+                .disabled(resolvedURL == nil)
             }
-            .buttonStyle(.plain)
-            .disabled(resolvedURL == nil)
         }
         .padding(16)
         .background(theme.card, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
@@ -157,6 +194,89 @@ struct ContentView: View {
             RoundedRectangle(cornerRadius: 24, style: .continuous)
                 .strokeBorder(theme.cardStroke, lineWidth: 1)
         )
+    }
+
+    // MARK: - 下载入口
+
+    private var runningDownload: DownloadItem? {
+        downloads.items.first { $0.state == .running }
+    }
+
+    private var downloadEntry: some View {
+        Button {
+            showDownloads = true
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "arrow.down.circle.fill")
+                    .font(.system(size: 17))
+                    .foregroundStyle(theme.accent)
+
+                Text("下载管理")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(theme.text)
+
+                if !downloads.items.isEmpty {
+                    Text("\(downloads.items.count)")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2)
+                        .background(theme.accent, in: Capsule())
+                }
+
+                Spacer()
+
+                if let running = runningDownload {
+                    Text(running.fileName)
+                        .font(.system(size: 11))
+                        .foregroundStyle(theme.textTertiary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Text("\(Int(running.progress * 100))%")
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundStyle(theme.accent)
+                }
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(theme.textTertiary)
+            }
+            .padding(.horizontal, 16)
+            .frame(height: 48)
+            .background(theme.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(theme.cardStroke, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var hintBinding: Binding<Bool> {
+        Binding(
+            get: { downloadHint != nil },
+            set: { if !$0 { downloadHint = nil } }
+        )
+    }
+
+    /// 直接把当前链接当文件下下来
+    private func downloadCurrent() {
+        guard let url = resolvedURL else { return }
+        inputFocused = false
+
+        let raw = url.absoluteString
+        if DownloadManager.isStream(raw) {
+            downloadHint = "这是流媒体地址（m3u8 之类），没法整段下成一个文件，先播放再看。"
+            return
+        }
+
+        guard let item = downloads.start(from: raw) else {
+            downloadHint = "这个链接下载不了，换视频直链试试（.mp4 结尾那种）。"
+            return
+        }
+
+        items = HistoryStore.add(HistoryItem(url: raw, date: Date()))
+        downloadHint = "已开始下载「\(item.fileName)」，进度可以在「下载管理」里看。"
     }
 
     // MARK: - 历史记录

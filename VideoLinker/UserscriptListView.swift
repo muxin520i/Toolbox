@@ -8,8 +8,8 @@ extension Notification.Name {
 
 /// 脚本来源地址（直接用内置浏览器打开，页面里点安装由拦截逻辑收进脚本库）
 enum ScriptSite {
-    /// 国内可直连的 Greasy Fork 镜像（GFork Proxy，走国内 CDN）
-    static let mirror = "https://home.greasyfork.org.cn/zh-hans"
+    /// 国内可直连的 Greasy Fork 镜像（中文镜像站，服务端渲染，装脚本走页面里的安装按钮）
+    static let mirror = "https://greasyfork.icu"
     /// 官方站，网络能通时更可靠
     static let official = "https://greasyfork.org/zh-CN/scripts"
 

@@ -286,7 +286,7 @@ struct DownloadsView: View {
                         Text("还没有下载")
                             .font(.system(size: 14, weight: .medium))
                             .foregroundStyle(.secondary)
-                        Text("网页里的安装包、压缩包、视频文件会自动进这里")
+                        Text("网页里的安装包、压缩包会自动进这里，首页和播放页也能直接下视频")
                             .font(.system(size: 11))
                             .foregroundStyle(.tertiary)
                     }

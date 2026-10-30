@@ -474,6 +474,12 @@ final class TabCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScri
             decisionHandler(.download)
             return
         }
+        // 镜像站有些安装按钮是整页跳转，这里再兜一层：.user.js 一律收进脚本库
+        if url.path.lowercased().hasSuffix(".user.js") {
+            decisionHandler(.cancel)
+            installScript(from: url.absoluteString, in: webView)
+            return
+        }
         decisionHandler(.allow)
     }
 

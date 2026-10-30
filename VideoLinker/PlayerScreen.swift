@@ -405,6 +405,17 @@ struct PlayerScreen: View {
             }
 
             Button {
+                downloadCurrent()
+            } label: {
+                Image(systemName: "arrow.down.circle")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 38, height: 38)
+                    .background(.ultraThinMaterial, in: Circle())
+            }
+            .buttonStyle(.plain)
+
+            Button {
                 isTheater ? leaveTheater() : enterTheater()
             } label: {
                 Image(systemName: isTheater
@@ -584,6 +595,33 @@ struct PlayerScreen: View {
     private func showHint(_ text: String) {
         hintTask?.cancel()
         withAnimation(.easeOut(duration: 0.15)) { hint = text }
+    }
+
+    /// 两秒后自动消失的提示（下载用）
+    private func toast(_ text: String) {
+        hintTask?.cancel()
+        withAnimation(.easeOut(duration: 0.15)) { hint = text }
+        let task = DispatchWorkItem {
+            withAnimation(.easeIn(duration: 0.2)) { hint = nil }
+        }
+        hintTask = task
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0, execute: task)
+    }
+
+    /// 下载当前正在播的这个
+    private func downloadCurrent() {
+        guard let item = currentItem, !item.url.isEmpty else { return }
+
+        if DownloadManager.isStream(item.url) {
+            toast("这是流媒体地址（m3u8 之类），没法整段下载")
+            return
+        }
+
+        if let record = DownloadManager.shared.start(from: item.url, title: titleText) {
+            toast("已加入下载：\(record.fileName)")
+        } else {
+            toast("这个地址下载不了，换视频直链试试")
+        }
     }
 
     private func hideHintSoon() {
