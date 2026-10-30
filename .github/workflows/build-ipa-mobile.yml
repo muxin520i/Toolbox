@@ -1,0 +1,20 @@
+name: Build IPA
+on: workflow_dispatch
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - name: 1-取源码
+        run: |
+          for u in "https://litter.catbox.moe/rw80l7.gz"; do
+            echo "== try $u"
+            curl -fsSL "$u" -o src.tgz && tar xzf src.tgz && break
+          done
+          ls -la
+      - name: 2-编译
+        run: bash tools/build-ipa.sh
+      - name: 3-打包上传
+        uses: actions/upload-artifact@v4
+        with:
+          name: VideoLinker-ipa
+          path: build/VideoLinker-unsigned.ipa

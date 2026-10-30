@@ -1,0 +1,58 @@
+name: Build unsigned IPA
+
+# 没有 Mac 也能出包：
+# 1. 把整个 VideoLinker 文件夹推到一个 GitHub 仓库
+# 2. 打开仓库的 Actions 页面，等这个流程跑完
+# 3. 在运行记录的 Artifacts 里下载 VideoLinker-ipa.zip，解压得到 .ipa
+# 产物是未签名包，需要用 Sideloadly / AltStore / TrollStore 用你自己的 Apple ID 签名后才能装。
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          xcodebuild -showsdks | grep -i iphoneos || true
+
+      - name: Build (no code signing)
+        run: |
+          set -x
+          xcodebuild \
+            -project VideoLinker.xcodeproj \
+            -scheme VideoLinker \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Package IPA
+        run: |
+          APP_PATH="build/Build/Products/Release-iphoneos/VideoLinker.app"
+          test -d "$APP_PATH"
+          rm -rf Payload VideoLinker-unsigned.ipa
+          mkdir -p Payload
+          cp -R "$APP_PATH" Payload/
+          zip -qry VideoLinker-unsigned.ipa Payload
+          rm -rf Payload
+          ls -lh VideoLinker-unsigned.ipa
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: VideoLinker-ipa
+          path: VideoLinker-unsigned.ipa
+          if-no-files-found: error
