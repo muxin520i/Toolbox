@@ -68,7 +68,10 @@ struct ContentView: View {
         .sheet(isPresented: $showDownloads) {
             DownloadsView { url in
                 showDownloads = false
-                request = PlayRequest(url: url)
+                // 等弹窗收完再起全屏播放，避免两个呈现冲突被吞掉
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+                    request = PlayRequest(url: url)
+                }
             }
         }
         .alert("下载", isPresented: hintBinding) {
