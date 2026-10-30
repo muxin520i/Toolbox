@@ -1,11 +1,15 @@
 name: probe
 on: workflow_dispatch
 jobs:
-  linux:
-    runs-on: ubuntu-latest
+  m15:
+    runs-on: macos-15
     steps:
-      - run: echo linux-ok; uname -a
-  mac:
-    runs-on: macos-14
+      - run: echo m15-ok; sw_vers
+  m13:
+    runs-on: macos-13
     steps:
-      - run: echo mac-ok; sw_vers; xcodebuild -version
+      - run: echo m13-ok; sw_vers
+  latest:
+    runs-on: macos-latest
+    steps:
+      - run: echo latest-ok; sw_vers
