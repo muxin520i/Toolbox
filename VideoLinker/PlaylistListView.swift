@@ -1,12 +1,47 @@
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
+
+// MARK: - 备份文件
+
+struct VideoLinkerBackup: Codable {
+    var version: Int = 1
+    var playlists: [Playlist]
+    var favorites: [String]
+    var history: [HistoryItem]
+}
+
+struct BackupDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.json] }
+
+    var data: Data
+
+    init(data: Data) {
+        self.data = data
+    }
+
+    init(configuration: ReadConfiguration) throws {
+        data = configuration.file.regularFileContents ?? Data()
+    }
+
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        FileWrapper(regularFileWithContents: data)
+    }
+}
 
 // MARK: - 列表总览
 
 struct PlaylistListView: View {
+    @Environment(\.theme) private var theme
+
     @State private var playlists: [Playlist] = PlaylistStore.load()
     @State private var showCreateSheet = false
     @State private var newName = ""
+
+    @State private var showExporter = false
+    @State private var showImporter = false
+    @State private var backupData = Data()
+    @State private var alertText: String?
 
     var body: some View {
         NavigationStack {
@@ -36,6 +71,8 @@ struct PlaylistListView: View {
                                 }
                             }
                         }
+
+                        backupHint
                     }
                     .padding(.horizontal, 20)
                     .padding(.top, 12)
@@ -44,9 +81,27 @@ struct PlaylistListView: View {
             }
             .navigationTitle("播放列表")
             .navigationBarTitleDisplayMode(.large)
-            .toolbarBackground(Color(red: 0.045, green: 0.045, blue: 0.06), for: .navigationBar)
+            .toolbarBackground(theme.navBg, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Menu {
+                        Button {
+                            exportBackup()
+                        } label: {
+                            Label("导出备份", systemImage: "square.and.arrow.up")
+                        }
+                        Button {
+                            showImporter = true
+                        } label: {
+                            Label("从备份导入", systemImage: "square.and.arrow.down")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                            .font(.system(size: 16, weight: .semibold))
+                    }
+                }
+
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
                         newName = ""
@@ -58,26 +113,53 @@ struct PlaylistListView: View {
                 }
             }
         }
-        .preferredColorScheme(.dark)
         .onAppear { playlists = PlaylistStore.load() }
         .sheet(isPresented: $showCreateSheet) {
             createSheet
                 .presentationDetents([.height(230)])
                 .presentationDragIndicator(.visible)
         }
+        .fileExporter(
+            isPresented: $showExporter,
+            document: BackupDocument(data: backupData),
+            contentType: .json,
+            defaultFilename: "videolinker-backup"
+        ) { _ in }
+        .fileImporter(
+            isPresented: $showImporter,
+            allowedContentTypes: [.json]
+        ) { result in
+            importBackup(result)
+        }
+        .alert("提示", isPresented: Binding(
+            get: { alertText != nil },
+            set: { if !$0 { alertText = nil } }
+        )) {
+            Button("知道了", role: .cancel) { alertText = nil }
+        } message: {
+            Text(alertText ?? "")
+        }
+    }
+
+    private var backupHint: some View {
+        Text("点左上角 ⋯ 可以导出/导入备份，换机或重装不会丢列表")
+            .font(.system(size: 11))
+            .foregroundStyle(theme.textTertiary)
+            .frame(maxWidth: .infinity)
+            .padding(.top, 18)
     }
 
     private var emptyState: some View {
         VStack(spacing: 14) {
             Image(systemName: "list.bullet.rectangle.portrait")
                 .font(.system(size: 40, weight: .light))
-                .foregroundStyle(.white.opacity(0.18))
+                .foregroundStyle(theme.textTertiary)
             Text("还没有播放列表")
                 .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.55))
+                .foregroundStyle(theme.textSecondary)
             Text("点右上角 + 新建一个，把常看的视频放进去")
                 .font(.system(size: 12))
-                .foregroundStyle(.white.opacity(0.3))
+                .foregroundStyle(theme.textTertiary)
                 .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
@@ -87,14 +169,7 @@ struct PlaylistListView: View {
     private func row(_ playlist: Playlist) -> some View {
         HStack(spacing: 14) {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [Color(red: 1.0, green: 0.42, blue: 0.31).opacity(0.85),
-                                 Color(red: 0.55, green: 0.28, blue: 0.85).opacity(0.85)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
+                .fill(theme.gradientTopLeft)
                 .frame(width: 46, height: 46)
                 .overlay(
                     Image(systemName: "list.bullet")
@@ -105,24 +180,24 @@ struct PlaylistListView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(playlist.name)
                     .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.94))
+                    .foregroundStyle(theme.text)
                     .lineLimit(1)
                 Text(playlist.items.isEmpty ? "空列表" : "\(playlist.items.count) 个视频")
                     .font(.system(size: 12))
-                    .foregroundStyle(.white.opacity(0.38))
+                    .foregroundStyle(theme.textTertiary)
             }
 
             Spacer(minLength: 6)
 
             Image(systemName: "chevron.right")
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.22))
+                .foregroundStyle(theme.textTertiary)
         }
         .padding(12)
-        .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .background(theme.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.06), lineWidth: 1)
+                .strokeBorder(theme.cardStroke, lineWidth: 1)
         )
     }
 
@@ -130,15 +205,16 @@ struct PlaylistListView: View {
         VStack(alignment: .leading, spacing: 16) {
             Text("新建播放列表")
                 .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(theme.text)
                 .padding(.top, 22)
 
-            TextField("", text: $newName, prompt: Text("给列表起个名字").foregroundColor(.white.opacity(0.3)))
+            TextField("", text: $newName,
+                      prompt: Text("给列表起个名字").foregroundColor(theme.textTertiary))
                 .font(.system(size: 15))
-                .foregroundStyle(.white)
+                .foregroundStyle(theme.text)
                 .padding(.horizontal, 14)
                 .frame(height: 46)
-                .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+                .background(theme.field, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
 
             Button {
                 playlists = PlaylistStore.create(named: newName)
@@ -149,77 +225,174 @@ struct PlaylistListView: View {
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
                     .frame(height: 46)
-                    .background(
-                        LinearGradient(
-                            colors: [Color(red: 1.0, green: 0.42, blue: 0.31),
-                                     Color(red: 0.55, green: 0.28, blue: 0.85)],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        ),
-                        in: RoundedRectangle(cornerRadius: 13, style: .continuous)
-                    )
+                    .background(theme.gradient, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
             }
             .buttonStyle(.plain)
 
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 20)
-        .background(Color(red: 0.09, green: 0.09, blue: 0.11))
+        .background(theme.bg)
+    }
+
+    // MARK: 备份
+
+    private func exportBackup() {
+        let backup = VideoLinkerBackup(
+            playlists: PlaylistStore.load(),
+            favorites: Array(ResumeStore.favorites()),
+            history: HistoryStore.load()
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .withoutEscapingSlashes]
+        encoder.dateEncodingStrategy = .iso8601
+        guard let data = try? encoder.encode(backup) else {
+            alertText = "导出失败，请重试。"
+            return
+        }
+        backupData = data
+        showExporter = true
+    }
+
+    private func importBackup(_ result: Result<URL, Error>) {
+        guard case .success(let url) = result else { return }
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+
+        guard let data = try? Data(contentsOf: url) else {
+            alertText = "这个文件读不出来。"
+            return
+        }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        guard let backup = try? decoder.decode(VideoLinkerBackup.self, from: data) else {
+            alertText = "文件格式不对，需要本 App 导出的备份文件。"
+            return
+        }
+
+        // 合并：同名列表追加条目，其余新建
+        var current = PlaylistStore.load()
+        for incoming in backup.playlists {
+            if let index = current.firstIndex(where: { $0.name == incoming.name }) {
+                let existing = Set(current[index].items.map { $0.url })
+                let fresh = incoming.items.filter { !existing.contains($0.url) }
+                current[index].items.append(contentsOf: fresh)
+            } else {
+                current.append(incoming)
+            }
+        }
+        PlaylistStore.save(current)
+
+        if !backup.favorites.isEmpty {
+            let set = ResumeStore.favorites().union(backup.favorites)
+            UserDefaults.standard.set(Array(set), forKey: "video.favorites.v1")
+        }
+
+        playlists = PlaylistStore.load()
+        alertText = "已导入 \(backup.playlists.count) 个列表。"
     }
 }
 
 // MARK: - 列表详情
 
 struct PlaylistDetailView: View {
+    @Environment(\.theme) private var theme
+
     let playlistID: UUID
 
     @State private var playlist: Playlist?
     @State private var request: PlayRequest?
     @State private var showAddSheet = false
+    @State private var showBulkSheet = false
     @State private var addURL = ""
     @State private var addTitle = ""
+    @State private var bulkText = ""
+    @State private var editMode: EditMode = .inactive
+    @State private var selection = Set<UUID>()
+    @State private var toast: String?
 
     var body: some View {
         ZStack {
             BackgroundView()
 
-            ScrollView {
-                VStack(spacing: 8) {
-                    if let playlist = playlist {
-                        if playlist.items.isEmpty {
-                            emptyState
-                        } else {
-                            ForEach(Array(playlist.items.enumerated()), id: \.element.id) { index, item in
-                                row(item, index: index)
-                            }
-                        }
-                    }
+            if let playlist = playlist, !playlist.items.isEmpty {
+                itemList(playlist)
+            } else {
+                emptyState
+            }
+
+            if let toast = toast {
+                VStack {
+                    Spacer()
+                    Text(toast)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        .background(Color.black.opacity(0.78), in: Capsule())
+                        .padding(.bottom, 30)
                 }
-                .padding(.horizontal, 20)
-                .padding(.top, 12)
-                .padding(.bottom, 40)
+                .transition(.opacity)
+                .allowsHitTesting(false)
             }
         }
         .navigationTitle(playlist?.name ?? "列表")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(Color(red: 0.045, green: 0.045, blue: 0.06), for: .navigationBar)
+        .toolbarBackground(theme.navBg, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
         .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                EditButton()
+                    .font(.system(size: 15, weight: .medium))
+            }
+
             ToolbarItem(placement: .navigationBarTrailing) {
-                Button {
-                    addURL = ""
-                    addTitle = ""
-                    showAddSheet = true
-                } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 16, weight: .semibold))
+                HStack(spacing: 14) {
+                    if editMode == .active {
+                        Button {
+                            deleteSelected()
+                        } label: {
+                            Image(systemName: "trash")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(selection.isEmpty ? theme.textTertiary : .red)
+                        }
+                        .disabled(selection.isEmpty)
+                    } else {
+                        Menu {
+                            Button {
+                                addURL = ""
+                                addTitle = ""
+                                showAddSheet = true
+                            } label: {
+                                Label("添加一条", systemImage: "plus")
+                            }
+                            Button {
+                                bulkText = ""
+                                showBulkSheet = true
+                            } label: {
+                                Label("批量粘贴导入", systemImage: "text.badge.plus")
+                            }
+                        } label: {
+                            Image(systemName: "plus")
+                                .font(.system(size: 16, weight: .semibold))
+                        }
+                    }
                 }
             }
         }
         .onAppear { reload() }
+        .onChange(of: editMode) { newValue in
+            if newValue == .inactive { selection.removeAll() }
+        }
         .sheet(isPresented: $showAddSheet) {
             addSheet
-                .presentationDetents([.height(300)])
+                .presentationDetents([.height(320)])
+                .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showBulkSheet) {
+            bulkSheet
+                .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         }
         .fullScreenCover(item: $request) { req in
@@ -231,21 +404,46 @@ struct PlaylistDetailView: View {
         VStack(spacing: 14) {
             Image(systemName: "play.rectangle.on.rectangle")
                 .font(.system(size: 38, weight: .light))
-                .foregroundStyle(.white.opacity(0.18))
+                .foregroundStyle(theme.textTertiary)
             Text("列表是空的")
                 .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.55))
-            Text("点右上角 + 把视频链接加进来")
+                .foregroundStyle(theme.textSecondary)
+            Text("点右上角 + 添加，支持一次粘贴多行链接")
                 .font(.system(size: 12))
-                .foregroundStyle(.white.opacity(0.3))
+                .foregroundStyle(theme.textTertiary)
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 90)
     }
 
+    private func itemList(_ playlist: Playlist) -> some View {
+        List(selection: $selection) {
+            ForEach(Array(playlist.items.enumerated()), id: \.element.id) { index, item in
+                row(item, index: index)
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 4, trailing: 20))
+            }
+            .onMove { source, destination in
+                PlaylistStore.moveItem(in: playlistID, from: source, to: destination)
+                reload()
+            }
+            .onDelete { offsets in
+                for offset in offsets {
+                    guard playlist.items.indices.contains(offset) else { continue }
+                    PlaylistStore.removeItem(playlist.items[offset].id, from: playlistID)
+                }
+                reload()
+            }
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .environment(\.editMode, $editMode)
+    }
+
     private func row(_ item: PlaylistItem, index: Int) -> some View {
         Button {
-            guard let playlist = playlist else { return }
+            guard editMode == .inactive, let playlist = playlist else { return }
             let playbackItems = playlist.items.map {
                 PlaybackItem(url: $0.url, title: $0.displayTitle)
             }
@@ -254,31 +452,41 @@ struct PlaylistDetailView: View {
             HStack(spacing: 13) {
                 Text(String(format: "%02d", index + 1))
                     .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.28))
+                    .foregroundStyle(theme.textTertiary)
                     .frame(width: 26, alignment: .leading)
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(item.displayTitle)
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.92))
+                        .foregroundStyle(theme.text)
                         .lineLimit(1)
                     Text(item.subtitle)
                         .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.35))
+                        .foregroundStyle(theme.textTertiary)
                         .lineLimit(1)
                 }
 
                 Spacer(minLength: 6)
 
+                if ResumeStore.progress(for: item.url) != nil {
+                    Image(systemName: "bookmark.fill")
+                        .font(.system(size: 10))
+                        .foregroundStyle(theme.accent.opacity(0.8))
+                }
+
                 Image(systemName: "play.fill")
                     .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.32))
+                    .foregroundStyle(theme.textSecondary)
                     .frame(width: 30, height: 30)
-                    .background(Color.white.opacity(0.07), in: Circle())
+                    .background(theme.field, in: Circle())
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 11)
-            .background(Color.white.opacity(0.045), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .background(theme.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(theme.cardStroke, lineWidth: 1)
+            )
         }
         .buttonStyle(.plain)
         .contextMenu {
@@ -286,6 +494,13 @@ struct PlaylistDetailView: View {
                 UIPasteboard.general.string = item.url
             } label: {
                 Label("复制链接", systemImage: "doc.on.doc")
+            }
+            Button {
+                ResumeStore.remove(url: item.url)
+                toast = "已清除这条的观看进度"
+                hideToastSoon()
+            } label: {
+                Label("清除观看进度", systemImage: "arrow.counterclockwise")
             }
             Button(role: .destructive) {
                 PlaylistStore.removeItem(item.id, from: playlistID)
@@ -296,29 +511,33 @@ struct PlaylistDetailView: View {
         }
     }
 
+    // MARK: 添加
+
     private var addSheet: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("添加视频")
                 .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(theme.text)
                 .padding(.top, 22)
 
-            TextField("", text: $addURL, prompt: Text("视频链接").foregroundColor(.white.opacity(0.3)))
+            TextField("", text: $addURL,
+                      prompt: Text("视频链接").foregroundColor(theme.textTertiary))
                 .font(.system(size: 15))
-                .foregroundStyle(.white)
+                .foregroundStyle(theme.text)
                 .keyboardType(.URL)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .padding(.horizontal, 14)
                 .frame(height: 46)
-                .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+                .background(theme.field, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
 
-            TextField("", text: $addTitle, prompt: Text("标题（可留空）").foregroundColor(.white.opacity(0.3)))
+            TextField("", text: $addTitle,
+                      prompt: Text("标题（可留空）").foregroundColor(theme.textTertiary))
                 .font(.system(size: 15))
-                .foregroundStyle(.white)
+                .foregroundStyle(theme.text)
                 .padding(.horizontal, 14)
                 .frame(height: 46)
-                .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+                .background(theme.field, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
 
             HStack(spacing: 10) {
                 Button {
@@ -328,10 +547,10 @@ struct PlaylistDetailView: View {
                 } label: {
                     Text("粘贴")
                         .font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.75))
+                        .foregroundStyle(theme.textSecondary)
                         .frame(maxWidth: .infinity)
                         .frame(height: 44)
-                        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+                        .background(theme.field, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
                 }
                 .buttonStyle(.plain)
 
@@ -343,15 +562,7 @@ struct PlaylistDetailView: View {
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
                         .frame(height: 44)
-                        .background(
-                            LinearGradient(
-                                colors: [Color(red: 1.0, green: 0.42, blue: 0.31),
-                                         Color(red: 0.55, green: 0.28, blue: 0.85)],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            ),
-                            in: RoundedRectangle(cornerRadius: 13, style: .continuous)
-                        )
+                        .background(theme.gradient, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
                         .opacity(normalizedURL == nil ? 0.4 : 1)
                 }
                 .buttonStyle(.plain)
@@ -361,7 +572,105 @@ struct PlaylistDetailView: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 20)
-        .background(Color(red: 0.09, green: 0.09, blue: 0.11))
+        .background(theme.bg)
+    }
+
+    private var bulkSheet: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("批量导入")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(theme.text)
+                Spacer()
+                Text("\(parsedBulkLines.count) 条")
+                    .font(.system(size: 12))
+                    .foregroundStyle(theme.textTertiary)
+            }
+            .padding(.top, 22)
+
+            Text("一行一个链接，空行和重复的会自动跳过")
+                .font(.system(size: 12))
+                .foregroundStyle(theme.textTertiary)
+
+            TextEditor(text: $bulkText)
+                .font(.system(size: 13, design: .monospaced))
+                .foregroundStyle(theme.text)
+                .scrollContentBackground(.hidden)
+                .padding(10)
+                .background(theme.field, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+                .frame(maxHeight: .infinity)
+
+            HStack(spacing: 10) {
+                Button {
+                    if let s = UIPasteboard.general.string {
+                        bulkText = s
+                    }
+                } label: {
+                    Text("粘贴全部")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(theme.textSecondary)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 44)
+                        .background(theme.field, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    importBulk()
+                } label: {
+                    Text("导入")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 44)
+                        .background(theme.gradient, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+                        .opacity(parsedBulkLines.isEmpty ? 0.4 : 1)
+                }
+                .buttonStyle(.plain)
+                .disabled(parsedBulkLines.isEmpty)
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.bottom, 16)
+        .background(theme.bg)
+    }
+
+    // MARK: 逻辑
+
+    private var parsedBulkLines: [String] {
+        bulkText
+            .split(whereSeparator: { $0 == "\n" || $0 == "\r" })
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { $0.contains(".") && !$0.contains(" ") }
+    }
+
+    private func importBulk() {
+        var added = 0
+        for line in parsedBulkLines {
+            var s = line
+            if !s.lowercased().hasPrefix("http://"), !s.lowercased().hasPrefix("https://") {
+                s = "https://" + s
+            }
+            guard let u = URL(string: s), u.host != nil else { continue }
+            let before = PlaylistStore.load().first { $0.id == playlistID }?.items.count ?? 0
+            PlaylistStore.add(PlaylistItem(url: u.absoluteString, title: ""), to: playlistID)
+            let after = PlaylistStore.load().first { $0.id == playlistID }?.items.count ?? 0
+            if after > before { added += 1 }
+        }
+        reload()
+        showBulkSheet = false
+        toast = "已导入 \(added) 条"
+        hideToastSoon()
+    }
+
+    private func deleteSelected() {
+        guard !selection.isEmpty else { return }
+        for id in selection {
+            PlaylistStore.removeItem(id, from: playlistID)
+        }
+        selection.removeAll()
+        editMode = .inactive
+        reload()
     }
 
     private var normalizedURL: String? {
@@ -377,11 +686,18 @@ struct PlaylistDetailView: View {
     private func saveNewItem() {
         guard let url = normalizedURL else { return }
         let item = PlaylistItem(url: url, title: addTitle)
-        playlist = PlaylistStore.add(item, to: playlistID)
+        let lists = PlaylistStore.add(item, to: playlistID)
+        playlist = lists.first { $0.id == playlistID }
         showAddSheet = false
     }
 
     private func reload() {
         playlist = PlaylistStore.load().first { $0.id == playlistID }
+    }
+
+    private func hideToastSoon() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
+            withAnimation(.easeInOut(duration: 0.2)) { toast = nil }
+        }
     }
 }

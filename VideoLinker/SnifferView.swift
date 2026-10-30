@@ -1,6 +1,45 @@
 import SwiftUI
 import WebKit
-import Combine
+import UIKit
+
+// MARK: - 浏览器视觉规范（对齐 Firefox for iOS）
+
+enum FirefoxStyle {
+    /// Photon Blue 60，Firefox 主色
+    static let accent = Color(red: 0.0, green: 0.376, blue: 0.875)
+    static let privateAccent = Color(red: 0.545, green: 0.361, blue: 0.965)
+
+    static func bg(_ dark: Bool) -> Color {
+        dark ? Color(red: 0.110, green: 0.106, blue: 0.133)
+             : Color(red: 0.992, green: 0.992, blue: 0.996)
+    }
+
+    static func bar(_ dark: Bool) -> Color {
+        dark ? Color(red: 0.169, green: 0.165, blue: 0.200) : .white
+    }
+
+    static func field(_ dark: Bool) -> Color {
+        dark ? Color(red: 0.259, green: 0.255, blue: 0.302)
+             : Color(red: 0.945, green: 0.945, blue: 0.965)
+    }
+
+    static func card(_ dark: Bool) -> Color {
+        dark ? Color(red: 0.169, green: 0.165, blue: 0.200) : .white
+    }
+
+    static func text(_ dark: Bool) -> Color {
+        dark ? Color(red: 0.984, green: 0.980, blue: 0.988)
+             : Color(red: 0.082, green: 0.078, blue: 0.102)
+    }
+
+    static func sub(_ dark: Bool) -> Color {
+        dark ? Color.white.opacity(0.52) : Color.black.opacity(0.48)
+    }
+
+    static func line(_ dark: Bool) -> Color {
+        dark ? Color.white.opacity(0.10) : Color.black.opacity(0.09)
+    }
+}
 
 // MARK: - 嗅探结果
 
@@ -36,476 +75,790 @@ struct SniffedVideo: Identifiable, Hashable {
     }
 }
 
-// MARK: - 嗅探模型
+// MARK: - 面板
 
-final class SnifferModel: NSObject, ObservableObject {
-    @Published var found: [SniffedVideo] = []
-    @Published var isLoading = false
-    @Published var progress: Double = 0
-    @Published var pageTitle: String = ""
-    @Published var currentURLString: String = ""
-    @Published var canGoBack = false
+private enum BrowserSheet: String, Identifiable {
+    case tabs, menu, sniff, history, bookmarks, downloads, settings, scripts
 
-    weak var webView: WKWebView?
-    private var cancellables = Set<AnyCancellable>()
-
-    func attach(_ webView: WKWebView) {
-        self.webView = webView
-
-        webView.publisher(for: \.estimatedProgress)
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] value in self?.progress = value }
-            .store(in: &cancellables)
-
-        webView.publisher(for: \.isLoading)
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] value in self?.isLoading = value }
-            .store(in: &cancellables)
-
-        webView.publisher(for: \.canGoBack)
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] value in self?.canGoBack = value }
-            .store(in: &cancellables)
-
-        webView.publisher(for: \.title)
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] value in self?.pageTitle = value ?? "" }
-            .store(in: &cancellables)
-
-        webView.publisher(for: \.url)
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] value in
-                guard let url = value else { return }
-                self?.currentURLString = url.absoluteString
-            }
-            .store(in: &cancellables)
-    }
-
-    @discardableResult
-    func open(_ text: String) -> Bool {
-        var s = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !s.isEmpty, !s.contains(" ") else { return false }
-        if !s.lowercased().hasPrefix("http://"), !s.lowercased().hasPrefix("https://") {
-            s = "https://" + s
-        }
-        guard let url = URL(string: s), let host = url.host, host.contains(".") else { return false }
-        found.removeAll()
-        currentURLString = url.absoluteString
-        webView?.load(URLRequest(url: url))
-        return true
-    }
-
-    func reload() {
-        webView?.reload()
-    }
-
-    func goBack() {
-        webView?.goBack()
-    }
-
-    func add(_ raw: String) {
-        let clean = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !clean.isEmpty, clean.count < 2000 else { return }
-        guard found.count < 40 else { return }
-        guard !found.contains(where: { $0.url == clean }) else { return }
-        guard clean.lowercased().hasPrefix("http") else { return }
-
-        let host = URL(string: clean)?.host ?? ""
-        let video = SniffedVideo(url: clean, host: host, kind: SniffedVideo.kind(of: clean))
-        found.append(video)
-    }
+    var id: String { rawValue }
 }
 
-// MARK: - 注入脚本
-
-enum SnifferScript {
-    /// 页面一开始就加载：劫持 fetch / XHR，并持续扫描 video 标签
-    static let source = """
-    (function() {
-      if (window.__vlHooked) { return; }
-      window.__vlHooked = true;
-
-      function send(u) {
-        try {
-          if (!u || typeof u !== 'string') { return; }
-          if (!/^https?:/i.test(u)) { return; }
-          if (!/\\.(m3u8|mp4|m4v|mov|webm|flv)(\\?|#|$)/i.test(u)) { return; }
-          window.webkit.messageHandlers.videoSniffer.postMessage(u);
-        } catch (e) {}
-      }
-
-      function scan() {
-        try {
-          var nodes = document.querySelectorAll('video, source, audio');
-          for (var i = 0; i < nodes.length; i++) {
-            var el = nodes[i];
-            send(el.currentSrc || el.src || el.getAttribute('data-src') || '');
-          }
-        } catch (e) {}
-      }
-
-      window.__vlScan = scan;
-      scan();
-      setInterval(scan, 2000);
-
-      try {
-        new MutationObserver(scan).observe(document.documentElement, {
-          childList: true,
-          subtree: true,
-          attributes: true,
-          attributeFilter: ['src']
-        });
-      } catch (e) {}
-
-      var origFetch = window.fetch;
-      if (origFetch) {
-        window.fetch = function(input, init) {
-          try {
-            send(typeof input === 'string' ? input : (input && input.url));
-          } catch (e) {}
-          var promise = origFetch.apply(this, arguments);
-          try {
-            promise.then(function(res) {
-              try { send(res && res.url); } catch (e) {}
-            });
-          } catch (e) {}
-          return promise;
-        };
-      }
-
-      var origOpen = XMLHttpRequest.prototype.open;
-      XMLHttpRequest.prototype.open = function(method, url) {
-        try { send(url); } catch (e) {}
-        return origOpen.apply(this, arguments);
-      };
-    })();
-    """
-
-    static let scanOnce = "if (window.__vlScan) { window.__vlScan(); }"
-}
-
-// MARK: - WKWebView 包装
-
-struct SnifferWebView: UIViewRepresentable {
-    @ObservedObject var model: SnifferModel
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(model: model)
-    }
-
-    func makeUIView(context: Context) -> WKWebView {
-        let configuration = WKWebViewConfiguration()
-        configuration.allowsInlineMediaPlayback = true
-        configuration.mediaTypesRequiringUserActionForPlayback = []
-        configuration.preferences.javaScriptCanOpenWindowsAutomatically = true
-
-        let contentController = WKUserContentController()
-        contentController.addUserScript(
-            WKUserScript(
-                source: SnifferScript.source,
-                injectionTime: .atDocumentStart,
-                forMainFrameOnly: false
-            )
-        )
-        contentController.add(context.coordinator, name: "videoSniffer")
-        configuration.userContentController = contentController
-
-        let webView = WKWebView(frame: .zero, configuration: configuration)
-        webView.navigationDelegate = context.coordinator
-        webView.uiDelegate = context.coordinator
-        webView.allowsBackForwardNavigationGestures = true
-        webView.isOpaque = false
-        webView.backgroundColor = .black
-        webView.scrollView.backgroundColor = .black
-
-        model.attach(webView)
-        return webView
-    }
-
-    func updateUIView(_ webView: WKWebView, context: Context) {}
-
-    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
-        private let model: SnifferModel
-
-        init(model: SnifferModel) {
-            self.model = model
-        }
-
-        // 接收 JS 发来的地址
-        func userContentController(_ userContentController: WKUserContentController,
-                                   didReceive message: WKScriptMessage) {
-            guard message.name == "videoSniffer", let url = message.body as? String else { return }
-            DispatchQueue.main.async {
-                self.model.add(url)
-            }
-        }
-
-        func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
-            DispatchQueue.main.async {
-                self.model.found.removeAll()
-            }
-        }
-
-        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            webView.evaluateJavaScript(SnifferScript.scanOnce, completionHandler: nil)
-
-            // 懒加载的视频常常晚一步出现，补两次扫描
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-                webView.evaluateJavaScript(SnifferScript.scanOnce, completionHandler: nil)
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
-                webView.evaluateJavaScript(SnifferScript.scanOnce, completionHandler: nil)
-            }
-        }
-
-        // 处理 target="_blank"，直接在同一个 webView 里打开
-        func webView(_ webView: WKWebView,
-                     createWebViewWith configuration: WKWebViewConfiguration,
-                     for navigationAction: WKNavigationAction,
-                     windowFeatures: WKWindowFeatures) -> WKWebView? {
-            if navigationAction.targetFrame == nil {
-                webView.load(navigationAction.request)
-            }
-            return nil
-        }
-    }
-}
-
-// MARK: - 嗅探页面
+// MARK: - 嗅探 / 浏览器页
 
 struct SnifferView: View {
-    @StateObject private var model = SnifferModel()
+    var body: some View {
+        BrowserView()
+    }
+}
+
+struct BrowserView: View {
+    @StateObject private var store = BrowserStore()
+    @ObservedObject private var library = UserscriptLibrary.shared
+    @ObservedObject private var bookmarks = BookmarkLibrary.shared
+
+    @AppStorage(SettingsKey.uaMode) private var uaMode = UAMode.mobile.rawValue
+    @AppStorage(SettingsKey.customUA) private var customUA = ""
+    @AppStorage(SettingsKey.adBlock) private var adBlock = true
+    @AppStorage(SettingsKey.searchEngine) private var engineRaw = SearchEngine.baidu.rawValue
+    @AppStorage(SettingsKey.customSearch) private var customSearch = ""
+    @AppStorage(SettingsKey.homePage) private var homePage = ""
+    @AppStorage(SettingsKey.nightMode) private var night = false
+    @AppStorage(SettingsKey.noImage) private var noImage = false
+
+    @Environment(\.colorScheme) private var scheme
+
     @State private var address = ""
-    @State private var request: PlayRequest?
+    @State private var editing = false
     @FocusState private var addressFocused: Bool
 
-    private var hasPage: Bool { !model.currentURLString.isEmpty }
+    @State private var sheet: BrowserSheet?
+    @State private var pendingSheet: BrowserSheet?
+    @State private var draft: ShortcutDraft?
+    @State private var pendingDraft: ShortcutDraft?
+
+    @State private var shareItems: [Any] = []
+    @State private var showShare = false
+
+    @State private var findText = ""
+    @State private var showFind = false
+    @State private var findFound = true
+
+    @State private var toast: String?
+    @State private var booted = false
+
+    @State private var request: PlayRequest?
+    @State private var playlists: [Playlist] = []
+    @State private var pendingVideo: SniffedVideo?
+    @State private var showPicker = false
+    @State private var showNoPlaylist = false
+
+    private var tab: BrowserTab? { store.current }
+    private var isDark: Bool { scheme == .dark }
+
+    private var effectiveUA: String? {
+        switch UAMode(rawValue: uaMode) ?? .mobile {
+        case .mobile:
+            return nil
+        case .desktop:
+            return "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15"
+        case .custom:
+            let trimmed = customUA.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+    }
+
+    private var currentBookmarked: Bool {
+        guard let tab = tab, !tab.urlString.isEmpty else { return false }
+        return bookmarks.contains(tab.urlString)
+    }
 
     var body: some View {
-        NavigationStack {
-            ZStack(alignment: .bottom) {
-                Color(red: 0.03, green: 0.03, blue: 0.04).ignoresSafeArea()
+        VStack(spacing: 0) {
+            if !(tab?.isHome ?? true) {
+                topBar
+            }
 
-                VStack(spacing: 0) {
-                    addressBar
+            ZStack(alignment: .top) {
+                BrowserWebHost(store: store)
 
-                    ZStack(alignment: .top) {
-                        SnifferWebView(model: model)
+                if let tab = tab {
+                    if tab.isHome {
+                        homeView
+                    }
 
-                        if model.isLoading {
-                            ProgressView(value: max(0.03, model.progress))
-                                .progressViewStyle(.linear)
-                                .tint(Color(red: 1.0, green: 0.55, blue: 0.45))
-                        }
+                    if let error = tab.errorText {
+                        errorPanel(tab, error)
+                    }
 
-                        if !hasPage {
-                            startHint
+                    if !tab.isHome {
+                        FloatingSniffButton(count: tab.found.count) {
+                            addressFocused = false
+                            editing = false
+                            sheet = .sniff
                         }
                     }
                 }
-
-                if !model.found.isEmpty {
-                    resultsBar
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
             }
-            .navigationTitle("网页嗅探")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(Color(red: 0.045, green: 0.045, blue: 0.06), for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
-            .animation(.easeInOut(duration: 0.22), value: model.found.count)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            if showFind {
+                findBar
+            }
+
+            bottomBar
         }
-        .preferredColorScheme(.dark)
+        .background(FirefoxStyle.bg(isDark))
+        .ignoresSafeArea(.keyboard, edges: .bottom)
+        .overlay(alignment: .center) {
+            if let text = toast {
+                Text(text)
+                    .font(.system(size: 13))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(Color.black.opacity(0.84))
+                    )
+                    .transition(.opacity)
+            }
+        }
+        .onAppear {
+            if !booted {
+                booted = true
+                store.bootstrap()
+                syncStore()
+            }
+        }
+        .onChange(of: uaMode) { _ in syncStore() }
+        .onChange(of: customUA) { _ in syncStore() }
+        .onChange(of: adBlock) { _ in syncStore() }
+        .onChange(of: engineRaw) { _ in syncStore() }
+        .onChange(of: customSearch) { _ in syncStore() }
+        .onChange(of: night) { _ in syncStore() }
+        .onChange(of: noImage) { _ in syncStore() }
+        .onChange(of: tab?.id) { _ in
+            editing = false
+            showFind = false
+            address = ""
+        }
+        .onReceive(library.$scripts) { _ in syncStore() }
+        .onReceive(NotificationCenter.default.publisher(for: .browserAppearanceChanged)) { _ in
+            syncStore()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .openInBrowser)) { note in
+            guard let url = note.object as? String, !url.isEmpty else { return }
+            openInBrowser(url)
+        }
         .fullScreenCover(item: $request) { req in
             PlayerScreen(request: req)
         }
-    }
-
-    // MARK: 地址栏
-
-    private var addressBar: some View {
-        HStack(spacing: 8) {
-            Button {
-                model.goBack()
-            } label: {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(model.canGoBack ? .white.opacity(0.8) : .white.opacity(0.2))
-                    .frame(width: 30, height: 34)
-            }
-            .buttonStyle(.plain)
-            .disabled(!model.canGoBack)
-
-            HStack(spacing: 7) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.35))
-
-                TextField("", text: $address, prompt: Text("输入网址，例如 example.com").foregroundColor(.white.opacity(0.28)))
-                    .focused($addressFocused)
-                    .keyboardType(.URL)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .submitLabel(.go)
-                    .font(.system(size: 14))
-                    .foregroundStyle(.white)
-                    .onSubmit { go() }
-
-                if model.isLoading {
-                    ProgressView()
-                        .controlSize(.mini)
-                        .tint(.white.opacity(0.6))
+        .sheet(item: $sheet, onDismiss: handleDismiss) { item in
+            sheetContent(item)
+        }
+        .sheet(item: $draft) { item in
+            ShortcutEditor(draft: item)
+        }
+        .sheet(isPresented: $showShare) {
+            ActivityView(items: shareItems)
+        }
+        .confirmationDialog("加入哪个列表", isPresented: $showPicker, titleVisibility: .visible) {
+            ForEach(playlists) { playlist in
+                Button(playlist.name) {
+                    if let video = pendingVideo {
+                        PlaylistStore.add(
+                            PlaylistItem(url: video.url, title: video.displayName),
+                            to: playlist.id
+                        )
+                    }
+                    pendingVideo = nil
                 }
             }
-            .padding(.horizontal, 11)
-            .frame(height: 34)
-            .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+            Button("取消", role: .cancel) { pendingVideo = nil }
+        }
+        .alert("还没有播放列表", isPresented: $showNoPlaylist) {
+            Button("知道了", role: .cancel) {}
+        } message: {
+            Text("先去「列表」标签页新建一个播放列表。")
+        }
+    }
+
+    // MARK: 顶部地址栏
+
+    private var topBar: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                if editing {
+                    editField
+                    Button("取消") { cancelEditing() }
+                        .font(.system(size: 15))
+                        .foregroundStyle(FirefoxStyle.accent)
+                        .buttonStyle(.plain)
+                } else {
+                    browseField
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+
+            ZStack(alignment: .leading) {
+                Rectangle()
+                    .fill(Color.clear)
+                    .frame(height: 2)
+
+                if let tab = tab, tab.isLoading {
+                    GeometryReader { geo in
+                        Rectangle()
+                            .fill(FirefoxStyle.accent)
+                            .frame(width: geo.size.width * max(0.02, tab.progress), height: 2)
+                    }
+                    .frame(height: 2)
+                }
+            }
+        }
+        .background(FirefoxStyle.bar(isDark))
+    }
+
+    private var editField: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 13))
+                .foregroundStyle(FirefoxStyle.sub(isDark))
+
+            TextField(
+                "",
+                text: $address,
+                prompt: Text("搜索或输入网址").foregroundColor(FirefoxStyle.sub(isDark))
+            )
+            .focused($addressFocused)
+            .keyboardType(.URL)
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
+            .submitLabel(.go)
+            .font(.system(size: 15))
+            .foregroundStyle(FirefoxStyle.text(isDark))
+            .onSubmit { submit() }
+
+            if !address.isEmpty {
+                Button {
+                    address = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 15))
+                        .foregroundStyle(FirefoxStyle.sub(isDark).opacity(0.7))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 40)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(FirefoxStyle.field(isDark))
+        )
+    }
+
+    private var browseField: some View {
+        HStack(spacing: 6) {
+            Image(systemName: (tab?.isSecure ?? false) ? "lock.fill" : "magnifyingglass")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(FirefoxStyle.sub(isDark))
+                .frame(width: 13)
+
+            Text(displayAddress)
+                .font(.system(size: 15))
+                .foregroundStyle(FirefoxStyle.text(isDark))
+                .lineLimit(1)
+                .frame(maxWidth: .infinity)
 
             Button {
-                go()
+                if tab?.isLoading == true {
+                    tab?.stop()
+                } else {
+                    tab?.reload()
+                }
             } label: {
-                Text("前往")
+                Image(systemName: tab?.isLoading == true ? "xmark" : "arrow.clockwise")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(FirefoxStyle.sub(isDark))
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 40)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(FirefoxStyle.field(isDark))
+        )
+        .contentShape(Rectangle())
+        .onTapGesture { beginEditing() }
+    }
+
+    private var displayAddress: String {
+        guard let tab = tab, !tab.urlString.isEmpty else { return "搜索或输入网址" }
+        let host = tab.hostText
+        return host.isEmpty ? tab.urlString : host
+    }
+
+    // MARK: 主页
+
+    private var homeView: some View {
+        BrowserHomeView(
+            query: $address,
+            onSubmit: { submit() },
+            onOpen: { url in
+                address = url
+                store.load(url)
+            },
+            onOpenHistory: { sheet = .history },
+            onOpenBookmarks: { sheet = .bookmarks },
+            onAddShortcut: {
+                pendingDraft = ShortcutDraft(item: nil, prefillURL: nil, prefillTitle: nil)
+                sheet = nil
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.32) {
+                    if let item = pendingDraft {
+                        pendingDraft = nil
+                        draft = item
+                    }
+                }
+            },
+            onEditShortcut: { item in
+                draft = ShortcutDraft(item: item, prefillURL: nil, prefillTitle: nil)
+            }
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    // MARK: 底部工具栏（后退 / 前进 / 主页 / 标签 / 菜单）
+
+    private var bottomBar: some View {
+        HStack(spacing: 0) {
+            toolButton("chevron.left", enabled: tab?.canGoBack ?? false) { tab?.goBack() }
+            toolButton("chevron.right", enabled: tab?.canGoForward ?? false) { tab?.goForward() }
+            toolButton("house", enabled: true) { goHome() }
+            tabsButton
+            toolButton("line.3.horizontal", enabled: true) { openMenu() }
+        }
+        .frame(height: 50)
+        .background(FirefoxStyle.bar(isDark))
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(FirefoxStyle.line(isDark))
+                .frame(height: 0.5)
+        }
+    }
+
+    private func toolButton(_ symbol: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 19, weight: .regular))
+                .foregroundStyle(
+                    enabled
+                        ? FirefoxStyle.text(isDark).opacity(0.9)
+                        : FirefoxStyle.text(isDark).opacity(0.22)
+                )
+                .frame(maxWidth: .infinity)
+                .frame(height: 48)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+    }
+
+    private var tabsButton: some View {
+        Button {
+            addressFocused = false
+            editing = false
+            sheet = .tabs
+        } label: {
+            ZStack {
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .strokeBorder(FirefoxStyle.text(isDark).opacity(0.85), lineWidth: 1.6)
+                Text("\(store.tabs.count)")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(FirefoxStyle.text(isDark))
+            }
+            .frame(width: 20, height: 20)
+            .frame(maxWidth: .infinity)
+            .frame(height: 48)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: 错误页
+
+    private func errorPanel(_ tab: BrowserTab, _ message: String) -> some View {
+        VStack(spacing: 14) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: 34, weight: .light))
+                .foregroundStyle(FirefoxStyle.sub(isDark))
+
+            Text("网页打不开")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(FirefoxStyle.text(isDark))
+
+            Text(message)
+                .font(.system(size: 12))
+                .foregroundStyle(FirefoxStyle.sub(isDark))
+                .multilineTextAlignment(.center)
+                .lineSpacing(3)
+                .padding(.horizontal, 34)
+
+            HStack(spacing: 12) {
+                Button("重新加载") {
+                    tab.errorText = nil
+                    tab.reload()
+                }
+                .font(.system(size: 14, weight: .medium))
+                .padding(.horizontal, 18)
+                .padding(.vertical, 9)
+                .background(Capsule().fill(FirefoxStyle.field(isDark)))
+
+                Button("桌面版网站") {
+                    uaMode = UAMode(rawValue: uaMode) == .desktop
+                        ? UAMode.mobile.rawValue
+                        : UAMode.desktop.rawValue
+                }
+                .font(.system(size: 14, weight: .medium))
+                .padding(.horizontal, 18)
+                .padding(.vertical, 9)
+                .background(Capsule().fill(FirefoxStyle.field(isDark)))
+            }
+            .foregroundStyle(FirefoxStyle.text(isDark))
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(FirefoxStyle.bg(isDark))
+    }
+
+    // MARK: 页内查找
+
+    private var findBar: some View {
+        HStack(spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 12))
+                    .foregroundStyle(FirefoxStyle.sub(isDark))
+                TextField("在页面中查找", text: $findText)
+                    .font(.system(size: 14))
+                    .foregroundStyle(FirefoxStyle.text(isDark))
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .submitLabel(.search)
+                    .onSubmit { runFind(backwards: false) }
+                    .onChange(of: findText) { _ in runFind(backwards: false) }
+                if !findText.isEmpty {
+                    Text(findFound ? "找到" : "无结果")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(findFound ? Color.green : FirefoxStyle.sub(isDark))
+                }
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 36)
+            .background(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(FirefoxStyle.field(isDark))
+            )
+
+            Button { runFind(backwards: true) } label: {
+                Image(systemName: "chevron.up")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 12)
-                    .frame(height: 34)
-                    .background(
-                        LinearGradient(
-                            colors: [Color(red: 1.0, green: 0.42, blue: 0.31),
-                                     Color(red: 0.55, green: 0.28, blue: 0.85)],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        ),
-                        in: RoundedRectangle(cornerRadius: 11, style: .continuous)
-                    )
+                    .foregroundStyle(FirefoxStyle.sub(isDark))
+            }
+            .buttonStyle(.plain)
+
+            Button { runFind(backwards: false) } label: {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(FirefoxStyle.sub(isDark))
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                showFind = false
+                addressFocused = false
+                findText = ""
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(FirefoxStyle.sub(isDark))
             }
             .buttonStyle(.plain)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(Color(red: 0.05, green: 0.05, blue: 0.07))
+        .background(FirefoxStyle.bar(isDark))
     }
 
-    // MARK: 初始提示
+    // MARK: 面板内容
 
-    private var startHint: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "safari")
-                .font(.system(size: 38, weight: .light))
-                .foregroundStyle(.white.opacity(0.16))
-            Text("打开一个网页，自动找出里面的视频")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.55))
-            Text("在地址栏输入网址，页面里出现的 m3u8 / mp4 地址会被自动捕获，\n直接点开就能播。")
-                .font(.system(size: 12))
-                .foregroundStyle(.white.opacity(0.3))
-                .multilineTextAlignment(.center)
-                .lineSpacing(3)
-
-            Text("提示：视频站点频繁改版，反爬和加密链接可能导致抓不到。")
-                .font(.system(size: 11))
-                .foregroundStyle(.white.opacity(0.22))
-                .multilineTextAlignment(.center)
-                .padding(.top, 6)
+    @ViewBuilder
+    private func sheetContent(_ item: BrowserSheet) -> some View {
+        switch item {
+        case .tabs:
+            TabSwitcherView(store: store)
+        case .menu:
+            BrowserMenuSheet(
+                store: store,
+                library: library,
+                isBookmarked: currentBookmarked,
+                foundCount: tab?.found.count ?? 0,
+                onAction: { action in handle(action) }
+            )
+        case .sniff:
+            if let tab = tab {
+                SniffResultsPanel(
+                    tab: tab,
+                    onPlay: { play($0) },
+                    onAddToPlaylist: { addToPlaylist($0) }
+                )
+            } else {
+                EmptyView()
+            }
+        case .history:
+            BrowserHistoryView { url in openFromPanel(url) }
+        case .bookmarks:
+            BookmarksView { url in openFromPanel(url) }
+        case .downloads:
+            DownloadsView { url in playFile(url) }
+        case .settings:
+            BrowserSettingsView(library: library)
+        case .scripts:
+            UserscriptListView(library: library)
         }
-        .padding(30)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(red: 0.03, green: 0.03, blue: 0.04))
     }
 
-    // MARK: 结果条
-
-    private var resultsBar: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 8) {
-                Circle()
-                    .fill(Color(red: 1.0, green: 0.45, blue: 0.35))
-                    .frame(width: 6, height: 6)
-                Text("发现 \(model.found.count) 个视频")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.85))
-                Spacer()
-                Button("清空") {
-                    model.found.removeAll()
-                }
-                .font(.system(size: 12))
-                .foregroundStyle(.white.opacity(0.35))
-                .buttonStyle(.plain)
+    private func handleDismiss() {
+        if let item = pendingDraft {
+            pendingDraft = nil
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.28) {
+                draft = item
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 12)
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 10) {
-                    ForEach(model.found) { video in
-                        Button {
-                            open(video)
-                        } label: {
-                            resultCard(video)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
+            return
+        }
+        if let next = pendingSheet {
+            pendingSheet = nil
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.28) {
+                sheet = next
             }
         }
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
-        )
-        .padding(.horizontal, 12)
-        .padding(.bottom, 10)
     }
 
-    private func resultCard(_ video: SniffedVideo) -> some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack(spacing: 6) {
-                Text(video.kind)
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(
-                        Capsule().fill(Color(red: 1.0, green: 0.42, blue: 0.31).opacity(0.85))
-                    )
-                Spacer(minLength: 0)
-                Image(systemName: "play.circle.fill")
-                    .font(.system(size: 14))
-                    .foregroundStyle(.white.opacity(0.55))
-            }
-
-            Text(video.displayName)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.white.opacity(0.9))
-                .lineLimit(2)
-                .multilineTextAlignment(.leading)
-                .frame(width: 148, alignment: .leading)
-
-            Text(video.host)
-                .font(.system(size: 10))
-                .foregroundStyle(.white.opacity(0.32))
-                .lineLimit(1)
-                .frame(width: 148, alignment: .leading)
-        }
-        .padding(10)
-        .frame(width: 168, height: 92, alignment: .topLeading)
-        .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    private func openPanel(_ next: BrowserSheet) {
+        sheet = nil
+        pendingSheet = next
     }
 
     // MARK: 动作
 
-    private func go() {
+    private func submit() {
+        let text = address.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else {
+            cancelEditing()
+            return
+        }
         addressFocused = false
-        if model.open(address) {
-            address = model.currentURLString
+        editing = false
+        showFind = false
+        store.openSmart(text)
+    }
+
+    private func beginEditing() {
+        address = tab?.urlString ?? ""
+        editing = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) {
+            addressFocused = true
         }
     }
 
-    private func open(_ video: SniffedVideo) {
+    private func cancelEditing() {
+        addressFocused = false
+        editing = false
+        address = ""
+    }
+
+    private func goHome() {
+        addressFocused = false
+        cancelEditing()
+        showFind = false
+        let home = homePage.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !home.isEmpty {
+            store.load(home)
+        } else {
+            tab?.showHome()
+        }
+    }
+
+    /// 从脚本页跳过来：先把弹窗收干净，再在内置浏览器里打开网址
+    private func openInBrowser(_ url: String) {
+        addressFocused = false
+        editing = false
+        showFind = false
+        address = ""
+        sheet = nil
+        pendingSheet = nil
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+            store.load(url)
+        }
+    }
+
+    private func openMenu() {
+        addressFocused = false
+        editing = false
+        if tab == nil { return }
+        sheet = .menu
+    }
+
+    private func handle(_ action: BrowserMenuAction) {
+        guard let tab = tab else { return }
+
+        switch action {
+        case .bookmark:
+            sheet = nil
+            toggleBookmark(tab)
+
+        case .reload:
+            sheet = nil
+            tab.reload()
+
+        case .share:
+            let text = tab.urlString
+            guard !text.isEmpty else {
+                sheet = nil
+                showToast("当前没有可分享的网址")
+                return
+            }
+            sheet = nil
+            shareLater([text])
+
+        case .copyURL:
+            sheet = nil
+            UIPasteboard.general.string = tab.urlString
+            showToast("链接已复制")
+
+        case .addShortcut:
+            let title = tab.title.isEmpty ? tab.hostText : tab.title
+            pendingDraft = ShortcutDraft(item: nil, prefillURL: tab.urlString, prefillTitle: title)
+            sheet = nil
+
+        case .tabs:
+            openPanel(.tabs)
+
+        case .history:
+            openPanel(.history)
+
+        case .downloads:
+            openPanel(.downloads)
+
+        case .bookmarks:
+            openPanel(.bookmarks)
+
+        case .readingList:
+            openPanel(.bookmarks)
+
+        case .find:
+            sheet = nil
+            showFind = true
+            addressFocused = false
+
+        case .scripts:
+            openPanel(.scripts)
+
+        case .sniff:
+            openPanel(.sniff)
+
+        case .settings:
+            openPanel(.settings)
+        }
+    }
+
+    private func toggleBookmark(_ tab: BrowserTab) {
+        guard !tab.urlString.isEmpty else {
+            showToast("先打开一个网页")
+            return
+        }
+        if bookmarks.contains(tab.urlString) {
+            if let hit = bookmarks.items.first(where: { $0.url == tab.urlString }) {
+                bookmarks.remove(hit)
+                showToast("已取消收藏")
+            }
+        } else {
+            let title = tab.title.isEmpty ? tab.hostText : tab.title
+            bookmarks.add(title: title, url: tab.urlString)
+            showToast("已收藏")
+        }
+    }
+
+    private func runReader(_ tab: BrowserTab) {
+        tab.webView.evaluateJavaScript(BrowserInject.readerRun) { result, _ in
+            let ok = (result as? Bool) ?? false
+            if !ok {
+                showToast("这个页面没法进入阅读模式")
+            } else {
+                showToast("已进入阅读模式，刷新可退出")
+            }
+        }
+    }
+
+    private func runFind(backwards: Bool) {
+        guard let tab = tab, !findText.isEmpty else { return }
+        let config = WKFindConfiguration()
+        config.backwards = backwards
+        config.wraps = true
+        config.caseSensitive = false
+        tab.webView.find(findText, configuration: config) { result in
+            findFound = result.matchFound
+        }
+    }
+
+    private func shareLater(_ items: [Any]) {
+        shareItems = items
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.34) {
+            showShare = true
+        }
+    }
+
+    private func openFromPanel(_ url: String) {
+        sheet = nil
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.32) {
+            address = url
+            store.load(url)
+        }
+    }
+
+    private func playFile(_ url: URL) {
+        sheet = nil
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.32) {
+            request = PlayRequest(url: url)
+        }
+    }
+
+    private func play(_ video: SniffedVideo) {
         guard let url = URL(string: video.url) else { return }
-        request = PlayRequest(url: url)
+        sheet = nil
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.32) {
+            request = PlayRequest(url: url)
+        }
+    }
+
+    private func addToPlaylist(_ video: SniffedVideo) {
+        playlists = PlaylistStore.load()
+        pendingVideo = video
+        if playlists.isEmpty {
+            showNoPlaylist = true
+        } else {
+            showPicker = true
+        }
+    }
+
+    private func syncStore() {
+        var options = BrowserOptions()
+        options.userAgent = effectiveUA
+        options.adBlock = adBlock
+        options.night = night
+        options.noImage = noImage
+        options.userscripts = library.scripts
+        options.engineRaw = engineRaw
+        options.customSearch = customSearch
+
+        store.apply(options)
+        // 幂等，多调一次没有副作用；避免开关切了页面没反应
+        store.applyAppearance()
+    }
+
+    private func showToast(_ text: String) {
+        withAnimation(.easeOut(duration: 0.15)) {
+            toast = text
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.7) {
+            if toast == text {
+                withAnimation(.easeIn(duration: 0.2)) {
+                    toast = nil
+                }
+            }
+        }
     }
 }
 

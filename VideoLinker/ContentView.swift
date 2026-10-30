@@ -1,16 +1,15 @@
 import SwiftUI
 import UIKit
 
-/// 一次播放请求（用 Identifiable 驱动 fullScreenCover）
-struct PlayRequest: Identifiable {
-    let id = UUID()
-    let url: URL
-}
-
 struct ContentView: View {
+    @Environment(\.theme) private var theme
+
     @State private var urlText = ""
     @State private var request: PlayRequest?
     @State private var items: [HistoryItem] = HistoryStore.load()
+    @State private var favorites: Set<String> = ResumeStore.favorites()
+    @State private var searchText = ""
+    @State private var onlyFavorites = false
     @FocusState private var inputFocused: Bool
 
     @State private var playlists: [Playlist] = PlaylistStore.load()
@@ -18,18 +17,14 @@ struct ContentView: View {
     @State private var showPlaylistPicker = false
     @State private var showNoPlaylistAlert = false
 
-    /// Apple 官方公开测试流，用来快速验证播放器是否正常
-    private let sampleURL = "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_fmp4/master.m3u8"
-
     var body: some View {
         ZStack {
             BackgroundView()
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 22) {
+                VStack(alignment: .leading, spacing: 20) {
                     header
                     inputCard
-                    quickAction
                     if !items.isEmpty { historySection }
                     footer
                 }
@@ -39,7 +34,10 @@ struct ContentView: View {
             }
             .scrollDismissesKeyboard(.interactively)
         }
-        .preferredColorScheme(.dark)
+        .onAppear {
+            items = HistoryStore.load()
+            favorites = ResumeStore.favorites()
+        }
         .confirmationDialog("加入哪个列表", isPresented: $showPlaylistPicker, titleVisibility: .visible) {
             ForEach(playlists) { playlist in
                 Button(playlist.name) {
@@ -62,6 +60,12 @@ struct ContentView: View {
         .fullScreenCover(item: $request) { req in
             PlayerScreen(request: req)
         }
+        .onReceive(Router.shared.$pending) { req in
+            guard let req = req else { return }
+            items = HistoryStore.load()
+            request = req
+            Router.shared.pending = nil
+        }
     }
 
     // MARK: - 顶部标题
@@ -72,25 +76,18 @@ struct ContentView: View {
                 .font(.system(size: 26, weight: .semibold))
                 .foregroundStyle(.white)
                 .frame(width: 54, height: 54)
-                .background(
-                    LinearGradient(
-                        colors: [Color(red: 1.00, green: 0.42, blue: 0.31),
-                                 Color(red: 0.72, green: 0.20, blue: 0.85)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    in: RoundedRectangle(cornerRadius: 17, style: .continuous)
-                )
-                .shadow(color: Color(red: 0.85, green: 0.25, blue: 0.45).opacity(0.45),
+                .background(theme.gradientTopLeft,
+                            in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+                .shadow(color: Color(red: 0.85, green: 0.25, blue: 0.45).opacity(theme.isDark ? 0.45 : 0.25),
                         radius: 18, x: 0, y: 10)
 
             Text("视频链接播放器")
                 .font(.system(size: 30, weight: .bold))
-                .foregroundStyle(.white)
+                .foregroundStyle(theme.text)
 
             Text("粘贴视频直链即可播放，支持在线流")
                 .font(.subheadline)
-                .foregroundStyle(.white.opacity(0.55))
+                .foregroundStyle(theme.textSecondary)
         }
         .padding(.bottom, 2)
     }
@@ -102,16 +99,17 @@ struct ContentView: View {
             HStack(spacing: 10) {
                 Image(systemName: "link")
                     .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.5))
+                    .foregroundStyle(theme.textTertiary)
 
-                TextField("", text: $urlText, prompt: Text("https://… / xxx.mp4").foregroundColor(.white.opacity(0.3)))
+                TextField("", text: $urlText,
+                          prompt: Text("https://… / xxx.mp4").foregroundColor(theme.textTertiary))
                     .focused($inputFocused)
                     .keyboardType(.URL)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .submitLabel(.go)
                     .font(.system(size: 15))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(theme.text)
                     .onSubmit(playCurrent)
 
                 if !urlText.isEmpty {
@@ -120,22 +118,22 @@ struct ContentView: View {
                         inputFocused = true
                     } label: {
                         Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(.white.opacity(0.35))
+                            .foregroundStyle(theme.textTertiary)
                     }
                     .buttonStyle(.plain)
                 } else {
                     Button("粘贴") { paste() }
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(Color(red: 1.0, green: 0.55, blue: 0.45))
+                        .foregroundStyle(theme.accent)
                         .buttonStyle(.plain)
                 }
             }
             .padding(.horizontal, 16)
             .frame(height: 52)
-            .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .background(theme.field, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .strokeBorder(inputFocused ? Color.white.opacity(0.35) : Color.white.opacity(0.08), lineWidth: 1)
+                    .strokeBorder(inputFocused ? theme.accent.opacity(0.6) : theme.cardStroke, lineWidth: 1)
             )
 
             Button(action: playCurrent) {
@@ -146,74 +144,111 @@ struct ContentView: View {
                 .foregroundStyle(.white)
                 .frame(maxWidth: .infinity)
                 .frame(height: 52)
-                .background(
-                    LinearGradient(
-                        colors: [Color(red: 1.00, green: 0.42, blue: 0.31),
-                                 Color(red: 0.72, green: 0.20, blue: 0.85)],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    ),
-                    in: RoundedRectangle(cornerRadius: 16, style: .continuous)
-                )
+                .background(theme.gradient,
+                            in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .opacity(resolvedURL == nil ? 0.4 : 1)
             }
             .buttonStyle(.plain)
             .disabled(resolvedURL == nil)
         }
         .padding(16)
-        .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .background(theme.card, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.07), lineWidth: 1)
+                .strokeBorder(theme.cardStroke, lineWidth: 1)
         )
     }
 
-    // MARK: - 快捷操作
+    // MARK: - 历史记录
 
-    private var quickAction: some View {
-        HStack(spacing: 10) {
-            Button {
-                urlText = sampleURL
-                playCurrent()
-            } label: {
-                Label("播放示例", systemImage: "sparkles")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.75))
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 9)
-                    .background(Color.white.opacity(0.07), in: Capsule())
-            }
-            .buttonStyle(.plain)
-
-            Text("不确定格式？先用示例确认播放正常")
-                .font(.system(size: 12))
-                .foregroundStyle(.white.opacity(0.35))
-                .lineLimit(1)
+    private var filteredItems: [HistoryItem] {
+        var list = items
+        if onlyFavorites {
+            list = list.filter { favorites.contains($0.url) }
         }
+        let keyword = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if !keyword.isEmpty {
+            list = list.filter {
+                $0.url.lowercased().contains(keyword) || $0.displayName.lowercased().contains(keyword)
+            }
+        }
+        return list
     }
 
-    // MARK: - 历史记录
+    /// 首页只保留最近 3 条，新的把旧的顶下去
+    private var recentItems: [HistoryItem] {
+        Array(filteredItems.prefix(3))
+    }
 
     private var historySection: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("最近播放")
                     .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.85))
+                    .foregroundStyle(theme.text)
+
                 Spacer()
+
+                Button {
+                    onlyFavorites.toggle()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: onlyFavorites ? "star.fill" : "star")
+                        Text("收藏")
+                    }
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(onlyFavorites ? theme.accent : theme.textTertiary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(onlyFavorites ? theme.accent.opacity(0.14) : theme.field, in: Capsule())
+                }
+                .buttonStyle(.plain)
+
                 Button("清空") {
                     withAnimation(.easeInOut(duration: 0.2)) {
                         items = HistoryStore.clear()
                     }
                 }
                 .font(.system(size: 13))
-                .foregroundStyle(.white.opacity(0.4))
+                .foregroundStyle(theme.textTertiary)
                 .buttonStyle(.plain)
             }
 
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 13))
+                    .foregroundStyle(theme.textTertiary)
+                TextField("", text: $searchText,
+                          prompt: Text("搜索链接或标题").foregroundColor(theme.textTertiary))
+                    .font(.system(size: 14))
+                    .foregroundStyle(theme.text)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                if !searchText.isEmpty {
+                    Button {
+                        searchText = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(theme.textTertiary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 12)
+            .frame(height: 38)
+            .background(theme.field, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+
             VStack(spacing: 8) {
-                ForEach(items) { item in
-                    historyRow(item)
+                if recentItems.isEmpty {
+                    Text(onlyFavorites ? "还没有收藏的视频" : "没有匹配的记录")
+                        .font(.system(size: 12))
+                        .foregroundStyle(theme.textTertiary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 24)
+                } else {
+                    ForEach(recentItems) { item in
+                        historyRow(item)
+                    }
                 }
             }
         }
@@ -226,37 +261,65 @@ struct ContentView: View {
             request = PlayRequest(url: u)
         } label: {
             HStack(spacing: 13) {
-                RoundedRectangle(cornerRadius: 13, style: .continuous)
-                    .fill(Color.white.opacity(0.08))
-                    .frame(width: 44, height: 44)
-                    .overlay(
-                        Image(systemName: "play.fill")
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundStyle(.white.opacity(0.8))
-                    )
+                ZStack {
+                    RoundedRectangle(cornerRadius: 13, style: .continuous)
+                        .fill(theme.field)
+                        .frame(width: 46, height: 46)
+
+                    Image(systemName: "play.fill")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(theme.textSecondary)
+                }
+                .overlay(alignment: .bottom) {
+                    if let progress = ResumeStore.progress(for: item.url), progress > 0.02, progress < 0.98 {
+                        GeometryReader { geo in
+                            ZStack(alignment: .leading) {
+                                Capsule().fill(Color.white.opacity(0.18))
+                                Capsule().fill(theme.accent)
+                                    .frame(width: geo.size.width * progress)
+                            }
+                        }
+                        .frame(height: 3)
+                        .padding(.horizontal, 6)
+                        .padding(.bottom, 4)
+                    }
+                }
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(item.displayName)
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.92))
+                        .foregroundStyle(theme.text)
                         .lineLimit(1)
                     Text(item.subtitle)
                         .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.38))
+                        .foregroundStyle(theme.textTertiary)
                         .lineLimit(1)
                 }
 
                 Spacer(minLength: 6)
 
+                if favorites.contains(item.url) {
+                    Image(systemName: "star.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(theme.accent)
+                }
+
                 Image(systemName: "chevron.right")
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.22))
+                    .foregroundStyle(theme.textTertiary)
             }
             .padding(11)
-            .background(Color.white.opacity(0.045), in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+            .background(theme.card, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
         }
         .buttonStyle(.plain)
         .contextMenu {
+            Button {
+                toggleFavorite(item)
+            } label: {
+                Label(favorites.contains(item.url) ? "取消收藏" : "收藏",
+                      systemImage: favorites.contains(item.url) ? "star.slash" : "star")
+            }
+
             Button {
                 pendingHistoryItem = item
                 playlists = PlaylistStore.load()
@@ -267,6 +330,12 @@ struct ContentView: View {
                 }
             } label: {
                 Label("加入播放列表", systemImage: "text.badge.plus")
+            }
+
+            Button {
+                UIPasteboard.general.string = item.url
+            } label: {
+                Label("复制链接", systemImage: "doc.on.doc")
             }
 
             Button(role: .destructive) {
@@ -283,14 +352,14 @@ struct ContentView: View {
 
     private var footer: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Divider().overlay(Color.white.opacity(0.08))
+            Divider().overlay(theme.cardStroke)
             Text("支持的格式")
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.45))
+                .foregroundStyle(theme.textSecondary)
                 .padding(.top, 8)
             Text("MP4 / MOV / M4V 直链，以及 HLS 直播流（.m3u8）。\nYouTube、B 站等网页链接不是视频直链，需要先取得真实播放地址。")
                 .font(.system(size: 12))
-                .foregroundStyle(.white.opacity(0.3))
+                .foregroundStyle(theme.textTertiary)
                 .lineSpacing(3)
         }
     }
@@ -320,31 +389,12 @@ struct ContentView: View {
             urlText = s.trimmingCharacters(in: .whitespacesAndNewlines)
         }
     }
-}
 
-// MARK: - 背景
-
-struct BackgroundView: View {
-    var body: some View {
-        ZStack {
-            Color(red: 0.05, green: 0.05, blue: 0.08)
-
-            Circle()
-                .fill(Color(red: 0.85, green: 0.22, blue: 0.35).opacity(0.35))
-                .frame(width: 320, height: 320)
-                .blur(radius: 110)
-                .offset(x: -120, y: -300)
-
-            Circle()
-                .fill(Color(red: 0.35, green: 0.20, blue: 0.95).opacity(0.30))
-                .frame(width: 300, height: 300)
-                .blur(radius: 120)
-                .offset(x: 140, y: 120)
-
-            Color.black.opacity(0.25)
-        }
-        .ignoresSafeArea()
+    private func toggleFavorite(_ item: HistoryItem) {
+        ResumeStore.toggleFavorite(item.url)
+        favorites = ResumeStore.favorites()
     }
+
 }
 
 struct ContentView_Previews: PreviewProvider {

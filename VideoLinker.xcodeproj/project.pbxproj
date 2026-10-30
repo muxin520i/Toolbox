@@ -17,6 +17,23 @@
 		1A0000000000000000000308 /* PlaylistListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000209 /* PlaylistListView.swift */; };
 		1A0000000000000000000309 /* SnifferView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000000000000000000020A /* SnifferView.swift */; };
 		1A000000000000000000030A /* OrientationLock.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000000000000000000020B /* OrientationLock.swift */; };
+		1A000000000000000000030B /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000000000000000000020C /* AppSettings.swift */; };
+		1A000000000000000000030C /* ResumeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000000000000000000020D /* ResumeStore.swift */; };
+		1A000000000000000000030D /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000000000000000000020E /* SettingsView.swift */; };
+		1A000000000000000000030E /* AppIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000000000000000000020F /* AppIntents.swift */; };
+		1A000000000000000000030F /* UserscriptStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000210 /* UserscriptStore.swift */; };
+		1A0000000000000000000310 /* UserscriptListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000211 /* UserscriptListView.swift */; };
+		1A0000000000000000000311 /* GMEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000212 /* GMEngine.swift */; };
+		1A0000000000000000000312 /* BookmarkStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000213 /* BookmarkStore.swift */; };
+		1A0000000000000000000313 /* ScriptStoreView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000214 /* ScriptStoreView.swift */; };
+		1A0000000000000000000314 /* BrowserTabStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000215 /* BrowserTabStore.swift */; };
+		1A0000000000000000000315 /* BrowserWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000216 /* BrowserWebView.swift */; };
+		1A0000000000000000000316 /* DownloadManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000217 /* DownloadManager.swift */; };
+		1A0000000000000000000317 /* ShortcutStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000218 /* ShortcutStore.swift */; };
+		1A0000000000000000000318 /* BrowserHistoryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000219 /* BrowserHistoryStore.swift */; };
+		1A0000000000000000000319 /* BrowserHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000000000000000000021A /* BrowserHomeView.swift */; };
+		1A000000000000000000031A /* BrowserOverlays.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000000000000000000021B /* BrowserOverlays.swift */; };
+		1A000000000000000000031B /* BrowserLibraryViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000000000000000000021C /* BrowserLibraryViews.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -32,6 +49,23 @@
 		1A0000000000000000000208 /* PlaylistStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistStore.swift; sourceTree = "<group>"; };
 		1A0000000000000000000209 /* PlaylistListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistListView.swift; sourceTree = "<group>"; };
 		1A000000000000000000020A /* SnifferView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnifferView.swift; sourceTree = "<group>"; };
+		1A000000000000000000020C /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
+		1A000000000000000000020D /* ResumeStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResumeStore.swift; sourceTree = "<group>"; };
+		1A000000000000000000020E /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		1A000000000000000000020F /* AppIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppIntents.swift; sourceTree = "<group>"; };
+		1A0000000000000000000210 /* UserscriptStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserscriptStore.swift; sourceTree = "<group>"; };
+		1A0000000000000000000211 /* UserscriptListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserscriptListView.swift; sourceTree = "<group>"; };
+		1A0000000000000000000212 /* GMEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GMEngine.swift; sourceTree = "<group>"; };
+		1A0000000000000000000213 /* BookmarkStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookmarkStore.swift; sourceTree = "<group>"; };
+		1A0000000000000000000214 /* ScriptStoreView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScriptStoreView.swift; sourceTree = "<group>"; };
+		1A0000000000000000000215 /* BrowserTabStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserTabStore.swift; sourceTree = "<group>"; };
+		1A0000000000000000000216 /* BrowserWebView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserWebView.swift; sourceTree = "<group>"; };
+		1A0000000000000000000217 /* DownloadManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadManager.swift; sourceTree = "<group>"; };
+		1A0000000000000000000218 /* ShortcutStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutStore.swift; sourceTree = "<group>"; };
+		1A0000000000000000000219 /* BrowserHistoryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserHistoryStore.swift; sourceTree = "<group>"; };
+		1A000000000000000000021A /* BrowserHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserHomeView.swift; sourceTree = "<group>"; };
+		1A000000000000000000021B /* BrowserOverlays.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserOverlays.swift; sourceTree = "<group>"; };
+		1A000000000000000000021C /* BrowserLibraryViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserLibraryViews.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -75,6 +109,23 @@
 				1A0000000000000000000208 /* PlaylistStore.swift */,
 				1A0000000000000000000209 /* PlaylistListView.swift */,
 				1A000000000000000000020A /* SnifferView.swift */,
+				1A000000000000000000020C /* AppSettings.swift */,
+				1A000000000000000000020D /* ResumeStore.swift */,
+				1A000000000000000000020E /* SettingsView.swift */,
+				1A000000000000000000020F /* AppIntents.swift */,
+				1A0000000000000000000210 /* UserscriptStore.swift */,
+				1A0000000000000000000211 /* UserscriptListView.swift */,
+				1A0000000000000000000212 /* GMEngine.swift */,
+				1A0000000000000000000213 /* BookmarkStore.swift */,
+				1A0000000000000000000214 /* ScriptStoreView.swift */,
+				1A0000000000000000000215 /* BrowserTabStore.swift */,
+				1A0000000000000000000216 /* BrowserWebView.swift */,
+				1A0000000000000000000217 /* DownloadManager.swift */,
+				1A0000000000000000000218 /* ShortcutStore.swift */,
+				1A0000000000000000000219 /* BrowserHistoryStore.swift */,
+				1A000000000000000000021A /* BrowserHomeView.swift */,
+				1A000000000000000000021B /* BrowserOverlays.swift */,
+				1A000000000000000000021C /* BrowserLibraryViews.swift */,
 			);
 			path = VideoLinker;
 			sourceTree = "<group>";
@@ -157,6 +208,23 @@
 				1A0000000000000000000309 /* SnifferView.swift in Sources */,
 				1A000000000000000000030A /* OrientationLock.swift in Sources */,
 				1A0000000000000000000301 /* VideoLinkerApp.swift in Sources */,
+				1A000000000000000000030B /* AppSettings.swift in Sources */,
+				1A000000000000000000030C /* ResumeStore.swift in Sources */,
+				1A000000000000000000030D /* SettingsView.swift in Sources */,
+				1A000000000000000000030E /* AppIntents.swift in Sources */,
+				1A000000000000000000030F /* UserscriptStore.swift in Sources */,
+				1A0000000000000000000310 /* UserscriptListView.swift in Sources */,
+				1A0000000000000000000311 /* GMEngine.swift in Sources */,
+				1A0000000000000000000312 /* BookmarkStore.swift in Sources */,
+				1A0000000000000000000313 /* ScriptStoreView.swift in Sources */,
+				1A0000000000000000000314 /* BrowserTabStore.swift in Sources */,
+				1A0000000000000000000315 /* BrowserWebView.swift in Sources */,
+				1A0000000000000000000316 /* DownloadManager.swift in Sources */,
+				1A0000000000000000000317 /* ShortcutStore.swift in Sources */,
+				1A0000000000000000000318 /* BrowserHistoryStore.swift in Sources */,
+				1A0000000000000000000319 /* BrowserHomeView.swift in Sources */,
+				1A000000000000000000031A /* BrowserOverlays.swift in Sources */,
+				1A000000000000000000031B /* BrowserLibraryViews.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -288,7 +356,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 12;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = VideoLinker/Info.plist;
@@ -296,7 +364,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 2.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.example.VideoLinker;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -311,7 +379,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 12;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = VideoLinker/Info.plist;
@@ -319,7 +387,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 2.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.example.VideoLinker;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
