@@ -168,4 +168,4 @@ App 用 GRDB 把数据统一存在一个 SQLite 库里：`Application Support/Vi
 - 表：`history`（播放历史）、`resume`（观看进度）、`favorite`（收藏）、`playlist` / `playlistItem`（播放列表）、`script` / `scriptValue`（用户脚本与 GM 存储值）、`download`（下载记录）、`webVisit`（网页历史）、`bookmark`、`shortcut`
 - 首次升级会把旧版 UserDefaults 里的 JSON 全量搬进库，搬之前先备份成 `legacy-backup-<时间>.json`
 - 写入仍然双写 UserDefaults，装回旧版本也能看到全部数据
-- 设置 → 存储 → 「存储详情与一致性校验」可以看条数、体积和双写一致性
+- 设置 → 关于 里能看到库体积；一致性校验页在 v2.7.3 移除（迁移验证完成后不再需要）
