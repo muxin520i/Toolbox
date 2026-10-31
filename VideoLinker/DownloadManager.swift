@@ -294,7 +294,7 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate {
                 // 分片拼出来的是裸流，容器不对播放器认不出来，
                 // 这里换成 MP4（只转封装，不重新编码），换完才能直接播
                 await MainActor.run {
-                    item.progress = 1
+                    item.progress = 0.99
                     item.note = "正在合并为 MP4…"
                 }
 
@@ -364,6 +364,14 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate {
     }
 
     // MARK: 增删
+
+    /// 文件被重封装后更新记录，避免列表里指向已删除的 .ts
+    func replacePath(of item: DownloadItem, with url: URL) {
+        item.fileName = url.lastPathComponent
+        item.localPath = url.path
+        item.note = ""
+        save()
+    }
 
     func remove(_ item: DownloadItem) {
         jobs[item.id]?.cancel()

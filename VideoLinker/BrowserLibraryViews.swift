@@ -274,6 +274,7 @@ struct DownloadsView: View {
     @ObservedObject private var manager = DownloadManager.shared
     @Environment(\.dismiss) private var dismiss
     @State private var shareBox: ShareBox?
+    @State private var converting = false
 
     var body: some View {
         NavigationStack {
@@ -325,12 +326,47 @@ struct DownloadsView: View {
             .sheet(item: $shareBox) { box in
                 ActivityView(items: [box.url])
             }
+            .overlay {
+                if converting {
+                    ZStack {
+                        Color.black.opacity(0.2).ignoresSafeArea()
+                        HStack(spacing: 10) {
+                            ProgressView().tint(.white)
+                            Text("正在合并为 MP4…")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(.white)
+                        }
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 14)
+                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    }
+                }
+            }
         }
     }
 
     private func open(_ url: URL) {
         let ext = url.pathExtension.lowercased()
         let videoExts = ["mp4", "m4v", "mov", "mkv", "flv", "webm", "ts", "avi", "mp3", "m4a", "aac", "wav"]
+
+        // 之前下到的 .ts 直接放会失败，播放前先换成 MP4
+        if ext == "ts" {
+            converting = true
+            Task {
+                let converted = try? await MediaRemuxer.remuxToMP4(url)
+                await MainActor.run {
+                    converting = false
+                    if let converted = converted,
+                       let item = manager.items.first(where: { $0.localPath == url.path }) {
+                        manager.replacePath(of: item, with: converted)
+                    }
+                    onPlay(converted ?? url)
+                    dismiss()
+                }
+            }
+            return
+        }
+
         if videoExts.contains(ext) {
             onPlay(url)
             dismiss()
