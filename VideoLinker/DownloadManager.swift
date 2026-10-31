@@ -45,6 +45,8 @@ final class DownloadItem: ObservableObject, Identifiable {
     var isHLS = false
     /// 后台任务标识，用来把系统回调对回这一条
     var taskID = 0
+    /// 断点续传时已经下完的那部分字节数，任务回调只报「本次」的量，得加上它
+    var baseOffset: Int64 = 0
     /// 断点续传数据，暂停或网络中断时保存
     var resumeData: Data?
     /// 目标文件：排队时就定好，重试不会又生成一个新名字
@@ -112,6 +114,14 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
     private let indexLock = NSLock()
     /// 正在跑的分片任务：taskID → (哪一条, 第几片，-1 表示初始化段)
     private var segTasks: [Int: (itemID: UUID, index: Int)] = [:]
+    /// 分片任务本次已写的字节数，只用于在界面上把「总进度」算准，不参与百分比
+    private var segWritten: [Int: Int64] = [:]
+    /// 每条 HLS 已经落盘的分片总字节
+    private var hlsDoneBytes: [UUID: Int64] = [:]
+    /// 哪些条已经按目录统计过落盘字节（重启后要恢复一次）
+    private var hlsBytesPrimed: Set<UUID> = []
+    /// 分片字节刷新的节流时间戳，避免每秒几十次刷新把主线程打满
+    private var lastSegFlush: [UUID: Date] = [:]
     /// 解析好的 HLS 任务（含密钥与分片清单），继续和重启恢复都靠它
     private var hlsJobs: [UUID: HLSJob] = [:]
     /// 正在拼文件的，避免重复进入
@@ -234,7 +244,43 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
     private func takeSegment(_ taskID: Int) -> (itemID: UUID, index: Int)? {
         indexLock.lock()
         defer { indexLock.unlock() }
+        segWritten.removeValue(forKey: taskID)
         return segTasks.removeValue(forKey: taskID)
+    }
+
+    /// 这个任务是不是「某一小片」，是的话它的字节数不能当成整条任务的进度
+    private func segmentOwner(_ taskID: Int) -> UUID? {
+        indexLock.lock()
+        defer { indexLock.unlock() }
+        return segTasks[taskID]?.itemID
+    }
+
+    private func setSegmentWritten(_ bytes: Int64, for taskID: Int) {
+        indexLock.lock()
+        segWritten[taskID] = bytes
+        indexLock.unlock()
+    }
+
+    /// 某一条正在下的分片里，已经写进临时文件的字节数
+    private func inFlightBytes(of itemID: UUID) -> Int64 {
+        indexLock.lock()
+        defer { indexLock.unlock() }
+        var sum: Int64 = 0
+        for (taskID, info) in segTasks where info.itemID == itemID {
+            sum += segWritten[taskID] ?? 0
+        }
+        return sum
+    }
+
+    /// 清掉某一条在内存里的分片计数（暂停、删除、完成时都走这里）
+    private func resetSegmentBytes(_ itemID: UUID) {
+        indexLock.lock()
+        let ids = segTasks.filter { $0.value.itemID == itemID }.map { $0.key }
+        for id in ids { segWritten.removeValue(forKey: id) }
+        indexLock.unlock()
+        hlsDoneBytes.removeValue(forKey: itemID)
+        hlsBytesPrimed.remove(itemID)
+        lastSegFlush.removeValue(forKey: itemID)
     }
 
     private func segmentCount(of itemID: UUID) -> Int {
@@ -290,6 +336,15 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
             return
         }
 
+        // 上一次的后台任务还活着就直接用它，别再派一个：
+        // 两个任务同时往一条记录里报字节数，进度必然来回跳
+        if item.taskID != 0, linkedItem(item.taskID) != nil {
+            item.state = .running
+            item.failReason = ""
+            refreshRunning()
+            return
+        }
+
         item.state = .running
         item.note = ""
         item.failReason = ""
@@ -297,15 +352,20 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
 
         let hasResume = !(item.resumeData?.isEmpty ?? true)
         if hasResume {
-            // 接着上次的字节数显示，别一继续就跳回 0%
+            // 接着上次的位置显示，别一继续就跳回 0%
+            item.baseOffset = Self.resumeOffset(item.resumeData ?? Data())
+            if item.baseOffset == 0 { item.baseOffset = item.received }
+            item.received = item.baseOffset
             item.note = "正在接着上次的位置…"
         } else {
+            item.baseOffset = 0
             if item.received > 0 {
                 // 服务器没给断点数据（不支持 Range），只能从头下，明说一句
                 item.note = "服务器不支持断点，已从头开始"
             }
             item.progress = 0
             item.received = 0
+            item.expected = 0
         }
 
         if item.destURL == nil {
@@ -322,7 +382,7 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
             task = backgroundSession.downloadTask(withResumeData: data)
         } else {
             var request = URLRequest(url: url)
-            request.timeoutInterval = 60
+            request.timeoutInterval = 300
             request.setValue(Self.mobileUA, forHTTPHeaderField: "User-Agent")
             if let referer = Self.referer(for: url) {
                 request.setValue(referer, forHTTPHeaderField: "Referer")
@@ -338,6 +398,17 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
         startSpeedTimer()
     }
 
+    /// 从系统的断点数据里读出「已经下完了多少字节」，读不到就当 0
+    private static func resumeOffset(_ data: Data) -> Int64 {
+        guard !data.isEmpty,
+              let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil),
+              let dict = plist as? [String: Any] else { return 0 }
+        for key in ["NSURLSessionResumeBytesReceived", "NSURLSessionResumeInfoBytesReceived"] {
+            if let value = dict[key] as? NSNumber { return value.int64Value }
+        }
+        return 0
+    }
+
     /// m3u8：解析清单 → 取密钥 → 分片交给后台下载任务 → 拼装 → 换封装
     private func beginHLS(_ item: DownloadItem) {
         guard let url = URL(string: item.source) else {
@@ -349,6 +420,8 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
         item.failReason = ""
         item.note = ""
         item.speed = 0
+        // HLS 没有可信的总字节数，别显示一个会变的「/ 698 KB」
+        item.expected = 0
 
         // 之前解析过（暂停后继续、杀掉重开）：直接从缺的分片接着下，不再从头来
         if let job = loadJob(for: item.id) {
@@ -423,9 +496,44 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
         return min(0.99, Double(done) / Double(job.total))
     }
 
+    /// 重启后先把「已经落盘多少字节」算出来，界面不会从 0 重新数
+    private func primeSegmentBytes(_ itemID: UUID, job: HLSJob) {
+        guard !hlsBytesPrimed.contains(itemID) else { return }
+        hlsBytesPrimed.insert(itemID)
+
+        let dir = Self.partsDirectory(itemID)
+        var sum: Int64 = 0
+        if job.initSegment != nil {
+            sum += Self.fileSize(dir.appendingPathComponent("init"))
+        }
+        for index in 0..<job.total {
+            sum += Self.fileSize(dir.appendingPathComponent("seg-\(index)"))
+        }
+        hlsDoneBytes[itemID] = sum
+        if let item = items.first(where: { $0.id == itemID }) {
+            item.received = max(item.received, sum)
+        }
+    }
+
+    /// 把「已落盘 + 正在写」的字节数刷到界面，太频繁的刷新直接丢掉
+    private func flushSegmentBytes(_ itemID: UUID) {
+        DispatchQueue.main.async {
+            guard let item = self.items.first(where: { $0.id == itemID }),
+                  item.state == .running else { return }
+            let now = Date()
+            if let last = self.lastSegFlush[itemID], now.timeIntervalSince(last) < 0.3 { return }
+            self.lastSegFlush[itemID] = now
+            let total = (self.hlsDoneBytes[itemID] ?? 0) + self.inFlightBytes(of: itemID)
+            item.received = max(item.received, total)
+            item.expected = 0
+        }
+    }
+
     /// 把缺的分片排进后台任务，窗口没满就补满
     private func pumpSegments(_ item: DownloadItem, job: HLSJob) {
         guard item.state == .running, !hlsAssembling.contains(item.id) else { return }
+
+        primeSegmentBytes(item.id, job: job)
 
         let dir = Self.partsDirectory(item.id)
         Self.ensureDirectory(dir)
@@ -454,7 +562,9 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
         }
 
         if job.total > 0 {
-            item.progress = min(0.99, Double(job.total - missing) / Double(job.total))
+            // 只增不减：某一片失败重排时，进度条不能往回掉
+            let value = min(0.99, Double(job.total - missing) / Double(job.total))
+            item.progress = max(item.progress, value)
         }
 
         if missing == 0, segmentIndexes(of: item.id).isEmpty {
@@ -489,11 +599,17 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
 
         DispatchQueue.main.async {
             guard let item = self.items.first(where: { $0.id == info.itemID }) else { return }
-            item.received += size
+            // 这一片的字节数从「正在写」挪到「已落盘」，总数是连续的
+            if self.hlsBytesPrimed.contains(info.itemID) {
+                self.hlsDoneBytes[info.itemID, default: 0] += size
+            }
             if let job = self.hlsJobs[item.id] ?? self.loadJob(for: item.id) {
                 self.hlsJobs[item.id] = job
                 self.pumpSegments(item, job: job)
             }
+            let total = (self.hlsDoneBytes[info.itemID] ?? 0) + self.inFlightBytes(of: info.itemID)
+            item.received = max(item.received, total)
+            item.expected = 0
         }
         return true
     }
@@ -543,6 +659,7 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
                     item.speed = 0
                     self.hlsJobs.removeValue(forKey: item.id)
                     self.clearParts(item.id)
+                    self.resetSegmentBytes(item.id)
                     self.save()
                     self.archive(item)
                     self.pump()
@@ -582,9 +699,12 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
         let ids = segTasks.filter { $0.value.itemID == itemID }.map { $0.key }
         for id in ids {
             segTasks.removeValue(forKey: id)
+            segWritten.removeValue(forKey: id)
             itemForTask.removeValue(forKey: id)
         }
         indexLock.unlock()
+
+        resetSegmentBytes(itemID)
 
         guard !ids.isEmpty else { return }
         backgroundSession.getAllTasks { tasks in
@@ -599,6 +719,8 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
         item.failReason = reason
         item.note = ""
         item.speed = 0
+        // 失败了就把还在飞的分片停掉，别让它们继续写字节数
+        if item.isHLS { cancelSegments(of: item.id) }
         save()
         pump()
     }
@@ -700,6 +822,8 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
         if !keepParts {
             item.progress = 0
             item.received = 0
+            item.expected = 0
+            item.baseOffset = 0
         }
         item.failReason = ""
         save()
@@ -727,14 +851,30 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
                     didWriteData bytesWritten: Int64,
                     totalBytesWritten: Int64,
                     totalBytesExpectedToWrite: Int64) {
-        guard let item = linkedItem(downloadTask.taskIdentifier) else { return }
-        let expected = totalBytesExpectedToWrite
+        let taskID = downloadTask.taskIdentifier
+
+        // 分片任务报的是「这一小片」的字节数，几片并行时拿它当整条任务的进度，
+        // 百分比就会在这几片之间来回跳。这里只记字节，进度交给「已落地几片」算。
+        if let itemID = segmentOwner(taskID) {
+            setSegmentWritten(totalBytesWritten, for: taskID)
+            flushSegmentBytes(itemID)
+            return
+        }
+
+        // 只认当前这条记录手上的任务，旧任务迟到的回调一律丢掉
+        guard let item = linkedItem(taskID), item.taskID == taskID else { return }
+
         DispatchQueue.main.async {
-            item.received = totalBytesWritten
-            if expected > 0 {
-                item.expected = expected
-                item.progress = min(0.99, Double(totalBytesWritten) / Double(expected))
+            guard item.state == .running else { return }
+            item.received = item.baseOffset + totalBytesWritten
+            if totalBytesExpectedToWrite > 0 {
+                // 断点续传时服务端可能只报剩余长度，总量只增不减
+                item.expected = max(item.expected, item.baseOffset + totalBytesExpectedToWrite)
             }
+            guard item.expected > 0 else { return }
+            let value = Double(item.received) / Double(item.expected)
+            // 只增不减：回调乱序或续传重算时，进度条不能往回跳
+            item.progress = min(0.99, max(item.progress, value))
         }
     }
 
