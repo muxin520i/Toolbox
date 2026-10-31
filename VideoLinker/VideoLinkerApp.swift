@@ -16,7 +16,9 @@ struct VideoLinkerApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootView()
+            PrivacyGate {
+                RootView()
+            }
         }
     }
 }

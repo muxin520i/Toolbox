@@ -26,7 +26,7 @@ final class VLCPlayback: NSObject, VLCMediaPlayerDelegate {
 
     private var pendingSeek: Double?
 
-    func load(_ url: URL, rate: Double, startAt: Double?) {
+    func load(_ url: URL, rate: Double, startAt: Double?, credential: String? = nil) {
         stop()
 
         let engine = VLCMediaPlayer()
@@ -36,6 +36,14 @@ final class VLCPlayback: NSObject, VLCMediaPlayerDelegate {
         // 尽量别丢帧，画面更顺
         media.addOption("--no-drop-late-frames")
         media.addOption("--no-skip-frames")
+
+        // WebDAV 这类要认证的源：VLC 的 HTTP 模块认 http-user / http-pwd
+        if let credential, let colon = credential.firstIndex(of: ":") {
+            let user = String(credential[credential.startIndex..<colon])
+            let pass = String(credential[credential.index(after: colon)...])
+            if !user.isEmpty { media.addOption(":http-user=\(user)") }
+            if !pass.isEmpty { media.addOption(":http-pwd=\(pass)") }
+        }
 
         engine.media = media
         engine.rate = Float(rate)
@@ -153,7 +161,7 @@ final class VLCPlayback {
     var onEnded: (() -> Void)?
     var onFailed: ((String) -> Void)?
 
-    func load(_ url: URL, rate: Double, startAt: Double?) {}
+    func load(_ url: URL, rate: Double, startAt: Double?, credential: String? = nil) {}
     func play() {}
     func pause() {}
     func togglePlay() {}

@@ -12,6 +12,8 @@ struct PlaybackItem: Identifiable, Hashable {
     var id: String { url }
     let url: String
     let title: String?
+    /// WebDAV 这类需要认证的源，传 "用户名:密码"，播放器自己转成请求头
+    var credential: String? = nil
 }
 
 /// 一次播放请求：单条链接，或者一个带起始位置的队列
@@ -61,6 +63,10 @@ struct PlayerScreen: View {
     @State private var subtitleTicker: Timer?
     @State private var showSubtitlePicker = false
     @AppStorage(SettingsKey.subtitleSize) private var subtitleSize = 17.0
+
+    // 观看时长（统计页用）：本次播放累计看了多少秒
+    @State private var watchedSeconds: Double = 0
+    @State private var lastWatchTime: Double = 0
 
     // 手势过程状态
     @State private var dragMode = 0            // 0 未定 1 进度 2 音量
@@ -175,6 +181,7 @@ struct PlayerScreen: View {
         }
         .onDisappear {
             saveProgress()
+            flushWatch()
             model.onFinished = nil
             model.onProgress = nil
             model.stop()
@@ -788,6 +795,10 @@ struct PlayerScreen: View {
         model.onFinished = { advance() }
         model.onProgress = { time, duration in
             ResumeStore.save(url: url.absoluteString, position: time, duration: duration)
+            // 只累计正常前进的播放量，拖进度条造成的大跳变不计入
+            let delta = time - lastWatchTime
+            if delta > 0, delta < 20 { watchedSeconds += delta }
+            lastWatchTime = time
         }
 
         var startAt: Double?
@@ -796,7 +807,8 @@ struct PlayerScreen: View {
         }
 
         model.rate = currentRate
-        model.load(url, startAt: startAt)
+        model.load(url, startAt: startAt, credential: currentItem?.credential)
+        lastWatchTime = startAt ?? 0
 
         // 本地视频旁边有同名 srt/vtt 就自动挂上
         autoLoadSubtitle(for: url)
@@ -817,11 +829,21 @@ struct PlayerScreen: View {
         )
     }
 
+    /// 把本次播放的时长记进统计表，切集或退出时调用
+    private func flushWatch() {
+        let seconds = watchedSeconds
+        watchedSeconds = 0
+        lastWatchTime = 0
+        guard seconds >= 5, let url = currentURL else { return }
+        WatchStats.record(url: url.absoluteString, title: titleText, seconds: seconds)
+    }
+
     private func advance() {
         guard index + 1 < request.items.count else {
             showControls = true
             return
         }
+        flushWatch()
         index += 1
         loadCurrent()
     }
@@ -829,6 +851,7 @@ struct PlayerScreen: View {
     private func step(by offset: Int) {
         let target = index + offset
         guard request.items.indices.contains(target) else { return }
+        flushWatch()
         index = target
         loadCurrent()
     }
@@ -1133,7 +1156,7 @@ final class PlayerModel: ObservableObject {
         }
     }
 
-    func load(_ url: URL, startAt: Double? = nil) {
+    func load(_ url: URL, startAt: Double? = nil, credential: String? = nil) {
         configureAudioSession()
 
         teardownVLC()
@@ -1151,11 +1174,11 @@ final class PlayerModel: ObservableObject {
         // mkv / flv / avi 这些系统播放器基本没戏，直接交给 VLC，省一次失败等待
         if VLCPlayback.isAvailable,
            Self.vlcOnlyExtensions.contains(url.pathExtension.lowercased()) {
-            startVLC(url: url, startAt: startAt)
+            startVLC(url: url, startAt: startAt, credential: credential)
             return
         }
 
-        let item = AVPlayerItem(url: url)
+        let item = AVPlayerItem(asset: Self.makeAsset(url: url, credential: credential))
         item.preferredForwardBufferDuration = 4
 
         statusObserver = item.observe(\.status, options: [.new]) { [weak self] observedItem, _ in
@@ -1178,7 +1201,7 @@ final class PlayerModel: ObservableObject {
                         print("AVPlayer failed:", failureReason!.localizedDescription)
                     }
                     // 系统播放器不认这个容器，换 VLC 再试一次
-                    self.switchToVLC(url: url, startAt: self.pendingSeek)
+                    self.switchToVLC(url: url, startAt: self.pendingSeek, credential: credential)
                 default:
                     break
                 }
@@ -1200,10 +1223,22 @@ final class PlayerModel: ObservableObject {
         let workItem = DispatchWorkItem { [weak self] in
             guard let self = self, self.isLoading else { return }
             // 超时不直接判死，VLC 对某些流更宽容
-            self.switchToVLC(url: url, startAt: self.pendingSeek)
+            self.switchToVLC(url: url, startAt: self.pendingSeek, credential: credential)
         }
         timeoutWorkItem = workItem
         DispatchQueue.main.asyncAfter(deadline: .now() + 20, execute: workItem)
+    }
+
+    /// 需要认证的源（WebDAV）走 AVURLAsset，把 Basic 头挂在 asset 上，
+    /// AVPlayer 请求主文件和各分片时都会带上。
+    private static func makeAsset(url: URL, credential: String?) -> AVURLAsset {
+        guard let credential, !credential.isEmpty else { return AVURLAsset(url: url) }
+        let token = "Basic " + Data(credential.utf8).base64EncodedString()
+        let headers: [String: Any] = ["Authorization": token]
+        return AVURLAsset(
+            url: url,
+            options: ["AVURLAssetHTTPHeaderFieldsKey": headers]
+        )
     }
 
     private func applyPendingSeek() {
@@ -1287,7 +1322,7 @@ final class PlayerModel: ObservableObject {
         "m2ts", "mts", "ts", "mpg", "mpeg", "ogv", "3gp", "asf", "vob", "f4v"
     ]
 
-    private func switchToVLC(url: URL, startAt: Double?) {
+    private func switchToVLC(url: URL, startAt: Double?, credential: String? = nil) {
         guard VLCPlayback.isAvailable else {
             isLoading = false
             errorMessage = "视频格式不受支持，或链接不是可直接播放的媒体地址。"
@@ -1303,10 +1338,10 @@ final class PlayerModel: ObservableObject {
         statusObserver = nil
         player.pause()
         player.replaceCurrentItem(with: nil)
-        startVLC(url: url, startAt: startAt)
+        startVLC(url: url, startAt: startAt, credential: credential)
     }
 
-    private func startVLC(url: URL, startAt: Double?) {
+    private func startVLC(url: URL, startAt: Double?, credential: String? = nil) {
         isLoading = true
         errorMessage = nil
         duration = 0
@@ -1338,7 +1373,7 @@ final class PlayerModel: ObservableObject {
 
         vlcEngine = engine
         usingVLC = true
-        engine.load(url, rate: rate, startAt: startAt)
+        engine.load(url, rate: rate, startAt: startAt, credential: credential)
     }
 
     private func teardownVLC() {

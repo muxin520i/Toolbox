@@ -10,6 +10,8 @@ struct SettingsView: View {
     @AppStorage(SettingsKey.subtitleSize) private var subtitleSize = 17.0
     @AppStorage(SettingsKey.autoResume) private var autoResume = true
     @AppStorage(SettingsKey.gestures) private var gestures = true
+    @AppStorage(AppLock.enabledKey) private var lockEnabled = false
+    @AppStorage(AppLock.timingKey) private var lockTiming = 0
     @AppStorage(PlaylistStore.downloadTargetKey) private var downloadTarget = PlaylistStore.autoTarget
 
     @State private var playlists: [Playlist] = []
@@ -19,6 +21,8 @@ struct SettingsView: View {
     @State private var confirmClearResume = false
     @State private var confirmClearHistory = false
     @State private var showInbox = false
+    @State private var showStats = false
+    @State private var showWebDAV = false
     @State private var toast: String?
 
     private let rates: [Double] = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
@@ -33,6 +37,8 @@ struct SettingsView: View {
                         themeCard
                         playbackCard
                         downloadCard
+                        storageCard
+                        privacyCard
                         dataCard
                         aboutCard
                     }
@@ -62,6 +68,12 @@ struct SettingsView: View {
         }
         .sheet(isPresented: $showInbox) {
             LANInboxView()
+        }
+        .sheet(isPresented: $showStats) {
+            WatchStatsView()
+        }
+        .sheet(isPresented: $showWebDAV) {
+            WebDAVView()
         }
         .confirmationDialog("清除所有观看进度？", isPresented: $confirmClearResume, titleVisibility: .visible) {            Button("清除", role: .destructive) {
                 ResumeStore.clear()
@@ -281,9 +293,109 @@ struct SettingsView: View {
     }
 
     // MARK: 数据
+    // MARK: 网络存储
+
+    private var storageCard: some View {
+        card(title: "网络存储", icon: "externaldrive.connected.to.line.below") {
+            VStack(spacing: 0) {
+                Button {
+                    showWebDAV = true
+                } label: {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("WebDAV")
+                                .font(.system(size: 14))
+                                .foregroundStyle(theme.text)
+                            Text(webdavSubtitle)
+                                .font(.system(size: 11))
+                                .foregroundStyle(theme.textTertiary)
+                                .lineLimit(1)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 12))
+                            .foregroundStyle(theme.textTertiary)
+                    }
+                    .padding(.vertical, 12)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private var webdavSubtitle: String {
+        let config = WebDAVConfig.load()
+        guard config.isUsable, let host = URL(string: config.baseURL)?.host else {
+            return "未连接 · 点这里挂载 NAS 或网盘"
+        }
+        return host
+    }
+
+    // MARK: 隐私
+
+    private var privacyCard: some View {
+        card(title: "隐私", icon: "lock.shield.fill") {
+            VStack(spacing: 0) {
+                Toggle(isOn: $lockEnabled) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("App 锁")
+                            .font(.system(size: 14))
+                            .foregroundStyle(theme.text)
+                        Text("打开或切回前台时需要\(AppLock.biometryName)")
+                            .font(.system(size: 11))
+                            .foregroundStyle(theme.textTertiary)
+                    }
+                }
+                .tint(theme.accent)
+                .padding(.vertical, 10)
+
+                if lockEnabled {
+                    Divider().overlay(theme.cardStroke)
+
+                    HStack {
+                        Text("离开后重新验证")
+                            .font(.system(size: 14))
+                            .foregroundStyle(theme.text)
+                        Spacer()
+                        Picker("", selection: $lockTiming) {
+                            Text("立即").tag(0)
+                            Text("1 分钟").tag(60)
+                            Text("5 分钟").tag(300)
+                        }
+                        .pickerStyle(.menu)
+                        .tint(theme.textSecondary)
+                    }
+                    .padding(.vertical, 4)
+
+                    Divider().overlay(theme.cardStroke)
+
+                    Button {
+                        NotificationCenter.default.post(name: AppLock.lockNowNotification, object: nil)
+                        showToast("已锁定，验证后继续")
+                    } label: {
+                        actionRow("立即锁定", symbol: "lock.fill")
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    // MARK: 数据
+
     private var dataCard: some View {
         card(title: "数据", icon: "internaldrive.fill") {
             VStack(spacing: 0) {
+                Button {
+                    showStats = true
+                } label: {
+                    actionRow("观看统计", symbol: "chart.bar.xaxis")
+                }
+                .buttonStyle(.plain)
+
+                Divider().overlay(theme.cardStroke)
+
                 Button {
                     confirmClearResume = true
                 } label: {

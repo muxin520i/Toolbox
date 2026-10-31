@@ -161,6 +161,22 @@ enum AppDB {
             try db.execute(sql: "INSERT OR REPLACE INTO meta (key, value) VALUES ('schema.version', 'v1')")
         }
 
+        // v2：观看时长明细（统计页用）+ 网络存储（WebDAV）配置
+        migrator.registerMigration("v2") { db in
+            try db.execute(sql: """
+                CREATE TABLE IF NOT EXISTS watchSession (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    url TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    seconds DOUBLE NOT NULL,
+                    endedAt DOUBLE NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS watchSession_time ON watchSession(endedAt DESC);
+                """)
+
+            try db.execute(sql: "INSERT OR REPLACE INTO meta (key, value) VALUES ('schema.version', 'v2')")
+        }
+
         return migrator
     }()
 
