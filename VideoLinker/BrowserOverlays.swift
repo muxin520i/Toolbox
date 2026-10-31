@@ -300,6 +300,8 @@ struct BrowserMenuSheet: View {
 struct FloatingSniffButton: View {
     var count: Int
     var onTap: () -> Void
+    /// 长按：有多个地址时打开列表挑清晰度
+    var onLongPress: () -> Void = {}
 
     @AppStorage(SettingsKey.fabX) private var storedX = -1.0
     @AppStorage(SettingsKey.fabY) private var storedY = -1.0
@@ -307,6 +309,7 @@ struct FloatingSniffButton: View {
     @State private var dragOffset: CGSize = .zero
     @State private var dragging = false
     @State private var suppressTap = false
+    @State private var longFired = false
 
     private let diameter: CGFloat = 50
 
@@ -353,8 +356,20 @@ struct FloatingSniffButton: View {
                             }
                         }
                 )
+                .simultaneousGesture(
+                    LongPressGesture(minimumDuration: 0.55)
+                        .onEnded { _ in
+                            guard !dragging, !suppressTap else { return }
+                            longFired = true
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                            onLongPress()
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                                longFired = false
+                            }
+                        }
+                )
                 .onTapGesture {
-                    guard !suppressTap else { return }
+                    guard !suppressTap, !longFired else { return }
                     onTap()
                 }
         }

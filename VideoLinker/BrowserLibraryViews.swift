@@ -275,6 +275,7 @@ struct DownloadsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var shareBox: ShareBox?
     @State private var converting = false
+    @State private var showInbox = false
     @State private var toast: String?
 
     var body: some View {
@@ -342,16 +343,26 @@ struct DownloadsView: View {
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
                         Button {
+                            showInbox = true
+                        } label: {
+                            Label("从电脑传文件", systemImage: "antenna.radiowaves.left.and.right")
+                        }
+
+                        Divider()
+
+                        Button {
                             manager.pauseAll()
                         } label: {
                             Label("全部暂停", systemImage: "pause.circle")
                         }
+                        .disabled(manager.items.isEmpty)
 
                         Button {
                             manager.resumeAll()
                         } label: {
                             Label("全部继续", systemImage: "play.circle")
                         }
+                        .disabled(manager.items.isEmpty)
 
                         Divider()
 
@@ -360,14 +371,17 @@ struct DownloadsView: View {
                         } label: {
                             Label("清理已结束", systemImage: "trash")
                         }
+                        .disabled(manager.items.isEmpty)
                     } label: {
                         Text("管理")
                     }
-                    .disabled(manager.items.isEmpty)
                 }
             }
             .sheet(item: $shareBox) { box in
                 ActivityView(items: [box.url])
+            }
+            .sheet(isPresented: $showInbox) {
+                LANInboxView()
             }
             .overlay(alignment: .bottom) {
                 if let toast = toast {

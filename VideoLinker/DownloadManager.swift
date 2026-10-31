@@ -815,6 +815,34 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
         }
     }
 
+    // MARK: 外部文件（局域网收件箱）
+
+    /// 把电脑传进来的文件直接登记成一条已完成的下载，列表里立刻能看到
+    func importFile(at url: URL) {
+        let exists = items.contains { $0.localPath == url.path }
+        guard !exists else { return }
+
+        let item = DownloadItem(fileName: url.lastPathComponent, source: "")
+        item.localPath = url.path
+        item.destURL = url
+        item.state = .finished
+        item.progress = 1
+        item.createdAt = Date()
+        let size = Self.fileSize(url)
+        item.received = size
+        item.expected = size
+
+        if let index = items.firstIndex(where: { $0.state == .finished }) {
+            items.insert(item, at: index)
+        } else {
+            items.insert(item, at: 0)
+        }
+        save()
+        refreshRunning()
+        // 视频顺手进播放列表，和网页下载的待遇一致
+        archive(item)
+    }
+
     // MARK: 暂停 / 继续 / 重试
 
     func pause(_ item: DownloadItem) {

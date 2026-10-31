@@ -175,11 +175,15 @@ struct BrowserView: View {
                     }
 
                     if !tab.isHome {
-                        FloatingSniffButton(count: tab.found.count) {
-                            addressFocused = false
-                            editing = false
-                            present(.sniff)
-                        }
+                        FloatingSniffButton(
+                            count: tab.found.count,
+                            onTap: { quickDownload(tab) },
+                            onLongPress: {
+                                addressFocused = false
+                                editing = false
+                                present(.sniff)
+                            }
+                        )
                     }
                 }
             }
@@ -871,6 +875,48 @@ struct BrowserView: View {
         store.apply(options)
         // 幂等，多调一次没有副作用；避免开关切了页面没反应
         store.applyAppearance()
+    }
+
+    // MARK: 悬浮键
+
+    /// 短按悬浮键：直接下这一页最像正片的地址，不用先打开列表
+    private func quickDownload(_ tab: BrowserTab) {
+        guard let best = Self.pickMainVideo(from: tab.found) else {
+            showToast(tab.found.isEmpty ? "这页还没抓到视频，让视频先播一下" : "抓到的大多是广告片，长按自己挑")
+            return
+        }
+        switch DownloadManager.shared.start(from: best.url, title: best.displayName) {
+        case .started(let item):
+            showToast("开始下载：\(item.fileName)（长按可选其他）")
+        case .failed(let reason):
+            showToast(reason)
+        }
+    }
+
+    /// 优先 m3u8，其次 mp4/mov，带广告字样的降权，同分取先出现的
+    private static func pickMainVideo(from list: [SniffedVideo]) -> SniffedVideo? {
+        guard !list.isEmpty else { return nil }
+        let noise = ["advert", "ad-", "/ads", "trailer", "preview", "promo", "sample", "logo", "banner"]
+
+        var best: SniffedVideo?
+        var bestScore = Int.min
+        for video in list {
+            var score: Int
+            switch video.kind {
+            case "HLS": score = 40
+            case "MP4", "MOV": score = 30
+            case "WEBM": score = 20
+            default: score = 10
+            }
+            let lower = video.url.lowercased()
+            if noise.contains(where: { lower.contains($0) }) { score -= 50 }
+            if lower.contains("1080") || lower.contains("720") { score += 5 }
+            if score > bestScore {
+                bestScore = score
+                best = video
+            }
+        }
+        return bestScore > 0 ? best : nil
     }
 
     private func showToast(_ text: String) {

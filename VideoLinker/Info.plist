@@ -49,6 +49,8 @@
 	</dict>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>保存下载好的视频到系统相册时需要这个权限。</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>局域网收件箱需要访问本地网络，好让同一 Wi-Fi 下的电脑把视频传进来。</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

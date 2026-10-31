@@ -18,6 +18,7 @@ struct SettingsView: View {
     @State private var newListName = ""
     @State private var confirmClearResume = false
     @State private var confirmClearHistory = false
+    @State private var showInbox = false
     @State private var toast: String?
 
     private let rates: [Double] = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
@@ -59,8 +60,10 @@ struct SettingsView: View {
             .toolbarBackground(theme.navBg, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
         }
-        .confirmationDialog("清除所有观看进度？", isPresented: $confirmClearResume, titleVisibility: .visible) {
-            Button("清除", role: .destructive) {
+        .sheet(isPresented: $showInbox) {
+            LANInboxView()
+        }
+        .confirmationDialog("清除所有观看进度？", isPresented: $confirmClearResume, titleVisibility: .visible) {            Button("清除", role: .destructive) {
                 ResumeStore.clear()
                 showToast("观看进度已清除")
             }
@@ -255,6 +258,14 @@ struct SettingsView: View {
                     }
                 }
                 .padding(.vertical, 6)
+
+                Divider().overlay(theme.cardStroke)
+
+                Button {
+                    showInbox = true
+                } label: {
+                    actionRow("局域网收件箱", symbol: "antenna.radiowaves.left.and.right")
+                }
 
                 Divider().overlay(theme.cardStroke)
 
