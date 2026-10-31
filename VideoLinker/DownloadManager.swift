@@ -40,6 +40,8 @@ final class DownloadItem: ObservableObject, Identifiable {
     @Published var expected: Int64 = 0
     /// 实时速度（字节/秒），下载页直接显示
     @Published var speed: Double = 0
+    /// 总大小是按平均值估出来的（HLS 场景），显示时加「≈」
+    var estimatedTotal = false
 
     /// HLS 走自研分片下载，拿不到系统的 resumeData
     var isHLS = false
@@ -74,12 +76,16 @@ final class DownloadItem: ObservableObject, Identifiable {
         let done = ByteCountFormatter.string(fromByteCount: received, countStyle: .file)
         guard expected > 0 else { return done }
         let total = ByteCountFormatter.string(fromByteCount: expected, countStyle: .file)
-        return done + " / " + total
+        // HLS 没有总字节数，是按已下分片的平均值估的，标个约等号
+        return done + " / " + (estimatedTotal ? "≈" + total : total)
     }
 
     /// 「2.4 MB/s」「860 KB/s」这种，按量级自动选单位
     var speedText: String {
-        guard speed > 0 else { return "" }
+        guard speed > 0 else {
+            // 下载中即使这一秒没收到数据也占着位置，别让速度整个消失
+            return state == .running && note.isEmpty ? "0 KB/s" : ""
+        }
         if speed >= 1024 * 1024 {
             return String(format: "%.1f MB/s", speed / 1024 / 1024)
         }
@@ -118,10 +124,14 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
     private var segWritten: [Int: Int64] = [:]
     /// 每条 HLS 已经落盘的分片总字节
     private var hlsDoneBytes: [UUID: Int64] = [:]
+    /// 每条 HLS 已经落盘的分片个数，用来估总大小
+    private var hlsDoneCount: [UUID: Int] = [:]
     /// 哪些条已经按目录统计过落盘字节（重启后要恢复一次）
     private var hlsBytesPrimed: Set<UUID> = []
     /// 分片字节刷新的节流时间戳，避免每秒几十次刷新把主线程打满
     private var lastSegFlush: [UUID: Date] = [:]
+    /// 连续几秒没接到数据，速度才真的归零
+    private var idleTicks: [UUID: Int] = [:]
     /// 解析好的 HLS 任务（含密钥与分片清单），继续和重启恢复都靠它
     private var hlsJobs: [UUID: HLSJob] = [:]
     /// 正在拼文件的，避免重复进入
@@ -279,8 +289,10 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
         for id in ids { segWritten.removeValue(forKey: id) }
         indexLock.unlock()
         hlsDoneBytes.removeValue(forKey: itemID)
+        hlsDoneCount.removeValue(forKey: itemID)
         hlsBytesPrimed.remove(itemID)
         lastSegFlush.removeValue(forKey: itemID)
+        idleTicks.removeValue(forKey: itemID)
     }
 
     private func segmentCount(of itemID: UUID) -> Int {
@@ -349,6 +361,8 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
         item.note = ""
         item.failReason = ""
         item.speed = 0
+        // 直链的总大小是服务端给的，不是估的
+        item.estimatedTotal = false
 
         let hasResume = !(item.resumeData?.isEmpty ?? true)
         if hasResume {
@@ -422,6 +436,7 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
         item.speed = 0
         // HLS 没有可信的总字节数，别显示一个会变的「/ 698 KB」
         item.expected = 0
+        item.estimatedTotal = false
 
         // 之前解析过（暂停后继续、杀掉重开）：直接从缺的分片接着下，不再从头来
         if let job = loadJob(for: item.id) {
@@ -503,16 +518,42 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
 
         let dir = Self.partsDirectory(itemID)
         var sum: Int64 = 0
+        var count = 0
         if job.initSegment != nil {
             sum += Self.fileSize(dir.appendingPathComponent("init"))
         }
         for index in 0..<job.total {
-            sum += Self.fileSize(dir.appendingPathComponent("seg-\(index)"))
+            let size = Self.fileSize(dir.appendingPathComponent("seg-\(index)"))
+            guard size > 0 else { continue }
+            sum += size
+            count += 1
         }
         hlsDoneBytes[itemID] = sum
+        hlsDoneCount[itemID] = count
         if let item = items.first(where: { $0.id == itemID }) {
             item.received = max(item.received, sum)
         }
+    }
+
+    /// HLS 拿不到总字节数，用「已落盘分片的平均大小 × 总片数」估一个，边下边校准
+    private func refreshHLSExpected(_ item: DownloadItem, job: HLSJob) {
+        let count = hlsDoneCount[item.id] ?? 0
+        guard count > 0, job.total > 0 else { return }
+
+        let dir = Self.partsDirectory(item.id)
+        let initBytes = job.initSegment == nil ? 0 : Self.fileSize(dir.appendingPathComponent("init"))
+        let bodyBytes = max(0, (hlsDoneBytes[item.id] ?? 0) - initBytes)
+        guard bodyBytes > 0 else { return }
+
+        let estimated = Int64(Double(bodyBytes) / Double(count) * Double(job.total))
+        guard estimated > 0 else { return }
+
+        // 不同分片码率会有出入，做一次平滑，免得总量数字一路蹦
+        let smoothed = item.expected > 0
+            ? Int64(Double(item.expected) * 0.7 + Double(estimated) * 0.3)
+            : estimated
+        item.expected = max(smoothed, item.received)
+        item.estimatedTotal = true
     }
 
     /// 把「已落盘 + 正在写」的字节数刷到界面，太频繁的刷新直接丢掉
@@ -525,7 +566,6 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
             self.lastSegFlush[itemID] = now
             let total = (self.hlsDoneBytes[itemID] ?? 0) + self.inFlightBytes(of: itemID)
             item.received = max(item.received, total)
-            item.expected = 0
         }
     }
 
@@ -602,14 +642,15 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
             // 这一片的字节数从「正在写」挪到「已落盘」，总数是连续的
             if self.hlsBytesPrimed.contains(info.itemID) {
                 self.hlsDoneBytes[info.itemID, default: 0] += size
+                if info.index >= 0 { self.hlsDoneCount[info.itemID, default: 0] += 1 }
             }
             if let job = self.hlsJobs[item.id] ?? self.loadJob(for: item.id) {
                 self.hlsJobs[item.id] = job
                 self.pumpSegments(item, job: job)
+                self.refreshHLSExpected(item, job: job)
             }
             let total = (self.hlsDoneBytes[info.itemID] ?? 0) + self.inFlightBytes(of: info.itemID)
             item.received = max(item.received, total)
-            item.expected = 0
         }
         return true
     }
@@ -743,15 +784,28 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
             guard item.state == .running else {
                 if item.speed != 0 { item.speed = 0 }
                 lastSample.removeValue(forKey: item.id)
+                idleTicks.removeValue(forKey: item.id)
                 continue
             }
             active = true
-            if let last = lastSample[item.id] {
-                let seconds = now.timeIntervalSince(last.at)
-                if seconds > 0.2 {
-                    let delta = item.received - last.bytes
-                    item.speed = delta > 0 ? Double(delta) / seconds : 0
-                }
+            guard let last = lastSample[item.id] else {
+                lastSample[item.id] = (item.received, now)
+                continue
+            }
+            let seconds = now.timeIntervalSince(last.at)
+            guard seconds > 0.2 else { continue }
+
+            let delta = item.received - last.bytes
+            if delta > 0 {
+                let instant = Double(delta) / seconds
+                // 慢速网络下这一秒可能只来一点点，做一次平滑，数字别乱蹦
+                item.speed = item.speed > 0 ? item.speed * 0.45 + instant * 0.55 : instant
+                idleTicks.removeValue(forKey: item.id)
+            } else {
+                // 一秒没数据不代表停了，连续四秒才归零，中间慢慢往下掉
+                let ticks = (idleTicks[item.id] ?? 0) + 1
+                idleTicks[item.id] = ticks
+                item.speed = ticks >= 4 ? 0 : item.speed * 0.65
             }
             lastSample[item.id] = (item.received, now)
         }
@@ -824,6 +878,7 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
             item.received = 0
             item.expected = 0
             item.baseOffset = 0
+            item.estimatedTotal = false
         }
         item.failReason = ""
         save()
