@@ -48,6 +48,7 @@ struct PlayerScreen: View {
     @State private var isTheater = false
     @State private var showControls = true
     @State private var showMore = false
+    @State private var showMediaInfo = false
     @State private var showSleep = false
     @State private var scrubbing = false
     @State private var scrubValue: Double = 0
@@ -227,7 +228,13 @@ struct PlayerScreen: View {
             Button("重新加载") { loadCurrent() }
             Button("复制链接") { copyCurrentLink() }
             Button("用 Safari 打开") { openInSafari() }
+            Button("技术信息") { showMediaInfo = true }
             Button("取消", role: .cancel) {}
+        }
+        .sheet(isPresented: $showMediaInfo) {
+            if let url = currentURL {
+                MediaInfoSheet(url: url, engine: engineName, durationHint: model.duration)
+            }
         }
         .fileImporter(
             isPresented: $showSubtitlePicker,
@@ -790,6 +797,11 @@ struct PlayerScreen: View {
 
     private var rateLabel: String {
         rateText(boostActive ? 2.0 : model.rate)
+    }
+
+    /// 当前实际在用的播放内核，技术信息面板里要标明
+    private var engineName: String {
+        model.vlcEngine == nil ? "AVPlayer" : "VLC"
     }
 
     private func rateText(_ value: Double) -> String {

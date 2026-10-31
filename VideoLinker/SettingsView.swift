@@ -21,6 +21,7 @@ struct SettingsView: View {
     @State private var confirmClearResume = false
     @State private var confirmClearHistory = false
     @State private var showInbox = false
+    @State private var showLANShare = false
     @State private var showStats = false
     @State private var showStorage = false
     @State private var showWebDAV = false
@@ -69,6 +70,9 @@ struct SettingsView: View {
         }
         .sheet(isPresented: $showInbox) {
             LANInboxView()
+        }
+        .sheet(isPresented: $showLANShare) {
+            LANShareView()
         }
         .sheet(isPresented: $showStats) {
             WatchStatsView()
@@ -282,6 +286,15 @@ struct SettingsView: View {
                 } label: {
                     actionRow("局域网收件箱", symbol: "antenna.radiowaves.left.and.right")
                 }
+
+                Divider().overlay(theme.cardStroke)
+
+                Button {
+                    showLANShare = true
+                } label: {
+                    actionRow("局域网投屏（电脑浏览器看）", symbol: "airplayvideo")
+                }
+                .buttonStyle(.plain)
 
                 Divider().overlay(theme.cardStroke)
 
