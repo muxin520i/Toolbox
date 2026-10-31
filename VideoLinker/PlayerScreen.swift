@@ -74,6 +74,10 @@ struct PlayerScreen: View {
     @State private var dragMode = 0            // 0 未定 1 进度 2 音量
     @State private var dragBaseTime: Double = 0
     @State private var dragBaseVolume: Float = 0
+    /// 本轮拖动的起点，用来判断是不是新手势
+    @State private var dragStartPoint: CGPoint?
+    /// 最近一次因为拖动改音量的时间，用来压掉误触发的双击快进
+    @State private var lastVolumeTouch: Date?
 
     // 长按 2 倍速
     @State private var boostActive = false
@@ -365,7 +369,8 @@ struct PlayerScreen: View {
     }
 
     private func beginBoost() {
-        guard !boostActive else { return }
+        // 手指已经在划了（多半是在调音量），不要进 2 倍速
+        guard !boostActive, dragMode == 0 else { return }
         boostActive = true
         boostBase = model.rate
         boostStart = Date()
@@ -459,6 +464,8 @@ struct PlayerScreen: View {
         SpatialTapGesture(count: 2)
             .onEnded { value in
                 guard gesturesEnabled else { return }
+                // 刚在调音量：连着两下上下划很容易被认成双击，这时不要跳进度
+                if let touch = lastVolumeTouch, Date().timeIntervalSince(touch) < 0.7 { return }
                 let isLeft = value.location.x < UIScreen.main.bounds.width / 2
                 seekRelative(isLeft ? -10 : 10)
             }
@@ -469,14 +476,36 @@ struct PlayerScreen: View {
             .onChanged { value in
                 guard gesturesEnabled else { return }
 
+                // 每次新的拖动都重新判方向。用起点区分：上一轮万一被系统打断、没收到 onEnded，
+                // dragMode 会留在旧值上，接着滑就会拿旧的模式去快进
+                if dragStartPoint != value.startLocation {
+                    dragStartPoint = value.startLocation
+                    dragMode = 0
+                    // 拖起来了就不要再触发长按 2 倍速
+                    cancelScheduledBoost()
+                    if boostActive { endBoost() }
+                }
+
                 if dragMode == 0 {
-                    if abs(value.translation.width) > abs(value.translation.height) {
+                    let dx = abs(value.translation.width)
+                    let dy = abs(value.translation.height)
+                    // 留出 1.5 倍余量：斜着划、手抖一下都不会被判成快进
+                    if dx > dy * 1.5 {
                         dragMode = 1
                         dragBaseTime = model.currentTime
-                    } else {
+                        scrubValue = model.currentTime
+                    } else if dy > dx * 1.5 {
                         dragMode = 2
                         dragBaseVolume = SystemVolume.current()
+                    } else {
+                        // 方向还没定下来，这一帧什么都不做
+                        return
                     }
+                }
+
+                // 方向一旦定下来就是真在划了，长按 2 倍速立刻退出
+                if dragMode != 0, boostActive {
+                    endBoost()
                 }
 
                 let height = max(1, UIScreen.main.bounds.height)
@@ -491,6 +520,7 @@ struct PlayerScreen: View {
                     let delta = Float(-value.translation.height / height) * 1.2
                     let v = min(1, max(0, dragBaseVolume + delta))
                     SystemVolume.set(v)
+                    lastVolumeTouch = Date()
                     showHint("音量 \(Int(v * 100))%")
                 }
             }
@@ -498,7 +528,11 @@ struct PlayerScreen: View {
                 if dragMode == 1 {
                     model.seek(to: scrubValue)
                 }
+                if dragMode == 2 {
+                    lastVolumeTouch = Date()
+                }
                 dragMode = 0
+                dragStartPoint = nil
                 hideHintSoon()
             }
     }

@@ -19,6 +19,7 @@ struct ContentView: View {
 
     @ObservedObject private var downloads = DownloadManager.shared
     @State private var showDownloads = false
+    @State private var showLocalMedia = false
     @State private var downloadHint: String?
 
     var body: some View {
@@ -30,6 +31,7 @@ struct ContentView: View {
                     header
                     inputCard
                     downloadEntry
+                    localEntry
                     if !items.isEmpty { historySection }
                     footer
                 }
@@ -73,6 +75,9 @@ struct ContentView: View {
                     request = PlayRequest(url: url)
                 }
             }
+        }
+        .sheet(isPresented: $showLocalMedia) {
+            LocalMediaView()
         }
         .alert("下载", isPresented: hintBinding) {
             Button("知道了", role: .cancel) { downloadHint = nil }
@@ -236,6 +241,40 @@ struct ContentView: View {
                         accent: theme.accent
                     )
                 }
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(theme.textTertiary)
+            }
+            .padding(.horizontal, 16)
+            .frame(height: 48)
+            .background(theme.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(theme.cardStroke, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var localEntry: some View {
+        Button {
+            showLocalMedia = true
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "folder.fill")
+                    .font(.system(size: 16))
+                    .foregroundStyle(theme.accent)
+
+                Text("本机视频")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(theme.text)
+
+                Spacer()
+
+                Text("扫描 / 导入")
+                    .font(.system(size: 12))
+                    .foregroundStyle(theme.textTertiary)
 
                 Image(systemName: "chevron.right")
                     .font(.system(size: 11, weight: .semibold))

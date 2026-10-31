@@ -42,6 +42,7 @@ struct PlaylistListView: View {
 
     @State private var showExporter = false
     @State private var showImporter = false
+    @State private var showLocalMedia = false
     @State private var backupData = Data()
     @State private var alertText: String?
 
@@ -80,6 +81,9 @@ struct PlaylistListView: View {
                     .padding(.top, 12)
                     .padding(.bottom, 40)
                 }
+                .sheet(isPresented: $showLocalMedia) {
+                    LocalMediaView()
+                }
             }
             .navigationTitle("播放列表")
             .navigationBarTitleDisplayMode(.large)
@@ -97,6 +101,14 @@ struct PlaylistListView: View {
                             showImporter = true
                         } label: {
                             Label("从备份导入", systemImage: "square.and.arrow.down")
+                        }
+
+                        Divider()
+
+                        Button {
+                            showLocalMedia = true
+                        } label: {
+                            Label("本机视频（扫描 / 导入）", systemImage: "folder")
                         }
                     } label: {
                         Image(systemName: "ellipsis.circle")
