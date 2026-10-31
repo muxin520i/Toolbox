@@ -65,7 +65,10 @@ struct PlayerScreen: View {
     @State private var boostWork: DispatchWorkItem?
     @State private var boostTimer: Timer?
 
-    @AppStorage(SettingsKey.rate) private var lastRate: Double = 1.0
+    /// 设置里的「默认播放速度」，只读不写：播放页调倍速不能反过来改默认值
+    @AppStorage(SettingsKey.rate) private var defaultRate: Double = 1.0
+    /// 本次播放会话的速度。只活在播放页里，退出就丢，下次仍按默认速度起播
+    @State private var sessionRate: Double?
     @AppStorage(SettingsKey.gestures) private var gesturesEnabled = true
     @AppStorage(SettingsKey.autoResume) private var autoResume = true
 
@@ -155,7 +158,7 @@ struct PlayerScreen: View {
         .statusBarHidden(true)
         .onAppear {
             UIDevice.current.beginGeneratingDeviceOrientationNotifications()
-            model.rate = lastRate
+            model.rate = currentRate
             loadCurrent()
         }
         .onDisappear {
@@ -660,7 +663,7 @@ struct PlayerScreen: View {
             startAt = saved
         }
 
-        model.rate = lastRate
+        model.rate = currentRate
         model.load(url, startAt: startAt)
 
         if let saved = startAt {
@@ -703,9 +706,14 @@ struct PlayerScreen: View {
         hideHintSoon()
     }
 
+    /// 当前生效的倍速：本次会话改过就用会话值，否则用设置里的默认值
+    private var currentRate: Double {
+        sessionRate ?? defaultRate
+    }
+
     private func selectRate(_ value: Double) {
         model.forceRate(value)
-        lastRate = value
+        sessionRate = value
         showHint("\(rateText(value)) 倍速")
         hideHintSoon()
     }

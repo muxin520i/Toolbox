@@ -144,10 +144,16 @@ struct SettingsView: View {
         card(title: "播放", icon: "play.circle.fill") {
             VStack(spacing: 0) {
                 HStack {
-                    Text("默认倍速")
-                        .font(.system(size: 14))
-                        .foregroundStyle(theme.text)
-                    Spacer()
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("默认播放速度")
+                            .font(.system(size: 14))
+                            .foregroundStyle(theme.text)
+                        Text("每次打开播放器都用这个速度；播放页里临时调倍速不会改动它")
+                            .font(.system(size: 11))
+                            .foregroundStyle(theme.textTertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 8)
                     Picker("", selection: $rate) {
                         ForEach(rates, id: \.self) { value in
                             Text(rateText(value)).tag(value)
