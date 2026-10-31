@@ -17,7 +17,8 @@ struct DocumentPickerSheet: UIViewControllerRepresentable {
     var contentTypes: [UTType]
     var allowsMultiple: Bool = true
     var onPick: ([URL]) -> Void
-    var onCancel: () -> Void
+    /// failed 为 true 表示选择器压根没能弹出来，不是用户主动取消
+    var onCancel: (_ failed: Bool) -> Void
 
     func makeUIViewController(context: Context) -> DocumentPickerHost {
         let host = DocumentPickerHost()
@@ -35,9 +36,10 @@ final class DocumentPickerHost: UIViewController, UIDocumentPickerDelegate {
     var contentTypes: [UTType] = [.data]
     var allowsMultiple = true
     var onPick: (([URL]) -> Void)?
-    var onCancel: (() -> Void)?
+    var onCancel: ((Bool) -> Void)?
 
     private var didOpen = false
+    private var picked = false
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -65,14 +67,18 @@ final class DocumentPickerHost: UIViewController, UIDocumentPickerDelegate {
         // 兜底：如果 1 秒后 picker 没起来（系统拒绝、宿主已在转场），
         // 主动结束这次选择，让外层给个明确提示，而不是静默卡住
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-            guard let self else { return }
+            guard let self, !self.picked else { return }
             guard self.presentedViewController == nil
                 || !(self.presentedViewController is UIDocumentPickerViewController) else { return }
-            self.onCancel?()
+            let handler = self.onCancel
+            self.onPick = nil
+            self.onCancel = nil
+            handler?(true)
         }
     }
 
     func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+        picked = true
         let handler = onPick
         onPick = nil
         onCancel = nil
@@ -80,9 +86,10 @@ final class DocumentPickerHost: UIViewController, UIDocumentPickerDelegate {
     }
 
     func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+        picked = true
         let handler = onCancel
         onPick = nil
         onCancel = nil
-        handler?()
+        handler?(false)
     }
 }

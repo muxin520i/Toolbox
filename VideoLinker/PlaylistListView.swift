@@ -317,8 +317,8 @@ struct PlaylistListView: View {
     /// 走的是 PlaylistStore 里的一次性补登记，补过的路径不会反复塞回来
     private func repairDownloadArchive() {
         let orphans = DownloadManager.shared.items.compactMap { item -> (path: String, title: String)? in
-            guard let path = item.localPath, !path.isEmpty,
-                  FileManager.default.fileExists(atPath: path) else { return nil }
+            let path = item.localPath
+            guard !path.isEmpty, FileManager.default.fileExists(atPath: path) else { return nil }
             return (path, (item.fileName as NSString).deletingPathExtension)
         }
         guard PlaylistStore.reconcileDownloads(orphans) > 0 else { return }

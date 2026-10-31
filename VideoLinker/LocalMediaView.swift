@@ -80,9 +80,11 @@ struct LocalMediaView: View {
                     showPicker = false
                     handlePicked(urls)
                 },
-                onCancel: {
+                onCancel: { failed in
                     showPicker = false
-                    showToast("没选文件，或系统选择器没能打开")
+                    if failed {
+                        showToast("系统选择器没能打开，试试底部「去「文件」App」")
+                    }
                 }
             )
             .presentationDetents([.height(1)])
@@ -359,8 +361,8 @@ struct LocalMediaView: View {
             // 老版本有段时间下载完成没登记进列表，这些文件在界面上会显示成
             // 「已在列表」，用户点不到「+」，也就永远加不进去，只能这样兜一次
             let orphans = downloads.items.compactMap { item -> (path: String, title: String)? in
-                guard let path = item.localPath, !path.isEmpty,
-                      FileManager.default.fileExists(atPath: path) else { return nil }
+                let path = item.localPath
+                guard !path.isEmpty, FileManager.default.fileExists(atPath: path) else { return nil }
                 return (path, (item.fileName as NSString).deletingPathExtension)
             }
             let repaired = PlaylistStore.reconcileDownloads(orphans)
