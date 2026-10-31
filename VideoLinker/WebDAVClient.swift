@@ -6,7 +6,7 @@ import Security
 // WebDAV 密码不适合放 UserDefaults（明文可读），走 Keychain。
 
 enum Keychain {
-    static func set(_ value: String, for key: String) {
+    static func set(_ value: String, forKey key: String) {
         let data = Data(value.utf8)
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
