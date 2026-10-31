@@ -512,24 +512,32 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
         )
 
         Task.detached(priority: .utility) {
+            // 结果用不可变值带回来，别把 var 捕获进并发闭包
+            let outcome: Result<(url: URL, remuxFailed: Bool), Error>
             do {
-                try Self.writeParts(dir: dir, job: job, to: target)
+                try DownloadManager.writeParts(dir: dir, job: job, to: target)
 
                 // 拼出来的是裸流，换成 MP4 播放器才认
-                var finalURL = target
-                var mergeFailed = false
+                var output = target
+                var remuxFailed = false
                 do {
-                    finalURL = try await MediaRemuxer.remuxIfNeeded(target)
+                    output = try await MediaRemuxer.remuxIfNeeded(target)
                 } catch {
-                    mergeFailed = true
+                    remuxFailed = true
                 }
+                outcome = .success((output, remuxFailed))
+            } catch {
+                outcome = .failure(error)
+            }
 
-                await MainActor.run {
-                    self.hlsAssembling.remove(item.id)
-                    item.note = mergeFailed ? "已保存为 .ts，播放器可能不支持" : ""
-                    item.fileName = finalURL.lastPathComponent
-                    item.localPath = finalURL.path
-                    item.destURL = finalURL
+            await MainActor.run {
+                self.hlsAssembling.remove(item.id)
+                switch outcome {
+                case .success(let value):
+                    item.note = value.remuxFailed ? "已保存为 .ts，播放器可能不支持" : ""
+                    item.fileName = value.url.lastPathComponent
+                    item.localPath = value.url.path
+                    item.destURL = value.url
                     item.progress = 1
                     item.state = .finished
                     item.speed = 0
@@ -538,10 +546,7 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
                     self.save()
                     self.archive(item)
                     self.pump()
-                }
-            } catch {
-                await MainActor.run {
-                    self.hlsAssembling.remove(item.id)
+                case .failure:
                     self.fail(item, "合并失败，点重试会重新合一次")
                 }
             }
