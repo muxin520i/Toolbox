@@ -458,7 +458,6 @@ struct BrowserSettingsView: View {
     @AppStorage(SettingsKey.homePage) private var homePage = ""
     @AppStorage(SettingsKey.searchEngine) private var engineRaw = SearchEngine.baidu.rawValue
     @AppStorage(SettingsKey.customSearch) private var customSearch = ""
-    @AppStorage(SettingsKey.nightMode) private var night = false
     @AppStorage(SettingsKey.noImage) private var noImage = false
     @AppStorage(SettingsKey.uaMode) private var uaMode = UAMode.mobile.rawValue
     @AppStorage(SettingsKey.customUA) private var customUA = ""
@@ -485,7 +484,6 @@ struct BrowserSettingsView: View {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 22) {
                     section("常规") {
-                        toggle("夜间模式", "moon.fill", Color(red: 0.36, green: 0.32, blue: 0.86), isOn: $night)
                         toggle("无图模式", "photo", Color(red: 0.96, green: 0.55, blue: 0.18), isOn: $noImage)
                         toggle("广告拦截", "shield.lefthalf.filled", Color(red: 0.20, green: 0.65, blue: 0.42), isOn: $adBlock)
                     }
@@ -632,9 +630,6 @@ struct BrowserSettingsView: View {
             .onAppear {
                 // 进来先按当前存储值刷一遍，避免开关是「开着」但页面从没应用过
                 NotificationCenter.default.post(name: .browserAppearanceChanged, object: nil)
-            }
-            .onChange(of: night) { value in
-                notifyAppearance(value ? "夜间模式已开启" : "夜间模式已关闭")
             }
             .onChange(of: noImage) { value in
                 notifyAppearance(value ? "无图模式已开启" : "无图模式已关闭")

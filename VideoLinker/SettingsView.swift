@@ -8,7 +8,12 @@ struct SettingsView: View {
     @AppStorage(SettingsKey.rate) private var rate = 1.0
     @AppStorage(SettingsKey.autoResume) private var autoResume = true
     @AppStorage(SettingsKey.gestures) private var gestures = true
+    @AppStorage(PlaylistStore.downloadTargetKey) private var downloadTarget = PlaylistStore.autoTarget
 
+    @State private var playlists: [Playlist] = []
+    @State private var builtinDownloadID: UUID? = PlaylistStore.existingDownloadListID()
+    @State private var showNewList = false
+    @State private var newListName = ""
     @State private var confirmClearResume = false
     @State private var confirmClearHistory = false
     @State private var toast: String?
@@ -24,6 +29,7 @@ struct SettingsView: View {
                     VStack(spacing: 16) {
                         themeCard
                         playbackCard
+                        downloadCard
                         dataCard
                         aboutCard
                     }
@@ -64,6 +70,33 @@ struct SettingsView: View {
                 showToast("历史记录已清空")
             }
             Button("取消", role: .cancel) {}
+        }
+        .onAppear(perform: reloadDownloadTargets)
+        .alert("新建播放列表", isPresented: $showNewList) {
+            TextField("列表名称", text: $newListName)
+            Button("取消", role: .cancel) { newListName = "" }
+            Button("创建") {
+                let name = newListName
+                newListName = ""
+                if let list = PlaylistStore.createList(named: name) {
+                    playlists = PlaylistStore.load()
+                    downloadTarget = list.id.uuidString
+                    showToast("已新建「\(list.name)」，之后下载都放这里")
+                }
+            }
+        } message: {
+            Text("新建后会自动设为下载保存位置。")
+        }
+    }
+
+    private func reloadDownloadTargets() {
+        // 保证内置「下载」列表存在，同时把已删除的目标回落到默认
+        _ = PlaylistStore.downloadListID()
+        playlists = PlaylistStore.load()
+        builtinDownloadID = PlaylistStore.existingDownloadListID()
+        if downloadTarget != PlaylistStore.autoTarget,
+           !playlists.contains(where: { $0.id.uuidString == downloadTarget }) {
+            downloadTarget = PlaylistStore.autoTarget
         }
     }
 
@@ -133,8 +166,50 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: 数据
+    // MARK: 下载
 
+    private var downloadCard: some View {
+        card(title: "下载", icon: "arrow.down.circle.fill") {
+            VStack(spacing: 0) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("下载保存到")
+                            .font(.system(size: 14))
+                            .foregroundStyle(theme.text)
+                        Text("下好的视频自动加入这个列表")
+                            .font(.system(size: 11))
+                            .foregroundStyle(theme.textTertiary)
+                    }
+
+                    Spacer(minLength: 8)
+
+                    Picker("", selection: $downloadTarget) {
+                        Text("下载（默认）")
+                            .tag(PlaylistStore.autoTarget)
+                        ForEach(playlists.filter { $0.id != builtinDownloadID }) { playlist in
+                            Text(playlist.name)
+                                .tag(playlist.id.uuidString)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .tint(theme.accent)
+                }
+                .padding(.vertical, 6)
+
+                Divider().overlay(theme.cardStroke)
+
+                Button {
+                    newListName = ""
+                    showNewList = true
+                } label: {
+                    actionRow("新建列表并保存到", symbol: "folder.badge.plus")
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    // MARK: 数据
     private var dataCard: some View {
         card(title: "数据", icon: "internaldrive.fill") {
             VStack(spacing: 0) {
@@ -180,7 +255,7 @@ struct SettingsView: View {
                         .font(.system(size: 13))
                         .foregroundStyle(theme.textSecondary)
                 }
-                Text("支持 MP4 / MOV / M4V 直链与 HLS（.m3u8）流。网页链接不是直链，需要在「嗅探」里抓取真实地址。\n浏览器相关的 UA、广告拦截、夜间模式等都挪到嗅探页的「菜单 → 浏览器设置」里了。")
+                Text("支持 MP4 / MOV / M4V 直链与 HLS（.m3u8）流。网页链接不是直链，需要在「嗅探」里抓取真实地址。\n浏览器相关的 UA、广告拦截等在嗅探页的「菜单 → 设置」里；网页夜间效果跟随这里选的外观切换。")
                     .font(.system(size: 12))
                     .foregroundStyle(theme.textTertiary)
                     .lineSpacing(3)

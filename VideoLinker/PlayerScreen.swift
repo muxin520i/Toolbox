@@ -623,6 +623,11 @@ struct PlayerScreen: View {
     private func downloadCurrent() {
         guard let item = currentItem, !item.url.isEmpty else { return }
 
+        if item.url.lowercased().hasPrefix("file://") {
+            toast("这是本机文件，已经保存在「下载」列表里了")
+            return
+        }
+
         switch DownloadManager.shared.start(from: item.url, title: titleText) {
         case .started(let record):
             toast("已加入下载：\(record.fileName)")

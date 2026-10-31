@@ -104,6 +104,7 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate {
             item.progress = 1
             item.state = .finished
             self.save()
+            self.archive(item)
         }
     }
 
@@ -152,6 +153,7 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate {
         let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let url = URL(string: trimmed) else { return .failed("链接格式不对") }
         guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
+            if url.isFileURL { return .failed("这是本机已有的文件，已经在「下载」列表里了") }
             return .failed("只支持 http/https 链接")
         }
 
@@ -240,6 +242,7 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate {
                             item.progress = 1
                             item.state = .finished
                             self.save()
+                            self.archive(item)
                         }
                     }
                     return
@@ -247,6 +250,7 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate {
 
                 item.state = .finished
                 self.save()
+                self.archive(item)
             }
         }
 
@@ -322,6 +326,7 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate {
                     }
                     self.jobs.removeValue(forKey: item.id)
                     self.save()
+                    self.archive(item)
                 }
             } catch {
                 await MainActor.run {
@@ -368,6 +373,22 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate {
     }
 
     // MARK: 增删
+
+    /// 下载完成 → 自动登记进播放列表（默认「下载」列表，可在设置里改目标）
+    private func archive(_ item: DownloadItem) {
+        let path = item.localPath
+        guard !path.isEmpty else { return }
+        let ext = (path as NSString).pathExtension.lowercased()
+        guard Self.videoExtensions.contains(ext) else { return }
+        let title = (item.fileName as NSString).deletingPathExtension
+        PlaylistStore.attachDownload(path: path, title: title)
+    }
+
+    /// 只有这些后缀才当成视频放进播放列表，网页里的安装包之类不进
+    private static let videoExtensions: Set<String> = [
+        "mp4", "m4v", "mov", "ts", "mkv", "webm", "flv", "avi", "wmv",
+        "rmvb", "m2ts", "mpg", "mpeg", "ogv", "3gp", "mp3", "m4a", "aac", "wav"
+    ]
 
     /// 文件被重封装后更新记录，避免列表里指向已删除的 .ts
     func replacePath(of item: DownloadItem, with url: URL) {

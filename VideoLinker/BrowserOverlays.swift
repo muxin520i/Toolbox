@@ -308,7 +308,7 @@ struct FloatingSniffButton: View {
     @State private var dragging = false
     @State private var suppressTap = false
 
-    private let diameter: CGFloat = 56
+    private let diameter: CGFloat = 50
 
     var body: some View {
         GeometryReader { geo in
@@ -376,19 +376,19 @@ struct FloatingSniffButton: View {
                 )
 
             Image(systemName: "dot.radiowaves.left.and.right")
-                .font(.system(size: 22, weight: .semibold))
+                .font(.system(size: 19, weight: .semibold))
                 .foregroundStyle(.white)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             if count > 0 {
                 Text("\(min(count, 99))")
-                    .font(.system(size: 10, weight: .bold))
+                    .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(.white)
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 2)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 1.5)
                     .background(Capsule().fill(Color(red: 0.13, green: 0.13, blue: 0.16)))
                     .overlay(Capsule().strokeBorder(Color.white.opacity(0.5), lineWidth: 1))
-                    .offset(x: 3, y: -3)
+                    .offset(x: 2, y: -2)
             }
         }
         .frame(width: diameter, height: diameter)
@@ -409,6 +409,7 @@ struct SniffResultsPanel: View {
     var onAddToPlaylist: (SniffedVideo) -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @State private var hint: String?
 
     var body: some View {
         NavigationStack {
@@ -432,37 +433,32 @@ struct SniffResultsPanel: View {
                     List {
                         Section {
                             ForEach(tab.found) { video in
-                                Button {
-                                    onPlay(video)
-                                } label: {
-                                    row(video)
-                                }
-                                .buttonStyle(.plain)
-                                .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                                    Button {
-                                        UIPasteboard.general.string = video.url
-                                    } label: {
-                                        Label("复制", systemImage: "doc.on.doc")
-                                    }
-                                    .tint(.gray)
+                                row(video)
+                                    .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                                        Button {
+                                            UIPasteboard.general.string = video.url
+                                        } label: {
+                                            Label("复制", systemImage: "doc.on.doc")
+                                        }
+                                        .tint(.gray)
 
-                                    Button {
-                                        onAddToPlaylist(video)
-                                    } label: {
-                                        Label("加入列表", systemImage: "text.badge.plus")
+                                        Button {
+                                            onAddToPlaylist(video)
+                                        } label: {
+                                            Label("加入列表", systemImage: "text.badge.plus")
+                                        }
+                                        .tint(.blue)
                                     }
-                                    .tint(.blue)
-                                }
-                                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                    Button(role: .destructive) {
-                                        tab.found.removeAll { $0.url == video.url }
-                                    } label: {
-                                        Label("移除", systemImage: "trash")
+                                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                        Button(role: .destructive) {
+                                            tab.found.removeAll { $0.url == video.url }
+                                        } label: {
+                                            Label("移除", systemImage: "trash")
+                                        }
                                     }
-                                }
                             }
                         } header: {
-                            Text("共 \(tab.found.count) 个，点一下直接播放")
+                            Text("共 \(tab.found.count) 个，点一下播放，右下角可下载")
                         }
                     }
                     .listStyle(.plain)
@@ -481,10 +477,43 @@ struct SniffResultsPanel: View {
             }
         }
         .presentationDetents([.medium, .large])
+        .overlay(alignment: .bottom) {
+            if let hint = hint {
+                Text(hint)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 9)
+                    .background(Capsule().fill(Color.black.opacity(0.8)))
+                    .padding(.bottom, 22)
+                    .transition(.opacity)
+            }
+        }
+    }
+
+    // MARK: 下载
+
+    /// 和播放页共用同一个 DownloadManager：进度、记录、完成后自动进「下载」列表都是同一份
+    private func download(_ video: SniffedVideo) {
+        switch DownloadManager.shared.start(from: video.url, title: video.displayName) {
+        case .started(let item):
+            showHint("已开始下载：\(item.fileName)")
+        case .failed(let reason):
+            showHint(reason)
+        }
+    }
+
+    private func showHint(_ text: String) {
+        withAnimation(.easeOut(duration: 0.15)) { hint = text }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
+            if hint == text {
+                withAnimation(.easeIn(duration: 0.2)) { hint = nil }
+            }
+        }
     }
 
     private func row(_ video: SniffedVideo) -> some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
             Text(video.kind)
                 .font(.system(size: 9, weight: .bold))
                 .foregroundStyle(.white)
@@ -505,12 +534,31 @@ struct SniffResultsPanel: View {
 
             Spacer(minLength: 6)
 
-            Image(systemName: "play.circle.fill")
-                .font(.system(size: 20))
-                .foregroundStyle(Color(red: 1.0, green: 0.5, blue: 0.4))
+            Button {
+                download(video)
+            } label: {
+                Image(systemName: "arrow.down.circle")
+                    .font(.system(size: 19, weight: .regular))
+                    .foregroundStyle(Color(red: 1.0, green: 0.5, blue: 0.4))
+                    .frame(width: 34, height: 34)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                onPlay(video)
+            } label: {
+                Image(systemName: "play.circle.fill")
+                    .font(.system(size: 20))
+                    .foregroundStyle(Color(red: 1.0, green: 0.5, blue: 0.4))
+                    .frame(width: 34, height: 34)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
         }
         .padding(.vertical, 3)
         .contentShape(Rectangle())
+        .onTapGesture { onPlay(video) }
     }
 }
 

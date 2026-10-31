@@ -102,10 +102,12 @@ struct BrowserView: View {
     @AppStorage(SettingsKey.searchEngine) private var engineRaw = SearchEngine.baidu.rawValue
     @AppStorage(SettingsKey.customSearch) private var customSearch = ""
     @AppStorage(SettingsKey.homePage) private var homePage = ""
-    @AppStorage(SettingsKey.nightMode) private var night = false
     @AppStorage(SettingsKey.noImage) private var noImage = false
 
     @Environment(\.colorScheme) private var scheme
+
+    /// 网页夜间效果直接跟随 App 外观（设置 → 外观），不再单独放开关
+    private var night: Bool { scheme == .dark }
 
     @State private var address = ""
     @State private var editing = false
@@ -215,7 +217,7 @@ struct BrowserView: View {
         .onChange(of: adBlock) { _ in syncStore() }
         .onChange(of: engineRaw) { _ in syncStore() }
         .onChange(of: customSearch) { _ in syncStore() }
-        .onChange(of: night) { _ in syncStore() }
+        .onChange(of: scheme) { _ in syncStore() }
         .onChange(of: noImage) { _ in syncStore() }
         .onChange(of: tab?.id) { _ in
             editing = false
