@@ -87,6 +87,7 @@ enum HistoryStore {
         return items
     }
 
+    @discardableResult
     static func clear() -> [HistoryItem] {
         AppDB.write { db in
             try db.execute(sql: "DELETE FROM history")
