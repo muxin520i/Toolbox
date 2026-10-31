@@ -122,6 +122,12 @@ enum LocalMedia {
         var outcome = ImportOutcome()
 
         for source in urls {
+            // 列表里已经有同名文件了，别再复制一份出来
+            if existingPath(named: source.lastPathComponent) != nil {
+                outcome.skipped += 1
+                continue
+            }
+
             let result = await Task.detached(priority: .userInitiated) {
                 copyIntoLibrary(source)
             }.value
@@ -131,11 +137,17 @@ enum LocalMedia {
                 continue
             }
 
+            // 选择器是以 asCopy 弹的，系统会先复制一份到临时目录，这里用完清掉
+            cleanupTemporaryCopy(source, kept: dest)
+
             let already = PlaylistStore.load().contains { list in
                 list.items.contains { $0.localPath == dest.path }
             }
             if already {
                 outcome.skipped += 1
+                if dest.path != source.path {
+                    try? FileManager.default.removeItem(at: dest)
+                }
                 continue
             }
 
@@ -153,6 +165,30 @@ enum LocalMedia {
     private enum ImportFailure: Error {
         case unsupported
         case unreadable
+    }
+
+    /// 播放列表里已经有同名、且文件还在的条目，返回它的路径
+    private static func existingPath(named name: String) -> String? {
+        let paths = PlaylistStore.load().flatMap { $0.items.compactMap { $0.localPath } }
+        guard let path = paths.first(where: { ($0 as NSString).lastPathComponent == name }) else {
+            return nil
+        }
+        return FileManager.default.fileExists(atPath: path) ? path : nil
+    }
+
+    /// asCopy 选择器会在 tmp 或 Documents/Inbox 留一份副本，导入完删掉，别白占空间
+    private static func cleanupTemporaryCopy(_ source: URL, kept dest: URL) {
+        let sourcePath = source.standardizedFileURL.resolvingSymlinksInPath().path
+        guard sourcePath != dest.standardizedFileURL.resolvingSymlinksInPath().path else { return }
+
+        let tmpPath = FileManager.default.temporaryDirectory
+            .standardizedFileURL.resolvingSymlinksInPath().path
+        let inboxPath = root().appendingPathComponent("Inbox")
+            .standardizedFileURL.resolvingSymlinksInPath().path
+        guard sourcePath.hasPrefix(tmpPath + "/") || sourcePath.hasPrefix(inboxPath + "/") else {
+            return
+        }
+        try? FileManager.default.removeItem(at: source)
     }
 
     private static func copyIntoLibrary(_ source: URL) -> Result<URL, ImportFailure> {

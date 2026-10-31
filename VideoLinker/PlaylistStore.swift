@@ -60,6 +60,12 @@ struct Playlist: Codable, Identifiable, Hashable {
     var createdAt: Date = Date()
 }
 
+/// 播放列表有任何改动时广播，界面收到就重读。
+/// 从 sheet 里加完视频回来，总览页不会走 onAppear，没有这条通知就会一直显示旧数据
+extension Notification.Name {
+    static let playlistsDidChange = Notification.Name("video.playlistsDidChange")
+}
+
 /// 播放列表存储（SQLite + UserDefaults 双写）
 enum PlaylistStore {
     private static let key = "video.playlists.v1"
@@ -165,6 +171,10 @@ enum PlaylistStore {
         if let data = try? JSONEncoder().encode(limited) {
             UserDefaults.standard.set(data, forKey: key)
         }
+
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: .playlistsDidChange, object: nil)
+        }
     }
 
     private static func legacyLoad() -> [Playlist] {
@@ -222,8 +232,10 @@ enum PlaylistStore {
             return playlists
         }
         playlists[index].items.append(item)
+        // 满了从最前面丢：之前是 prefix(maxItems)，新加的在末尾会被直接截掉，
+        // 表现就是「点了加入，列表里却没有」
         if playlists[index].items.count > maxItems {
-            playlists[index].items = Array(playlists[index].items.prefix(maxItems))
+            playlists[index].items.removeFirst(playlists[index].items.count - maxItems)
         }
         save(playlists)
         return load()
@@ -355,7 +367,7 @@ enum PlaylistStore {
             existing.insert(item.url)
         }
         if playlists[t].items.count > maxItems {
-            playlists[t].items = Array(playlists[t].items.prefix(maxItems))
+            playlists[t].items.removeFirst(playlists[t].items.count - maxItems)
         }
         playlists[s].items.removeAll { itemIDs.contains($0.id) }
         save(playlists)
@@ -437,10 +449,85 @@ enum PlaylistStore {
     @discardableResult
     static func attachDownload(path: String, title: String) -> Playlist? {
         guard !path.isEmpty else { return nil }
-        let target = downloadTargetID()
-        let fileURL = URL(fileURLWithPath: path)
-        let item = PlaylistItem(url: fileURL.absoluteString, title: title, localPath: path)
-        let lists = add(item, to: target)
-        return lists.first { $0.id == target }
+        let item = PlaylistItem(
+            url: URL(fileURLWithPath: path).absoluteString,
+            title: title,
+            localPath: path
+        )
+
+        var target = downloadTargetID()
+        if !load().contains(where: { $0.id == target }) {
+            target = downloadListID()
+        }
+
+        var lists = add(item, to: target)
+        if let list = lists.first(where: { $0.id == target }),
+           list.items.contains(where: { $0.localPath == path }) {
+            return list
+        }
+
+        // 目标列表写不进去（刚好被删、库异常），再兜一次内置「下载」列表
+        let fallback = downloadListID()
+        guard fallback != target else { return nil }
+        lists = add(item, to: fallback)
+        return lists.first { $0.id == fallback }
+    }
+
+    /// 之前处理过的路径。补登记只做一次，用户之后手动删掉就不会被反复塞回来
+    private static let reconciledKey = "video.reconciledLocalPaths.v1"
+
+    /// 下载记录里有、任何播放列表里都没有的本地文件，补进内置「下载」列表。
+    ///
+    /// 老版本有一段时间下载完成后没写进列表，这些文件在「本机视频」里会显示成
+    /// 「已在列表」，用户点不到「+」，等于永远加不进去。这里按路径兜一次。
+    @discardableResult
+    static func reconcileDownloads(_ entries: [(path: String, title: String)]) -> Int {
+        guard !entries.isEmpty else { return 0 }
+
+        var handled = Set(UserDefaults.standard.stringArray(forKey: reconciledKey) ?? [])
+        let candidates = entries.filter { !handled.contains($0.path) }
+        guard !candidates.isEmpty else { return 0 }
+
+        // 先确认真的有待补的条目再动列表，否则可能平白新建出一个空的「下载」列表
+        let allLocalPaths = Set(load().flatMap { $0.items.compactMap { $0.localPath } })
+        let pending = candidates.filter { !allLocalPaths.contains($0.path) }
+        guard !pending.isEmpty else {
+            handled.formUnion(candidates.map { $0.path })
+            UserDefaults.standard.set(Array(handled), forKey: reconciledKey)
+            return 0
+        }
+
+        let target = downloadListID()
+
+        // downloadListID() 可能刚建过列表，要重新读一遍
+        var playlists = load()
+        guard let index = playlists.firstIndex(where: { $0.id == target }) else { return 0 }
+
+        var existing = Set(playlists[index].items.compactMap { $0.localPath })
+        var added = 0
+
+        for entry in pending {
+            handled.insert(entry.path)
+            guard !existing.contains(entry.path) else { continue }
+            playlists[index].items.append(
+                PlaylistItem(
+                    url: URL(fileURLWithPath: entry.path).absoluteString,
+                    title: entry.title,
+                    localPath: entry.path
+                )
+            )
+            existing.insert(entry.path)
+            added += 1
+        }
+
+        if playlists[index].items.count > maxItems {
+            playlists[index].items.removeFirst(playlists[index].items.count - maxItems)
+        }
+        if added > 0 {
+            save(playlists)
+        }
+        handled.formUnion(candidates.map { $0.path })
+        UserDefaults.standard.set(Array(handled), forKey: reconciledKey)
+        return added
     }
 }

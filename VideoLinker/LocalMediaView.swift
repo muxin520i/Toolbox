@@ -13,12 +13,15 @@ struct LocalMediaView: View {
     @ObservedObject private var downloads = DownloadManager.shared
 
     @State private var files: [LocalMediaFile] = []
+    /// 已经在某个播放列表里的文件路径。只认播放列表，不认下载记录——
+    /// 下载记录里有、列表里没有的那些，必须还能点「+」加进去，否则会卡成死结
     @State private var known: Set<String> = []
     @State private var scanning = true
     @State private var importing = false
     @State private var importNote: String?
     @State private var toast: String?
     @State private var request: PlayRequest?
+    @State private var showPicker = false
 
     private var freshFiles: [LocalMediaFile] {
         files.filter { !known.contains($0.path) }
@@ -69,6 +72,21 @@ struct LocalMediaView: View {
         .onAppear(perform: reload)
         .fullScreenCover(item: $request) { req in
             PlayerScreen(request: req)
+        }
+        .sheet(isPresented: $showPicker) {
+            DocumentPickerSheet(
+                contentTypes: [.movie, .video, .audio, .data],
+                onPick: { urls in
+                    showPicker = false
+                    handlePicked(urls)
+                },
+                onCancel: {
+                    showPicker = false
+                    showToast("没选文件，或系统选择器没能打开")
+                }
+            )
+            .presentationDetents([.height(1)])
+            .presentationDragIndicator(.hidden)
         }
         .overlay(alignment: .bottom) {
             if let toast {
@@ -296,28 +314,65 @@ struct LocalMediaView: View {
     }
 
     private var folderHint: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "info.circle")
-                .font(.system(size: 11))
-            Text("文件夹路径：「文件」App → 我的 iPhone → VideoLinker")
-                .font(.system(size: 11))
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "info.circle")
+                    .font(.system(size: 11))
+                Text("文件夹路径：「文件」App → 我的 iPhone → VideoLinker")
+                    .font(.system(size: 11))
+            }
+            .foregroundStyle(theme.textTertiary)
+
+            Button {
+                openFilesApp()
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "folder")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text("选择器打不开？直接去「文件」App 把视频拖进来")
+                        .font(.system(size: 11.5, weight: .medium))
+                }
+                .foregroundStyle(theme.accent)
+            }
+            .buttonStyle(.plain)
         }
-        .foregroundStyle(theme.textTertiary)
         .padding(.leading, 4)
+    }
+
+    private func openFilesApp() {
+        guard let url = URL(string: "shareddocuments://") else { return }
+        UIApplication.shared.open(url, options: [:]) { ok in
+            if !ok {
+                showToast("手动打开「文件」App → 我的 iPhone → VideoLinker")
+            }
+        }
     }
 
     // MARK: 动作
 
     private func reload() {
         scanning = true
-        Task {
+        Task { @MainActor in
             let list = await LocalMedia.scan()
-            let inDownloads = Set(downloads.items.compactMap { $0.localPath })
+
+            // 先把「下载记录里有、播放列表里却没有」的补回「下载」列表。
+            // 老版本有段时间下载完成没登记进列表，这些文件在界面上会显示成
+            // 「已在列表」，用户点不到「+」，也就永远加不进去，只能这样兜一次
+            let orphans = downloads.items.compactMap { item -> (path: String, title: String)? in
+                guard let path = item.localPath, !path.isEmpty,
+                      FileManager.default.fileExists(atPath: path) else { return nil }
+                return (path, (item.fileName as NSString).deletingPathExtension)
+            }
+            let repaired = PlaylistStore.reconcileDownloads(orphans)
+
+            // 只认播放列表：下载记录里有的、列表里没有的，还得能加
             let inLists = Set(PlaylistStore.load().flatMap { $0.items.compactMap { $0.localPath } })
-            await MainActor.run {
-                withAnimation(.easeInOut(duration: 0.18)) { files = list }
-                known = inDownloads.union(inLists)
-                scanning = false
+
+            withAnimation(.easeInOut(duration: 0.18)) { files = list }
+            known = inLists
+            scanning = false
+            if repaired > 0 {
+                showToast("已把 \(repaired) 个已下载的视频补回「下载」列表")
             }
         }
     }
@@ -389,12 +444,7 @@ struct LocalMediaView: View {
 
     private func presentImporter() {
         // ts / m2ts / flv 这些没有标准的 UTType，用 .data 兜住，导入时再按后缀过滤
-        DocumentPickerCoordinator.shared.present(
-            contentTypes: [.movie, .video, .audio, .data],
-            onPick: { urls in
-                handlePicked(urls)
-            }
-        )
+        showPicker = true
     }
 
     private func showToast(_ text: String) {

@@ -1,6 +1,7 @@
 import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
+import Combine
 
 // MARK: - 备份文件
 
@@ -250,6 +251,12 @@ struct PlaylistListView: View {
         .onAppear {
             playlists = PlaylistStore.load()
             downloadListID = PlaylistStore.existingDownloadListID()
+            // 下载记录里漏登记进列表的老条目，进这一页时顺手补回去
+            DispatchQueue.main.async { repairDownloadArchive() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .playlistsDidChange)) { _ in
+            playlists = PlaylistStore.load()
+            downloadListID = PlaylistStore.existingDownloadListID()
         }
         .onChange(of: editMode) { newValue in
             if newValue == .inactive { playlists = PlaylistStore.load() }
@@ -304,6 +311,19 @@ struct PlaylistListView: View {
             .multilineTextAlignment(.center)
             .frame(maxWidth: .infinity)
             .padding(.top, 18)
+    }
+
+    /// 下载记录里有、播放列表里没有的本地文件，补进内置「下载」列表。
+    /// 走的是 PlaylistStore 里的一次性补登记，补过的路径不会反复塞回来
+    private func repairDownloadArchive() {
+        let orphans = DownloadManager.shared.items.compactMap { item -> (path: String, title: String)? in
+            guard let path = item.localPath, !path.isEmpty,
+                  FileManager.default.fileExists(atPath: path) else { return nil }
+            return (path, (item.fileName as NSString).deletingPathExtension)
+        }
+        guard PlaylistStore.reconcileDownloads(orphans) > 0 else { return }
+        playlists = PlaylistStore.load()
+        downloadListID = PlaylistStore.existingDownloadListID()
     }
 
     private var emptyState: some View {
@@ -599,6 +619,9 @@ struct PlaylistDetailView: View {
             }
         }
         .onAppear { reload() }
+        .onReceive(NotificationCenter.default.publisher(for: .playlistsDidChange)) { _ in
+            reload()
+        }
         .onChange(of: editMode) { newValue in
             if newValue == .inactive { selection.removeAll() }
         }

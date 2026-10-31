@@ -2,33 +2,74 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 
-/// 用 UIKit 直接弹系统文件选择器。
+/// 系统文件选择器，挂在 SwiftUI 的 sheet 上。
 ///
-/// 不用 SwiftUI 的 `.fileImporter`：它挂在「sheet 里再开 picker」的场景下偶尔收不到回调，
-/// 表现就是选完文件点「打开」什么都没发生。自己拿 top view controller present，
-/// 回调稳定，取消事件也能拿到，选完还能立刻知道自己被点过了
-final class DocumentPickerCoordinator: NSObject, UIDocumentPickerDelegate {
-    static let shared = DocumentPickerCoordinator()
+/// 之前两版都栽在「谁去 present」这件事上：
+/// 第一版用 `.fileImporter`，视图本身就在 sheet 里，回调会丢；
+/// 第二版自己找 top view controller 去 present，仍然不稳。
+/// 这一版把呈现权交给 SwiftUI：sheet 里放一个空的宿主控制器，由它在 `viewDidAppear`
+/// 里弹出 picker，生命周期由 SwiftUI 管，delegate 也由宿主强持有。
+///
+/// 另外 `asCopy` 一律传 true：系统会先把文件（包括 iCloud 里还没落盘的）复制到
+/// App 的临时目录，拿到的 URL 立刻可读，不用再折腾安全作用域，也不会因为
+/// iCloud 占位符而复制失败。
+struct DocumentPickerSheet: UIViewControllerRepresentable {
+    var contentTypes: [UTType]
+    var allowsMultiple: Bool = true
+    var onPick: ([URL]) -> Void
+    var onCancel: () -> Void
 
-    private var onPick: (([URL]) -> Void)?
-    private var onCancel: (() -> Void)?
+    func makeUIViewController(context: Context) -> DocumentPickerHost {
+        let host = DocumentPickerHost()
+        host.contentTypes = contentTypes
+        host.allowsMultiple = allowsMultiple
+        host.onPick = onPick
+        host.onCancel = onCancel
+        return host
+    }
 
-    func present(
-        contentTypes: [UTType],
-        allowsMultiple: Bool = true,
-        onPick: @escaping ([URL]) -> Void,
-        onCancel: (() -> Void)? = nil
-    ) {
-        guard let root = Self.topViewController() else { return }
-        self.onPick = onPick
-        self.onCancel = onCancel
+    func updateUIViewController(_ uiViewController: DocumentPickerHost, context: Context) {}
+}
 
-        let picker = UIDocumentPickerViewController(forOpeningContentTypes: contentTypes, asCopy: false)
+final class DocumentPickerHost: UIViewController, UIDocumentPickerDelegate {
+    var contentTypes: [UTType] = [.data]
+    var allowsMultiple = true
+    var onPick: (([URL]) -> Void)?
+    var onCancel: (() -> Void)?
+
+    private var didOpen = false
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .clear
+        view.isUserInteractionEnabled = false
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        guard !didOpen else { return }
+        didOpen = true
+        open()
+    }
+
+    private func open() {
+        let picker = UIDocumentPickerViewController(
+            forOpeningContentTypes: contentTypes,
+            asCopy: true
+        )
         picker.allowsMultipleSelection = allowsMultiple
         picker.shouldShowFileExtensions = true
         picker.delegate = self
+        present(picker, animated: true)
 
-        root.present(picker, animated: true)
+        // 兜底：如果 1 秒后 picker 没起来（系统拒绝、宿主已在转场），
+        // 主动结束这次选择，让外层给个明确提示，而不是静默卡住
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            guard let self else { return }
+            guard self.presentedViewController == nil
+                || !(self.presentedViewController is UIDocumentPickerViewController) else { return }
+            self.onCancel?()
+        }
     }
 
     func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
@@ -43,15 +84,5 @@ final class DocumentPickerCoordinator: NSObject, UIDocumentPickerDelegate {
         onPick = nil
         onCancel = nil
         handler?()
-    }
-
-    private static func topViewController() -> UIViewController? {
-        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-        let scene = scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
-        guard var top = scene?.keyWindow?.rootViewController else { return nil }
-        while let presented = top.presentedViewController, !presented.isBeingDismissed {
-            top = presented
-        }
-        return top
     }
 }
