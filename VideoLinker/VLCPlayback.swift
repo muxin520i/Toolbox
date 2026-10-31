@@ -119,7 +119,7 @@ final class VLCPlayback: NSObject, VLCMediaPlayerDelegate {
     func mediaPlayerTimeChanged(_ aNotification: Notification) {
         guard let player = player else { return }
         let current = Double(player.time.intValue) / 1000.0
-        let total = Double(player.media.length.intValue) / 1000.0
+        let total = Double(player.media?.length.intValue ?? 0) / 1000.0
         onTime?(max(0, current), max(0, total))
     }
 }
