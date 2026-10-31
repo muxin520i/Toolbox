@@ -106,9 +106,32 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
         let stored = UserDefaults.standard.integer(forKey: SettingsKey.downloadConcurrency)
         concurrency = stored > 0 ? min(stored, 5) : 3
         load()
-        // 上次没下完的继续排队
+        // 先把上次还活着的后台任务认领回来，再按并发把排队的放出去
         DispatchQueue.main.async { [weak self] in
-            self?.pump()
+            self?.prepareSession()
+        }
+    }
+
+    /// 系统在 App 被回收后仍可能继续跑后台任务，这里按地址把任务认回对应记录，
+    /// 避免重复下载同一份文件
+    private func prepareSession() {
+        let session = backgroundSession
+        session.getAllTasks { tasks in
+            DispatchQueue.main.async {
+                for task in tasks {
+                    guard let url = task.originalRequest?.url?.absoluteString else { continue }
+                    guard let item = self.items.first(where: {
+                        $0.source == url && !$0.isHLS && $0.state != .finished
+                    }) else { continue }
+
+                    item.taskID = task.taskIdentifier
+                    item.state = .running
+                    self.itemForTask[task.taskIdentifier] = item
+                }
+
+                self.refreshRunning()
+                self.pump()
+            }
         }
     }
 
@@ -138,7 +161,7 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
         pendingCompletion = completion
         // 触发一次会话初始化，系统才会继续投递回调
         _ = backgroundSession
-        pump()
+        prepareSession()
     }
 
     // MARK: 队列
