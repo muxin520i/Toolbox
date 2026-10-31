@@ -362,6 +362,28 @@ enum PlaylistStore {
         return moving.count
     }
 
+    /// 文件被删掉后清理列表里的死条目（本地条目且文件已不存在）
+    @discardableResult
+    static func pruneMissingLocalItems() -> Int {
+        var playlists = load()
+        var removed = 0
+        for index in playlists.indices {
+            let before = playlists[index].items.count
+            playlists[index].items.removeAll { $0.isLocal && !$0.localFileExists }
+            removed += before - playlists[index].items.count
+        }
+        guard removed > 0 else { return 0 }
+        save(playlists)
+        return removed
+    }
+
+    /// 找出某个本地文件属于哪些列表，存储管理里做提示用
+    static func playlists(containingLocalPath path: String) -> [Playlist] {
+        load().filter { list in
+            list.items.contains { $0.localPath == path }
+        }
+    }
+
     /// 找出某个地址被哪些列表包含，用于界面上的状态提示
     static func playlists(containing url: String) -> [Playlist] {
         load().filter { playlist in

@@ -727,10 +727,11 @@ struct PlaylistDetailView: View {
                                    height: 34,
                                    corner: 6)
                 } else {
-                    Text(String(format: "%02d", index + 1))
-                        .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(theme.textTertiary)
-                        .frame(width: 26, alignment: .leading)
+                    OnlineCover(url: item.url,
+                                placeholder: String(format: "%02d", index + 1),
+                                width: 56,
+                                height: 34,
+                                corner: 6)
                 }
 
                 VStack(alignment: .leading, spacing: 3) {
@@ -752,10 +753,11 @@ struct PlaylistDetailView: View {
                         .foregroundStyle(item.localFileExists ? theme.accent.opacity(0.85) : Color.orange)
                 }
 
-                if ResumeStore.progress(for: item.url) != nil {
-                    Image(systemName: "bookmark.fill")
-                        .font(.system(size: 10))
-                        .foregroundStyle(theme.accent.opacity(0.8))
+                if let watched = ResumeStore.progress(for: item.url), watched > 0.02 {
+                    Text("\(Int((watched * 100).rounded()))%")
+                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                        .foregroundStyle(watched >= 0.95 ? theme.textTertiary : theme.accent)
+                        .frame(width: 30, alignment: .trailing)
                 }
 
                 if editMode == .inactive {
@@ -773,6 +775,22 @@ struct PlaylistDetailView: View {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .strokeBorder(theme.cardStroke, lineWidth: 1)
             )
+            .overlay(alignment: .bottom) {
+                if let watched = ResumeStore.progress(for: item.url), watched > 0.02 {
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(theme.accent.opacity(0.16))
+                            Capsule()
+                                .fill(watched >= 0.95 ? theme.textTertiary : theme.accent)
+                                .frame(width: max(3, geo.size.width * min(1, watched)))
+                        }
+                    }
+                    .frame(height: 3)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 3)
+                    .allowsHitTesting(false)
+                }
+            }
         }
         .buttonStyle(.plain)
         .contextMenu {

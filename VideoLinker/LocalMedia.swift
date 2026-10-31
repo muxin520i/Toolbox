@@ -46,10 +46,12 @@ enum LocalMedia {
 
     // MARK: 扫描
 
-    static func scan(limit: Int = 300) async -> [LocalMediaFile] {
+    static func scan(limit: Int = 300, probeDuration: Bool = true) async -> [LocalMediaFile] {
         let found = await Task.detached(priority: .userInitiated) {
             walk(limit: limit)
         }.value
+
+        guard probeDuration else { return found }
 
         // 时长一条条读太慢，只补前 80 条（列表按修改时间倒序，靠前的就是最可能看的）
         var result = found
@@ -103,20 +105,37 @@ enum LocalMedia {
 
     // MARK: 导入
 
+    struct ImportOutcome {
+        var added = 0
+        /// 已经在播放列表里，没有重复加
+        var skipped = 0
+        /// 读不出来 / 不是视频 / iCloud 没下下来
+        var failed = 0
+
+        var isEmpty: Bool { added == 0 && skipped == 0 && failed == 0 }
+    }
+
     /// 从「文件」里选的视频复制进 App 的 Downloads 目录，
     /// 顺手登记进「下载」列表和播放列表，之后在哪儿都能看到
     @MainActor
-    static func importFiles(_ urls: [URL]) async -> (added: Int, failed: Int) {
-        var added = 0
-        var failed = 0
+    static func importFiles(_ urls: [URL]) async -> ImportOutcome {
+        var outcome = ImportOutcome()
 
         for source in urls {
-            let copied = await Task.detached(priority: .userInitiated) {
+            let result = await Task.detached(priority: .userInitiated) {
                 copyIntoLibrary(source)
             }.value
 
-            guard let dest = copied else {
-                failed += 1
+            guard case .success(let dest) = result else {
+                outcome.failed += 1
+                continue
+            }
+
+            let already = PlaylistStore.load().contains { list in
+                list.items.contains { $0.localPath == dest.path }
+            }
+            if already {
+                outcome.skipped += 1
                 continue
             }
 
@@ -125,36 +144,79 @@ enum LocalMedia {
                 path: dest.path,
                 title: (dest.lastPathComponent as NSString).deletingPathExtension
             )
-            added += 1
+            outcome.added += 1
         }
 
-        return (added, failed)
+        return outcome
     }
 
-    private static func copyIntoLibrary(_ source: URL) -> URL? {
+    private enum ImportFailure: Error {
+        case unsupported
+        case unreadable
+    }
+
+    private static func copyIntoLibrary(_ source: URL) -> Result<URL, ImportFailure> {
         let ext = source.pathExtension.lowercased()
-        guard !ext.isEmpty, extensions.contains(ext) else { return nil }
+        guard !ext.isEmpty, extensions.contains(ext) else { return .failure(.unsupported) }
 
         let scoped = source.startAccessingSecurityScopedResource()
         defer { if scoped { source.stopAccessingSecurityScopedResource() } }
 
         let dir = DownloadManager.directory()
+        DownloadManager.ensureDirectory(dir)
+
         // 已经在 Downloads 里了，不用再动
-        if source.standardizedFileURL.path.hasPrefix(dir.standardizedFileURL.path + "/") {
-            return FileManager.default.fileExists(atPath: source.path) ? source : nil
+        let sourcePath = source.standardizedFileURL.resolvingSymlinksInPath().path
+        let dirPath = dir.standardizedFileURL.resolvingSymlinksInPath().path
+        if sourcePath.hasPrefix(dirPath + "/") {
+            guard FileManager.default.fileExists(atPath: sourcePath) else { return .failure(.unreadable) }
+            return .success(URL(fileURLWithPath: sourcePath))
         }
 
+        // iCloud 里还没下载到本机的，先等它下下来，否则 copyItem 直接失败
+        waitForDownload(source)
+
         let dest = DownloadManager.unique(in: dir, name: source.lastPathComponent)
-        do {
-            // 本来就在 App 的文档目录里（用户直接拖进文件夹的）：挪过去，别留两份
-            if source.standardizedFileURL.path.hasPrefix(root().standardizedFileURL.path + "/") {
-                try FileManager.default.moveItem(at: source, to: dest)
-            } else {
-                try FileManager.default.copyItem(at: source, to: dest)
+        var copied: URL?
+        var coordinationError: NSError?
+
+        NSFileCoordinator().coordinate(readingItemAt: source, options: [], error: &coordinationError) { readURL in
+            do {
+                let readPath = readURL.standardizedFileURL.resolvingSymlinksInPath().path
+                let rootPath = root().standardizedFileURL.resolvingSymlinksInPath().path
+                // 本来就在 App 的文档目录里（用户直接拖进文件夹的）：挪过去，别留两份
+                if readPath.hasPrefix(rootPath + "/") {
+                    try FileManager.default.moveItem(at: readURL, to: dest)
+                } else {
+                    try FileManager.default.copyItem(at: readURL, to: dest)
+                }
+                copied = dest
+            } catch {
+                copied = nil
             }
-            return dest
-        } catch {
-            return nil
+        }
+
+        if let copied = copied { return .success(copied) }
+        return .failure(.unreadable)
+    }
+
+    /// iCloud Drive 上的文件常常只有占位，等它真正落盘（最多 45 秒）
+    private static func waitForDownload(_ url: URL) {
+        guard let values = try? url.resourceValues(forKeys: [.isUbiquitousItemKey]),
+              values.isUbiquitousItem == true else { return }
+
+        func status() -> URLUbiquitousItemDownloadingStatus? {
+            try? url.resourceValues(forKeys: [.ubiquitousItemDownloadingStatusKey])
+                .ubiquitousItemDownloadingStatus
+        }
+
+        if status() == .current { return }
+        try? FileManager.default.startDownloadingUbiquitousItem(at: url)
+
+        let deadline = Date().addingTimeInterval(45)
+        while Date() < deadline {
+            if status() == .current { return }
+            Thread.sleep(forTimeInterval: 0.25)
         }
     }
 }

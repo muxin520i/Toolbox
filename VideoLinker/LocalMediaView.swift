@@ -16,7 +16,7 @@ struct LocalMediaView: View {
     @State private var known: Set<String> = []
     @State private var scanning = true
     @State private var importing = false
-    @State private var showImporter = false
+    @State private var importNote: String?
     @State private var toast: String?
     @State private var request: PlayRequest?
 
@@ -51,7 +51,7 @@ struct LocalMediaView: View {
                         .disabled(scanning || importing)
 
                         Button {
-                            showImporter = true
+                            presentImporter()
                         } label: {
                             Image(systemName: "square.and.arrow.down")
                                 .font(.system(size: 16, weight: .semibold))
@@ -67,13 +67,6 @@ struct LocalMediaView: View {
             }
         }
         .onAppear(perform: reload)
-        .fileImporter(
-            isPresented: $showImporter,
-            allowedContentTypes: [.movie, .video, .audio],
-            allowsMultipleSelection: true
-        ) { result in
-            handleImport(result)
-        }
         .fullScreenCover(item: $request) { req in
             PlayerScreen(request: req)
         }
@@ -88,6 +81,25 @@ struct LocalMediaView: View {
                     .background(Capsule().fill(Color.black.opacity(0.82)))
                     .padding(.bottom, freshFiles.isEmpty ? 26 : 78)
                     .transition(.opacity)
+            }
+        }
+        .overlay {
+            if importing {
+                VStack(spacing: 10) {
+                    ProgressView()
+                        .tint(.white)
+                    Text(importNote ?? "正在导入…")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.white)
+                        .multilineTextAlignment(.center)
+                }
+                .padding(.horizontal, 22)
+                .padding(.vertical, 18)
+                .background(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(Color.black.opacity(0.8))
+                )
+                .transition(.opacity)
             }
         }
     }
@@ -254,7 +266,7 @@ struct LocalMediaView: View {
             .padding(.top, 2)
 
             Button {
-                showImporter = true
+                presentImporter()
             } label: {
                 Text("从「文件」导入")
                     .font(.system(size: 14, weight: .semibold))
@@ -340,26 +352,49 @@ struct LocalMediaView: View {
         showToast("已加入 \(targets.count) 个视频")
     }
 
-    private func handleImport(_ result: Result<[URL], Error>) {
-        switch result {
-        case .success(let urls):
-            guard !urls.isEmpty else { return }
-            importing = true
-            Task {
-                let outcome = await LocalMedia.importFiles(urls)
-                await MainActor.run {
-                    importing = false
-                    if outcome.failed == 0 {
-                        showToast("已添加 \(outcome.added) 个视频")
-                    } else {
-                        showToast("已添加 \(outcome.added) 个，\(outcome.failed) 个没读出来")
-                    }
-                    reload()
-                }
+    private func handlePicked(_ urls: [URL]) {
+        guard !urls.isEmpty else { return }
+        importing = true
+        importNote = urls.count == 1
+            ? "正在导入 \(urls[0].lastPathComponent)"
+            : "正在导入 \(urls.count) 个文件"
+
+        Task {
+            let outcome = await LocalMedia.importFiles(urls)
+            await MainActor.run {
+                importing = false
+                importNote = nil
+                showToast(summary(of: outcome))
+                reload()
             }
-        case .failure:
-            showToast("没能读取所选文件")
         }
+    }
+
+    private func summary(of outcome: LocalMedia.ImportOutcome) -> String {
+        if outcome.isEmpty { return "没有可导入的文件" }
+        if outcome.added > 0 {
+            var text = "已导入 \(outcome.added) 个"
+            if outcome.skipped > 0 { text += "，\(outcome.skipped) 个已在列表" }
+            if outcome.failed > 0 { text += "，\(outcome.failed) 个读不出来" }
+            return text
+        }
+        if outcome.skipped > 0 && outcome.failed == 0 {
+            return "这些视频已经在列表里了"
+        }
+        if outcome.skipped > 0 {
+            return "\(outcome.skipped) 个已在列表，\(outcome.failed) 个读不出来"
+        }
+        return "读不出来，试试先把它下载到本机"
+    }
+
+    private func presentImporter() {
+        // ts / m2ts / flv 这些没有标准的 UTType，用 .data 兜住，导入时再按后缀过滤
+        DocumentPickerCoordinator.shared.present(
+            contentTypes: [.movie, .video, .audio, .data],
+            onPick: { urls in
+                handlePicked(urls)
+            }
+        )
     }
 
     private func showToast(_ text: String) {

@@ -50,6 +50,9 @@
 		1A0000000000000000000379 /* MediaProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000279 /* MediaProbe.swift */; };
 		1A000000000000000000037A /* LocalMedia.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000000000000000000027A /* LocalMedia.swift */; };
 		1A000000000000000000037B /* LocalMediaView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000000000000000000027B /* LocalMediaView.swift */; };
+		1A000000000000000000037C /* DocumentPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000000000000000000027C /* DocumentPicker.swift */; };
+		1A000000000000000000037D /* OnlineCoverStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000000000000000000027D /* OnlineCoverStore.swift */; };
+		1A000000000000000000037E /* StorageManagerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000000000000000000027E /* StorageManagerView.swift */; };
 		1A0000000000000000000361 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = 1A00000000000000000004A0 /* GRDB */; };
 /* End PBXBuildFile section */
 
@@ -99,6 +102,9 @@
 		1A0000000000000000000279 /* MediaProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaProbe.swift; sourceTree = "<group>"; };
 		1A000000000000000000027A /* LocalMedia.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalMedia.swift; sourceTree = "<group>"; };
 		1A000000000000000000027B /* LocalMediaView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalMediaView.swift; sourceTree = "<group>"; };
+		1A000000000000000000027C /* DocumentPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentPicker.swift; sourceTree = "<group>"; };
+		1A000000000000000000027D /* OnlineCoverStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnlineCoverStore.swift; sourceTree = "<group>"; };
+		1A000000000000000000027E /* StorageManagerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageManagerView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -176,6 +182,9 @@
 				1A0000000000000000000279 /* MediaProbe.swift */,
 				1A000000000000000000027A /* LocalMedia.swift */,
 				1A000000000000000000027B /* LocalMediaView.swift */,
+				1A000000000000000000027C /* DocumentPicker.swift */,
+				1A000000000000000000027D /* OnlineCoverStore.swift */,
+				1A000000000000000000027E /* StorageManagerView.swift */,
 			);
 			path = VideoLinker;
 			sourceTree = "<group>";
@@ -297,6 +306,9 @@
 				1A0000000000000000000379 /* MediaProbe.swift in Sources */,
 				1A000000000000000000037A /* LocalMedia.swift in Sources */,
 				1A000000000000000000037B /* LocalMediaView.swift in Sources */,
+				1A000000000000000000037C /* DocumentPicker.swift in Sources */,
+				1A000000000000000000037D /* OnlineCoverStore.swift in Sources */,
+				1A000000000000000000037E /* StorageManagerView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -428,7 +440,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 34;
+				CURRENT_PROJECT_VERSION = 35;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = VideoLinker/Info.plist;
@@ -436,7 +448,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.2.0;
+				MARKETING_VERSION = 3.3.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.example.VideoLinker;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -451,7 +463,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 34;
+				CURRENT_PROJECT_VERSION = 35;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = VideoLinker/Info.plist;
@@ -459,7 +471,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.2.0;
+				MARKETING_VERSION = 3.3.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.example.VideoLinker;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

@@ -22,6 +22,7 @@ struct SettingsView: View {
     @State private var confirmClearHistory = false
     @State private var showInbox = false
     @State private var showStats = false
+    @State private var showStorage = false
     @State private var showWebDAV = false
     @State private var toast: String?
 
@@ -71,6 +72,9 @@ struct SettingsView: View {
         }
         .sheet(isPresented: $showStats) {
             WatchStatsView()
+        }
+        .sheet(isPresented: $showStorage) {
+            StorageManagerView()
         }
         .sheet(isPresented: $showWebDAV) {
             WebDAVView()
@@ -391,6 +395,15 @@ struct SettingsView: View {
                     showStats = true
                 } label: {
                     actionRow("观看统计", symbol: "chart.bar.xaxis")
+                }
+                .buttonStyle(.plain)
+
+                Divider().overlay(theme.cardStroke)
+
+                Button {
+                    showStorage = true
+                } label: {
+                    actionRow("存储管理", symbol: "internaldrive")
                 }
                 .buttonStyle(.plain)
 

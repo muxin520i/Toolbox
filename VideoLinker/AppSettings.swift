@@ -251,4 +251,10 @@ enum Fmt {
         }
         return String(format: "%d:%02d", m, s)
     }
+
+    /// 字节数转 320.5 MB / 1.2 GB
+    static func bytes(_ value: Int64) -> String {
+        guard value > 0 else { return "0 MB" }
+        return ByteCountFormatter.string(fromByteCount: value, countStyle: .file)
+    }
 }
