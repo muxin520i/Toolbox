@@ -556,9 +556,21 @@ private struct DownloadRunningLabel: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
 
-            Text(item.note.isEmpty ? "\(Int(item.progress * 100))%" : item.note)
+            Spacer(minLength: 0)
+
+            Text(statusText)
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(accent)
+        }
+    }
+
+    private var statusText: String {
+        if !item.note.isEmpty { return item.note }
+        switch item.state {
+        case .queued: return "排队中"
+        case .paused: return "已暂停"
+        case .failed: return "失败"
+        default: return "\(Int(item.progress * 100))%"
         }
     }
 }

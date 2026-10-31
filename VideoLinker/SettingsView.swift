@@ -6,6 +6,8 @@ struct SettingsView: View {
 
     @AppStorage(SettingsKey.theme) private var themeRaw = AppTheme.system.rawValue
     @AppStorage(SettingsKey.rate) private var rate = 1.0
+    @AppStorage(SettingsKey.downloadConcurrency) private var concurrency = 3
+    @AppStorage(SettingsKey.subtitleSize) private var subtitleSize = 17.0
     @AppStorage(SettingsKey.autoResume) private var autoResume = true
     @AppStorage(SettingsKey.gestures) private var gestures = true
     @AppStorage(PlaylistStore.downloadTargetKey) private var downloadTarget = PlaylistStore.autoTarget
@@ -163,6 +165,31 @@ struct SettingsView: View {
 
                 Divider().overlay(theme.cardStroke)
 
+                HStack {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("字幕字号")
+                            .font(.system(size: 14))
+                            .foregroundStyle(theme.text)
+                        Text("播放页加载 srt / vtt / ass 字幕时用这个大小")
+                            .font(.system(size: 11))
+                            .foregroundStyle(theme.textTertiary)
+                    }
+
+                    Spacer(minLength: 8)
+
+                    Picker("", selection: $subtitleSize) {
+                        Text("小").tag(15.0)
+                        Text("标准").tag(17.0)
+                        Text("大").tag(20.0)
+                        Text("特大").tag(24.0)
+                    }
+                    .pickerStyle(.menu)
+                    .tint(theme.accent)
+                }
+                .padding(.vertical, 6)
+
+                Divider().overlay(theme.cardStroke)
+
                 toggleRow("记忆观看进度", subtitle: "下次打开自动从上次的位置继续", isOn: $autoResume)
 
                 Divider().overlay(theme.cardStroke)
@@ -199,6 +226,33 @@ struct SettingsView: View {
                     }
                     .pickerStyle(.menu)
                     .tint(theme.accent)
+                }
+                .padding(.vertical, 6)
+
+                Divider().overlay(theme.cardStroke)
+
+                HStack {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("同时下载数量")
+                            .font(.system(size: 14))
+                            .foregroundStyle(theme.text)
+                        Text("同时下的任务越多越快，也越吃网速和电量")
+                            .font(.system(size: 11))
+                            .foregroundStyle(theme.textTertiary)
+                    }
+
+                    Spacer(minLength: 8)
+
+                    Picker("", selection: $concurrency) {
+                        ForEach(1...5, id: \.self) { value in
+                            Text("\(value) 个").tag(value)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .tint(theme.accent)
+                    .onChange(of: concurrency) { value in
+                        DownloadManager.shared.concurrency = value
+                    }
                 }
                 .padding(.vertical, 6)
 

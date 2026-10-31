@@ -124,6 +124,8 @@ enum SettingsKey {
     static let desktopUA = "settings.desktopUA"
     static let adBlock = "settings.adBlock"
     static let sleepMinutes = "settings.sleepMinutes"
+    static let downloadConcurrency = "settings.downloadConcurrency"
+    static let subtitleSize = "settings.subtitleSize"
 
     // 浏览器
     static let uaMode = "browser.uaMode"

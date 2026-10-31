@@ -297,7 +297,8 @@ enum HLSDownloader {
                 let index = scheduled
                 scheduled += 1
                 group.addTask {
-                    (index, try await segmentData(segments[index], referer: referer))
+                    try Task.checkCancellation()
+                    return (index, try await segmentData(segments[index], referer: referer))
                 }
             }
 
@@ -321,10 +322,12 @@ enum HLSDownloader {
                 progress(min(1, Double(written) / Double(total)))
 
                 if scheduled < total {
+                    try Task.checkCancellation()
                     let index = scheduled
                     scheduled += 1
                     group.addTask {
-                        (index, try await segmentData(segments[index], referer: referer))
+                        try Task.checkCancellation()
+                        return (index, try await segmentData(segments[index], referer: referer))
                     }
                 }
             }
@@ -395,6 +398,7 @@ enum HLSDownloader {
     private static func fetchData(_ request: URLRequest, retry: Int) async throws -> Data {
         var lastError: Error?
         for attempt in 0...max(0, retry) {
+            try Task.checkCancellation()
             do {
                 let (data, response) = try await URLSession.shared.data(for: request)
                 if let http = response as? HTTPURLResponse, http.statusCode >= 400 {

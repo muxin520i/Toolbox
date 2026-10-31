@@ -11,6 +11,13 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     ) -> UIInterfaceOrientationMask {
         AppDelegate.orientationLock
     }
+
+    /// 系统唤醒来处理后台下载事件：把 completion 交给下载器，等它把回调跑完再调用
+    func application(_ application: UIApplication,
+                     handleEventsForBackgroundURLSession identifier: String,
+                     completionHandler: @escaping () -> Void) {
+        DownloadManager.shared.handleBackgroundEvents(completionHandler)
+    }
 }
 
 enum OrientationLock {

@@ -275,6 +275,7 @@ struct DownloadsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var shareBox: ShareBox?
     @State private var converting = false
+    @State private var toast: String?
 
     var body: some View {
         NavigationStack {
@@ -300,6 +301,26 @@ struct DownloadsView: View {
                                     open(url)
                                 }
                             }
+                            .contextMenu { menu(for: item) }
+                            .swipeActions(edge: .leading) {
+                                if item.state == .finished, let url = item.fileURL {
+                                    Button {
+                                        MediaExporter.exportToFiles([url])
+                                    } label: {
+                                        Label("导出", systemImage: "folder")
+                                    }
+                                    .tint(.blue)
+
+                                    Button {
+                                        MediaExporter.saveToPhotos(url) { message in
+                                            showToast(message)
+                                        }
+                                    } label: {
+                                        Label("存相册", systemImage: "photo")
+                                    }
+                                    .tint(.green)
+                                }
+                            }
                             .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                                 Button(role: .destructive) {
                                     manager.remove(item)
@@ -319,12 +340,45 @@ struct DownloadsView: View {
                     Button("关闭") { dismiss() }
                 }
                 ToolbarItem(placement: .primaryAction) {
-                    Button("清理") { manager.clearFinished() }
-                        .disabled(manager.items.isEmpty)
+                    Menu {
+                        Button {
+                            manager.pauseAll()
+                        } label: {
+                            Label("全部暂停", systemImage: "pause.circle")
+                        }
+
+                        Button {
+                            manager.resumeAll()
+                        } label: {
+                            Label("全部继续", systemImage: "play.circle")
+                        }
+
+                        Divider()
+
+                        Button(role: .destructive) {
+                            manager.clearFinished()
+                        } label: {
+                            Label("清理已结束", systemImage: "trash")
+                        }
+                    } label: {
+                        Text("管理")
+                    }
+                    .disabled(manager.items.isEmpty)
                 }
             }
             .sheet(item: $shareBox) { box in
                 ActivityView(items: [box.url])
+            }
+            .overlay(alignment: .bottom) {
+                if let toast = toast {
+                    Text(toast)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 9)
+                        .background(Capsule().fill(Color.black.opacity(0.78)))
+                        .padding(.bottom, 24)
+                }
             }
             .overlay {
                 if converting {
@@ -345,9 +399,65 @@ struct DownloadsView: View {
         }
     }
 
+    @ViewBuilder
+    private func menu(for item: DownloadItem) -> some View {
+        if let url = item.fileURL {
+            Button {
+                MediaExporter.exportToFiles([url])
+            } label: {
+                Label("导出到「文件」", systemImage: "folder")
+            }
+
+            Button {
+                MediaExporter.saveToPhotos(url) { message in
+                    showToast(message)
+                }
+            } label: {
+                Label("存到相册", systemImage: "photo")
+            }
+
+            Button {
+                shareBox = ShareBox(url: url)
+            } label: {
+                Label("分享", systemImage: "square.and.arrow.up")
+            }
+        }
+
+        if !item.source.isEmpty {
+            Button {
+                UIPasteboard.general.string = item.source
+                showToast("下载地址已复制")
+            } label: {
+                Label("复制下载地址", systemImage: "link")
+            }
+        }
+
+        if item.state == .paused {
+            Button {
+                manager.resume(item)
+            } label: {
+                Label("继续下载", systemImage: "play.circle")
+            }
+        }
+
+        if item.state == .failed {
+            Button {
+                manager.retry(item)
+            } label: {
+                Label("重试", systemImage: "arrow.clockwise")
+            }
+        }
+
+        Button(role: .destructive) {
+            manager.remove(item)
+        } label: {
+            Label("删除", systemImage: "trash")
+        }
+    }
+
     private func open(_ url: URL) {
         let ext = url.pathExtension.lowercased()
-        let videoExts = ["mp4", "m4v", "mov", "mkv", "flv", "webm", "ts", "avi", "mp3", "m4a", "aac", "wav"]
+        let videoExts = ["mp4", "m4v", "mov", "mkv", "flv", "webm", "ts", "avi", "mp3", "m4a", "aac", "wav", "flac"]
 
         // 之前下到的 .ts 直接放会失败，播放前先换成 MP4
         if ext == "ts" {
@@ -374,6 +484,15 @@ struct DownloadsView: View {
             shareBox = ShareBox(url: url)
         }
     }
+
+    private func showToast(_ text: String) {
+        withAnimation(.easeOut(duration: 0.15)) { toast = text }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            if toast == text {
+                withAnimation(.easeIn(duration: 0.2)) { toast = nil }
+            }
+        }
+    }
 }
 
 struct ShareBox: Identifiable {
@@ -386,53 +505,142 @@ struct DownloadRow: View {
     var onTap: () -> Void
 
     var body: some View {
-        Button(action: onTap) {
-            HStack(spacing: 10) {
-                Image(systemName: iconName)
-                    .font(.system(size: 16))
-                    .foregroundStyle(iconColor)
-                    .frame(width: 26)
+        HStack(spacing: 10) {
+            leading
 
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(item.fileName)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(item.fileName)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
 
-                    if item.state == .running {
-                        ProgressView(value: item.progress)
-                            .progressViewStyle(.linear)
-                            .tint(.accentColor)
-                        Text(item.note.isEmpty ? "\(Int(item.progress * 100))%" : item.note)
-                            .font(.system(size: 10))
-                            .foregroundStyle(.secondary)
-                    } else if item.state == .failed {
-                        Text(item.failReason.isEmpty ? "失败" : item.failReason)
-                            .font(.system(size: 10))
-                            .foregroundStyle(.red.opacity(0.85))
-                            .lineLimit(2)
-                    } else if !item.note.isEmpty {
-                        Text(item.note)
-                            .font(.system(size: 10))
-                            .foregroundStyle(.orange.opacity(0.9))
-                    } else {
-                        Text(item.sizeText)
-                            .font(.system(size: 10))
-                            .foregroundStyle(.secondary)
-                    }
+                statusLine
+            }
+
+            Spacer(minLength: 6)
+
+            actionButton
+        }
+        .padding(.vertical, 5)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            guard item.state == .finished else { return }
+            onTap()
+        }
+    }
+
+    // MARK: 左侧
+
+    @ViewBuilder
+    private var leading: some View {
+        if item.state == .finished, isVideoFile {
+            VideoThumbnail(path: item.localPath, width: 54, height: 34, corner: 6)
+        } else {
+            Image(systemName: iconName)
+                .font(.system(size: 16))
+                .foregroundStyle(iconColor)
+                .frame(width: 30)
+        }
+    }
+
+    private var isVideoFile: Bool {
+        guard !item.localPath.isEmpty else { return false }
+        let ext = (item.localPath as NSString).pathExtension.lowercased()
+        let list = ["mp4", "m4v", "mov", "mkv", "webm", "flv", "ts", "avi", "wmv",
+                    "rmvb", "mp3", "m4a", "aac", "wav", "flac"]
+        return list.contains(ext)
+    }
+
+    // MARK: 状态行
+
+    @ViewBuilder
+    private var statusLine: some View {
+        if item.state == .running || item.state == .queued {
+            ProgressView(value: item.state == .queued ? 0 : item.progress)
+                .progressViewStyle(.linear)
+                .tint(.accentColor)
+
+            HStack(spacing: 6) {
+                if item.state == .queued {
+                    Text("排队中")
+                } else {
+                    Text("\(Int(item.progress * 100))%")
                 }
 
-                Spacer(minLength: 0)
+                if !item.note.isEmpty {
+                    Text(item.note)
+                } else if !item.transferText.isEmpty {
+                    Text(item.transferText)
+                }
             }
-            .padding(.vertical, 3)
-            .contentShape(Rectangle())
+            .font(.system(size: 10))
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+        } else if item.state == .paused {
+            Text(item.progress > 0
+                 ? "已暂停 · \(Int(item.progress * 100))%，点右边的按钮接着下"
+                 : "已暂停")
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+        } else if item.state == .failed {
+            Text(item.failReason.isEmpty ? "下载失败" : item.failReason)
+                .font(.system(size: 10))
+                .foregroundStyle(.red.opacity(0.85))
+                .lineLimit(2)
+        } else if !item.note.isEmpty {
+            Text(item.note)
+                .font(.system(size: 10))
+                .foregroundStyle(.orange.opacity(0.9))
+                .lineLimit(2)
+        } else {
+            Text(item.sizeText.isEmpty ? "已完成" : item.sizeText)
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
         }
-        .buttonStyle(.plain)
+    }
+
+    // MARK: 右侧按钮
+
+    @ViewBuilder
+    private var actionButton: some View {
+        switch item.state {
+        case .running, .queued:
+            Button {
+                DownloadManager.shared.pause(item)
+            } label: {
+                actionIcon("pause.circle")
+            }
+        case .paused:
+            Button {
+                DownloadManager.shared.resume(item)
+            } label: {
+                actionIcon("play.circle.fill")
+            }
+        case .failed:
+            Button {
+                DownloadManager.shared.retry(item)
+            } label: {
+                actionIcon("arrow.clockwise.circle.fill")
+            }
+        case .finished:
+            EmptyView()
+        }
+    }
+
+    private func actionIcon(_ name: String) -> some View {
+        Image(systemName: name)
+            .font(.system(size: 20))
+            .foregroundStyle(.secondary)
+            .frame(width: 34, height: 34)
+            .contentShape(Rectangle())
     }
 
     private var iconName: String {
         switch item.state {
+        case .queued: return "clock"
         case .running: return "arrow.down.circle"
+        case .paused: return "pause.circle"
         case .finished: return "checkmark.circle.fill"
         case .failed: return "exclamationmark.triangle"
         }
@@ -440,7 +648,9 @@ struct DownloadRow: View {
 
     private var iconColor: Color {
         switch item.state {
+        case .queued: return .secondary
         case .running: return .accentColor
+        case .paused: return .orange
         case .finished: return .green
         case .failed: return .red
         }

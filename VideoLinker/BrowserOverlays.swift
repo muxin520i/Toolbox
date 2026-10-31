@@ -410,69 +410,80 @@ struct SniffResultsPanel: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var hint: String?
+    @State private var filter = "全部"
+    @State private var selecting = false
+    @State private var selected: Set<String> = []
+
+    private let filters = ["全部", "HLS", "MP4", "其他"]
+
+    private var filtered: [SniffedVideo] {
+        switch filter {
+        case "HLS":
+            return tab.found.filter { $0.kind == "HLS" }
+        case "MP4":
+            return tab.found.filter { $0.kind == "MP4" || $0.kind == "MOV" }
+        case "其他":
+            return tab.found.filter { $0.kind != "HLS" && $0.kind != "MP4" && $0.kind != "MOV" }
+        default:
+            return tab.found
+        }
+    }
 
     var body: some View {
         NavigationStack {
             Group {
                 if tab.found.isEmpty {
-                    VStack(spacing: 12) {
-                        Image(systemName: "dot.radiowaves.left.and.right")
-                            .font(.system(size: 34, weight: .light))
-                            .foregroundStyle(.secondary)
-                        Text("还没有抓到视频")
-                            .font(.system(size: 15, weight: .semibold))
-                        Text("播放一下页面里的视频，地址就会被捕获。\n很多站点把源藏在混淆脚本里，可以试试切到桌面版 UA。")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                            .lineSpacing(3)
-                    }
-                    .padding(30)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    emptyView
                 } else {
-                    List {
-                        Section {
-                            ForEach(tab.found) { video in
-                                row(video)
-                                    .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                                        Button {
-                                            UIPasteboard.general.string = video.url
-                                        } label: {
-                                            Label("复制", systemImage: "doc.on.doc")
-                                        }
-                                        .tint(.gray)
-
-                                        Button {
-                                            onAddToPlaylist(video)
-                                        } label: {
-                                            Label("加入列表", systemImage: "text.badge.plus")
-                                        }
-                                        .tint(.blue)
-                                    }
-                                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                        Button(role: .destructive) {
-                                            tab.found.removeAll { $0.url == video.url }
-                                        } label: {
-                                            Label("移除", systemImage: "trash")
-                                        }
-                                    }
-                            }
-                        } header: {
-                            Text("共 \(tab.found.count) 个，点一下播放，右下角可下载")
-                        }
-                    }
-                    .listStyle(.plain)
+                    content
                 }
             }
             .navigationTitle("嗅探结果")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("关闭") { dismiss() }
+                    if selecting {
+                        Button("取消") {
+                            selecting = false
+                            selected.removeAll()
+                        }
+                    } else {
+                        Button("关闭") { dismiss() }
+                    }
                 }
                 ToolbarItem(placement: .primaryAction) {
-                    Button("清空") { tab.found.removeAll() }
+                    if selecting {
+                        Button(selected.count == filtered.count && !filtered.isEmpty ? "取消全选" : "全选") {
+                            if selected.count == filtered.count && !filtered.isEmpty {
+                                selected.removeAll()
+                            } else {
+                                selected = Set(filtered.map { $0.url })
+                            }
+                        }
+                    } else {
+                        Menu {
+                            Button {
+                                selecting = true
+                            } label: {
+                                Label("多选", systemImage: "checkmark.circle")
+                            }
+
+                            Button(role: .destructive) {
+                                tab.found.removeAll()
+                                selected.removeAll()
+                            } label: {
+                                Label("清空", systemImage: "trash")
+                            }
+                        } label: {
+                            Text("操作")
+                        }
                         .disabled(tab.found.isEmpty)
+                    }
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                if selecting {
+                    batchBar
                 }
             }
         }
@@ -482,13 +493,206 @@ struct SniffResultsPanel: View {
                 Text(hint)
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(.white)
+                    .multilineTextAlignment(.center)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 9)
                     .background(Capsule().fill(Color.black.opacity(0.8)))
-                    .padding(.bottom, 22)
+                    .padding(.bottom, selecting ? 70 : 22)
                     .transition(.opacity)
             }
         }
+    }
+
+    // MARK: 主体
+
+    private var emptyView: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "dot.radiowaves.left.and.right")
+                .font(.system(size: 34, weight: .light))
+                .foregroundStyle(.secondary)
+            Text("还没有抓到视频")
+                .font(.system(size: 15, weight: .semibold))
+            Text("播放一下页面里的视频，地址就会被捕获。\n很多站点把源藏在混淆脚本里，可以试试切到桌面版 UA。")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .lineSpacing(3)
+        }
+        .padding(30)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var content: some View {
+        VStack(spacing: 0) {
+            chipBar
+
+            List {
+                Section {
+                    ForEach(filtered) { video in
+                        row(video)
+                            .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                                Button {
+                                    UIPasteboard.general.string = video.url
+                                    showHint("链接已复制")
+                                } label: {
+                                    Label("复制", systemImage: "doc.on.doc")
+                                }
+                                .tint(.gray)
+
+                                Button {
+                                    onAddToPlaylist(video)
+                                } label: {
+                                    Label("加入列表", systemImage: "text.badge.plus")
+                                }
+                                .tint(.blue)
+                            }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                Button(role: .destructive) {
+                                    tab.found.removeAll { $0.url == video.url }
+                                    selected.remove(video.url)
+                                } label: {
+                                    Label("移除", systemImage: "trash")
+                                }
+                            }
+                    }
+                } header: {
+                    Text(selecting
+                         ? "已选 \(selected.count) 个"
+                         : "共 \(filtered.count) 个，点一下播放，右边可下载")
+                }
+            }
+            .listStyle(.plain)
+        }
+    }
+
+    private var chipBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(filters, id: \.self) { item in
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.15)) { filter = item }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(item)
+                                .font(.system(size: 12, weight: .semibold))
+                            Text("\(count(for: item))")
+                                .font(.system(size: 10, weight: .semibold))
+                                .opacity(0.75)
+                        }
+                        .foregroundStyle(filter == item ? .white : Color.primary)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(
+                            Capsule().fill(filter == item
+                                           ? Color(red: 1.0, green: 0.42, blue: 0.31)
+                                           : Color(.secondarySystemBackground))
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+        }
+    }
+
+    private func count(for item: String) -> Int {
+        switch item {
+        case "HLS":
+            return tab.found.filter { $0.kind == "HLS" }.count
+        case "MP4":
+            return tab.found.filter { $0.kind == "MP4" || $0.kind == "MOV" }.count
+        case "其他":
+            return tab.found.filter { $0.kind != "HLS" && $0.kind != "MP4" && $0.kind != "MOV" }.count
+        default:
+            return tab.found.count
+        }
+    }
+
+    // MARK: 批量操作条
+
+    private var batchBar: some View {
+        HStack(spacing: 10) {
+            batchButton("下载", symbol: "arrow.down.circle.fill") { batchDownload() }
+            batchButton("加入列表", symbol: "text.badge.plus") { batchAdd() }
+            batchButton("复制", symbol: "doc.on.doc") { batchCopy() }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.bar)
+        .overlay(alignment: .top) {
+            Divider()
+        }
+    }
+
+    private func batchButton(_ title: String, symbol: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Image(systemName: symbol)
+                    .font(.system(size: 13, weight: .semibold))
+                Text(title)
+                    .font(.system(size: 13, weight: .semibold))
+            }
+            .foregroundStyle(selected.isEmpty ? Color.secondary : Color.white)
+            .frame(maxWidth: .infinity)
+            .frame(height: 36)
+            .background(
+                Capsule().fill(selected.isEmpty
+                               ? Color(.tertiarySystemFill)
+                               : Color(red: 1.0, green: 0.42, blue: 0.31))
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(selected.isEmpty)
+    }
+
+    private func selectedVideos() -> [SniffedVideo] {
+        tab.found.filter { selected.contains($0.url) }
+    }
+
+    private func batchDownload() {
+        let list = selectedVideos()
+        guard !list.isEmpty else { return }
+
+        var started = 0
+        for video in list.prefix(20) {
+            if case .started = DownloadManager.shared.start(from: video.url, title: video.displayName) {
+                started += 1
+            }
+        }
+
+        selecting = false
+        selected.removeAll()
+        showHint(started > 0
+                 ? "已加入 \(started) 个下载任务，进度在首页「下载管理」里看"
+                 : "这些地址都没能开始下载，可能已经过期")
+    }
+
+    private func batchAdd() {
+        let list = selectedVideos()
+        guard !list.isEmpty else { return }
+
+        let target = PlaylistStore.downloadListID()
+        for video in list {
+            _ = PlaylistStore.add(
+                PlaylistItem(url: video.url, title: video.displayName),
+                to: target
+            )
+        }
+
+        selecting = false
+        selected.removeAll()
+        showHint("已把 \(list.count) 条加入「下载」列表")
+    }
+
+    private func batchCopy() {
+        let list = selectedVideos()
+        guard !list.isEmpty else { return }
+
+        UIPasteboard.general.string = list.map { $0.url }.joined(separator: "\n")
+        selecting = false
+        selected.removeAll()
+        showHint("已复制 \(list.count) 条链接")
     }
 
     // MARK: 下载
@@ -514,6 +718,14 @@ struct SniffResultsPanel: View {
 
     private func row(_ video: SniffedVideo) -> some View {
         HStack(spacing: 8) {
+            if selecting {
+                Image(systemName: selected.contains(video.url) ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 19))
+                    .foregroundStyle(selected.contains(video.url)
+                                     ? Color(red: 1.0, green: 0.42, blue: 0.31)
+                                     : Color.secondary)
+            }
+
             Text(video.kind)
                 .font(.system(size: 9, weight: .bold))
                 .foregroundStyle(.white)
@@ -534,31 +746,43 @@ struct SniffResultsPanel: View {
 
             Spacer(minLength: 6)
 
-            Button {
-                download(video)
-            } label: {
-                Image(systemName: "arrow.down.circle")
-                    .font(.system(size: 19, weight: .regular))
-                    .foregroundStyle(Color(red: 1.0, green: 0.5, blue: 0.4))
-                    .frame(width: 34, height: 34)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
+            if !selecting {
+                Button {
+                    download(video)
+                } label: {
+                    Image(systemName: "arrow.down.circle")
+                        .font(.system(size: 19, weight: .regular))
+                        .foregroundStyle(Color(red: 1.0, green: 0.5, blue: 0.4))
+                        .frame(width: 34, height: 34)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
 
-            Button {
-                onPlay(video)
-            } label: {
-                Image(systemName: "play.circle.fill")
-                    .font(.system(size: 20))
-                    .foregroundStyle(Color(red: 1.0, green: 0.5, blue: 0.4))
-                    .frame(width: 34, height: 34)
-                    .contentShape(Rectangle())
+                Button {
+                    onPlay(video)
+                } label: {
+                    Image(systemName: "play.circle.fill")
+                        .font(.system(size: 20))
+                        .foregroundStyle(Color(red: 1.0, green: 0.5, blue: 0.4))
+                        .frame(width: 34, height: 34)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         }
         .padding(.vertical, 3)
         .contentShape(Rectangle())
-        .onTapGesture { onPlay(video) }
+        .onTapGesture {
+            if selecting {
+                if selected.contains(video.url) {
+                    selected.remove(video.url)
+                } else {
+                    selected.insert(video.url)
+                }
+            } else {
+                onPlay(video)
+            }
+        }
     }
 }
 

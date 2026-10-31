@@ -3,6 +3,7 @@ import AVKit
 import AVFoundation
 import MediaPlayer
 import UIKit
+import UniformTypeIdentifiers
 
 // MARK: - 播放请求
 
@@ -52,6 +53,14 @@ struct PlayerScreen: View {
     @State private var sleepTimer: Timer?
     @State private var sleepDeadline: Date?
     @State private var sleepLeft = ""
+
+    // 外挂字幕
+    @State private var subtitleCues: [SubtitleCue] = []
+    @State private var subtitleName = ""
+    @State private var subtitleText = ""
+    @State private var subtitleTicker: Timer?
+    @State private var showSubtitlePicker = false
+    @AppStorage(SettingsKey.subtitleSize) private var subtitleSize = 17.0
 
     // 手势过程状态
     @State private var dragMode = 0            // 0 未定 1 进度 2 音量
@@ -112,6 +121,8 @@ struct PlayerScreen: View {
 
             gestureLayer
 
+            subtitleOverlay
+
             if model.isLoading {
                 VStack(spacing: 12) {
                     ProgressView()
@@ -160,6 +171,7 @@ struct PlayerScreen: View {
             UIDevice.current.beginGeneratingDeviceOrientationNotifications()
             model.rate = currentRate
             loadCurrent()
+            startSubtitleTicker()
         }
         .onDisappear {
             saveProgress()
@@ -171,6 +183,8 @@ struct PlayerScreen: View {
             boostTimer?.invalidate()
             boostTimer = nil
             cancelScheduledBoost()
+            subtitleTicker?.invalidate()
+            subtitleTicker = nil
             UIDevice.current.endGeneratingDeviceOrientationNotifications()
             isTheater = false
             OrientationLock.apply(.portrait)
@@ -192,6 +206,29 @@ struct PlayerScreen: View {
             Button("用 Safari 打开") { openInSafari() }
             Button("取消", role: .cancel) {}
         }
+        .fileImporter(
+            isPresented: $showSubtitlePicker,
+            allowedContentTypes: subtitleTypes,
+            allowsMultipleSelection: false
+        ) { result in
+            switch result {
+            case .success(let urls):
+                guard let url = urls.first else { return }
+                let granted = url.startAccessingSecurityScopedResource()
+                defer { if granted { url.stopAccessingSecurityScopedResource() } }
+                do {
+                    let cues = try SubtitleLoader.load(url: url)
+                    subtitleCues = cues
+                    subtitleName = url.lastPathComponent
+                    subtitleText = ""
+                    toast("已加载字幕：\(url.lastPathComponent)")
+                } catch {
+                    toast(error.localizedDescription)
+                }
+            case .failure(let error):
+                toast(error.localizedDescription)
+            }
+        }
         .confirmationDialog("睡眠定时", isPresented: $showSleep, titleVisibility: .visible) {
             ForEach([15, 30, 45, 60, 90], id: \.self) { minutes in
                 Button("\(minutes) 分钟") { startSleep(minutes) }
@@ -201,6 +238,75 @@ struct PlayerScreen: View {
             }
             Button("取消", role: .cancel) {}
         }
+    }
+
+    // MARK: 字幕
+
+    private var subtitleTypes: [UTType] {
+        var types: [UTType] = [.plainText]
+        for ext in SubtitleLoader.extensions {
+            if let type = UTType(filenameExtension: ext) {
+                types.append(type)
+            }
+        }
+        return types
+    }
+
+    private var subtitleOverlay: some View {
+        VStack {
+            Spacer()
+            if !subtitleText.isEmpty {
+                Text(subtitleText)
+                    .font(.system(size: CGFloat(subtitleSize), weight: .semibold))
+                    .foregroundStyle(.white)
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(2)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, showControls ? 150 : 72)
+            }
+        }
+        .animation(.easeInOut(duration: 0.12), value: subtitleText)
+        .allowsHitTesting(false)
+    }
+
+    private func startSubtitleTicker() {
+        subtitleTicker?.invalidate()
+        let timer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { _ in
+            guard !subtitleCues.isEmpty else {
+                if !subtitleText.isEmpty { subtitleText = "" }
+                return
+            }
+            if let cue = SubtitleLoader.cue(at: model.currentTime, in: subtitleCues) {
+                if cue.text != subtitleText { subtitleText = cue.text }
+            } else if !subtitleText.isEmpty {
+                subtitleText = ""
+            }
+        }
+        subtitleTicker = timer
+    }
+
+    private func autoLoadSubtitle(for url: URL) {
+        guard url.isFileURL, let sidecar = SubtitleLoader.findSidecar(for: url) else {
+            subtitleCues = []
+            subtitleName = ""
+            subtitleText = ""
+            return
+        }
+        if let cues = try? SubtitleLoader.load(url: sidecar) {
+            subtitleCues = cues
+            subtitleName = sidecar.lastPathComponent
+            subtitleText = ""
+        }
+    }
+
+    private func clearSubtitle() {
+        subtitleCues = []
+        subtitleName = ""
+        subtitleText = ""
+        toast("已关闭字幕")
     }
 
     // MARK: 手势层
@@ -495,6 +601,32 @@ struct PlayerScreen: View {
 
             HStack(spacing: 22) {
                 Menu {
+                    Button {
+                        showSubtitlePicker = true
+                        showControls = true
+                    } label: {
+                        Label("载入字幕文件…", systemImage: "doc.text")
+                    }
+
+                    if !subtitleCues.isEmpty {
+                        Button(role: .destructive) {
+                            clearSubtitle()
+                        } label: {
+                            Label("关闭字幕", systemImage: "xmark.circle")
+                        }
+                    }
+                } label: {
+                    Image(systemName: subtitleCues.isEmpty ? "captions.bubble" : "captions.bubble.fill")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 34, height: 30)
+                }
+                .menuStyle(.button)
+                .tint(.white)
+                .buttonStyle(.plain)
+                .simultaneousGesture(TapGesture().onEnded { showControls = true })
+
+                Menu {
                     ForEach(rates, id: \.self) { value in
                         Button {
                             selectRate(value)
@@ -665,6 +797,9 @@ struct PlayerScreen: View {
 
         model.rate = currentRate
         model.load(url, startAt: startAt)
+
+        // 本地视频旁边有同名 srt/vtt 就自动挂上
+        autoLoadSubtitle(for: url)
 
         if let saved = startAt {
             showHint("从上次的 \(Fmt.time(saved)) 继续")

@@ -535,6 +535,11 @@ struct PlaylistDetailView: View {
                         .font(.system(size: 19, weight: .regular))
                         .foregroundStyle(selection.contains(item.id) ? theme.accent : theme.textTertiary)
                         .frame(width: 26, alignment: .leading)
+                } else if item.isLocal, item.localFileExists {
+                    VideoThumbnail(path: item.localPath ?? (URL(string: item.url)?.path ?? ""),
+                                   width: 56,
+                                   height: 34,
+                                   corner: 6)
                 } else {
                     Text(String(format: "%02d", index + 1))
                         .font(.system(size: 13, weight: .semibold, design: .monospaced))
@@ -606,6 +611,24 @@ struct PlaylistDetailView: View {
             } label: {
                 Label("移动到其他列表", systemImage: "folder")
             }
+
+            if item.isLocal, item.localFileExists {
+                Button {
+                    MediaExporter.exportToFiles([URL(fileURLWithPath: localFilePath(item))])
+                } label: {
+                    Label("导出到「文件」", systemImage: "folder.badge.plus")
+                }
+
+                Button {
+                    MediaExporter.saveToPhotos(URL(fileURLWithPath: localFilePath(item))) { message in
+                        toast = message
+                        hideToastSoon()
+                    }
+                } label: {
+                    Label("存到相册", systemImage: "photo")
+                }
+            }
+
             Button {
                 ResumeStore.remove(url: item.url)
                 toast = "已清除这条的观看进度"
@@ -772,6 +795,11 @@ struct PlaylistDetailView: View {
         showBulkSheet = false
         toast = "已导入 \(added) 条"
         hideToastSoon()
+    }
+
+    private func localFilePath(_ item: PlaylistItem) -> String {
+        if let path = item.localPath, !path.isEmpty { return path }
+        return URL(string: item.url)?.path ?? ""
     }
 
     private func deleteSelected() {
