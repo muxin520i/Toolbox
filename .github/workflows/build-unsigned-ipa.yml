@@ -100,6 +100,24 @@ jobs:
             echo "embedded frameworks:"
             du -sh Payload/VideoLinker.app/Frameworks/*
           fi
+          # 只留 arm64：armv7/armv7s 对现在的设备没用，去掉能省一半体积
+          for FW in Payload/VideoLinker.app/Frameworks/*.framework; do
+            [ -d "$FW" ] || continue
+            NAME=$(basename "$FW" .framework)
+            BIN="$FW/$NAME"
+            [ -f "$BIN" ] || continue
+            echo "before: $(lipo -archs "$BIN" 2>/dev/null || echo unknown)"
+            case "$(lipo -archs "$BIN" 2>/dev/null || echo)" in
+              *arm64*)
+                if lipo -thin arm64 "$BIN" -output "$BIN.arm64" 2>/dev/null; then
+                  mv "$BIN.arm64" "$BIN"
+                fi
+                ;;
+            esac
+            echo "after: $(lipo -archs "$BIN" 2>/dev/null || echo unknown)"
+          done
+          echo "--- link check ---"
+          otool -L Payload/VideoLinker.app/VideoLinker | grep -i -E "vlc" || echo "::warning::main binary is not linked with VLCKit"
           zip -qry VideoLinker-unsigned.ipa Payload
           rm -rf Payload
           ls -lh VideoLinker-unsigned.ipa
