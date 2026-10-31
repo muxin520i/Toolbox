@@ -30,14 +30,14 @@ jobs:
         uses: actions/cache@v4
         with:
           path: Vendor
-          key: vlckit-373-ios-arm64-v1
+          key: mvlckit-374-ios-v1
 
       # VLCKit 3.7.3 没有 SPM 支持，这里直接取官方二进制包，只留 iOS 真机切片
       - name: Fetch VLCKit
         if: steps.vlc-cache.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
-          URL="https://download.videolan.org/cocoapods/prod/VLCKit-3.7.3-319ed2c0-79128878.tar.xz"
+          URL="https://download.videolan.org/pub/cocoapods/prod/MobileVLCKit-3.0-20260922-1512.tar.xz"
           rm -rf /tmp/vlc && mkdir -p /tmp/vlc Vendor
           curl -L --retry 5 --retry-delay 5 --max-time 1500 -o /tmp/vlc.tar.xz "$URL"
           ls -lh /tmp/vlc.tar.xz
@@ -72,7 +72,7 @@ jobs:
           fi
           if [ -n "$VLC_MODULE" ]; then
             VLC_ARGS+=("FRAMEWORK_SEARCH_PATHS=$(pwd)/Vendor \$(inherited)")
-            VLC_ARGS+=("OTHER_LDFLAGS=\$(inherited) -framework $VLC_MODULE -lc++ -lz -lbz2 -liconv -lxml2 -ObjC")
+            VLC_ARGS+=("OTHER_LDFLAGS=\$(inherited) -framework $VLC_MODULE -framework QuartzCore -framework CoreText -framework AVFoundation -framework Security -framework CFNetwork -framework AudioToolbox -framework OpenGLES -framework CoreGraphics -framework VideoToolbox -framework CoreMedia -lc++ -lxml2 -lz -lbz2 -liconv -ObjC")
             echo "linking $VLC_MODULE"
           fi
           xcodebuild \
