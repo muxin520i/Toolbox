@@ -26,6 +26,8 @@ final class DownloadItem: ObservableObject, Identifiable {
     @Published var createdAt: Date = Date()
     /// 失败原因，直接显示给用户看
     @Published var failReason: String = ""
+    /// 阶段提示（比如“正在合并为 MP4”）
+    @Published var note: String = ""
 
     init(fileName: String, source: String) {
         self.fileName = fileName
@@ -167,7 +169,11 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate {
 
     /// 普通文件：一个 GET 到底
     private func startDirect(url: URL, name: String, source: String) -> DownloadItem {
-        let dest = Self.unique(in: Self.directory(), name: name + ".mp4")
+        // 按真实后缀存，不知道后缀才落到 mp4，避免把 .ts 装成 .mp4 导致播不了
+        let known = ["mp4", "m4v", "mov", "ts", "mkv", "webm", "flv", "mp3", "m4a", "aac", "wav"]
+        var ext = url.pathExtension.lowercased()
+        if !known.contains(ext) { ext = "mp4" }
+        let dest = Self.unique(in: Self.directory(), name: name + "." + ext)
 
         let item = DownloadItem(fileName: dest.lastPathComponent, source: source)
         item.localPath = dest.path
@@ -205,11 +211,38 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate {
                     try? FileManager.default.removeItem(at: dest)
                     try FileManager.default.moveItem(at: tempURL, to: dest)
                     item.progress = 1
-                    item.state = .finished
                 } catch {
                     item.state = .failed
                     item.failReason = "保存失败，存储空间可能不够"
+                    self.save()
+                    return
                 }
+
+                // 直接下到的是裸流（.ts）时同样转成 MP4
+                if dest.pathExtension.lowercased() == "ts" {
+                    item.note = "正在合并为 MP4…"
+                    self.save()
+                    Task {
+                        var finalURL = dest
+                        var failed = false
+                        do {
+                            finalURL = try await MediaRemuxer.remuxToMP4(dest)
+                        } catch {
+                            failed = true
+                        }
+                        await MainActor.run {
+                            item.note = failed ? "已保存为 .ts，播放器可能不支持" : ""
+                            item.fileName = finalURL.lastPathComponent
+                            item.localPath = finalURL.path
+                            item.progress = 1
+                            item.state = .finished
+                            self.save()
+                        }
+                    }
+                    return
+                }
+
+                item.state = .finished
                 self.save()
             }
         }
@@ -253,12 +286,36 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate {
                 }
 
                 try await HLSDownloader.download(playlist, referer: referer, to: dest) { value in
-                    DispatchQueue.main.async { item.progress = value }
+                    DispatchQueue.main.async {
+                        item.progress = min(value, 0.99)
+                    }
+                }
+
+                // 分片拼出来的是裸流，容器不对播放器认不出来，
+                // 这里换成 MP4（只转封装，不重新编码），换完才能直接播
+                await MainActor.run {
+                    item.progress = 1
+                    item.note = "正在合并为 MP4…"
+                }
+
+                var finalURL = dest
+                var mergeFailed = false
+                do {
+                    finalURL = try await MediaRemuxer.remuxIfNeeded(dest)
+                } catch {
+                    mergeFailed = true
                 }
 
                 await MainActor.run {
+                    item.note = ""
+                    item.fileName = finalURL.lastPathComponent
+                    item.localPath = finalURL.path
                     item.progress = 1
                     item.state = .finished
+                    if mergeFailed {
+                        item.failReason = ""
+                        item.note = "已保存为 .ts，播放器可能不支持"
+                    }
                     self.jobs.removeValue(forKey: item.id)
                     self.save()
                 }

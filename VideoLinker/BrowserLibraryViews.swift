@@ -367,7 +367,7 @@ struct DownloadRow: View {
                         ProgressView(value: item.progress)
                             .progressViewStyle(.linear)
                             .tint(.accentColor)
-                        Text("\(Int(item.progress * 100))%")
+                        Text(item.note.isEmpty ? "\(Int(item.progress * 100))%" : item.note)
                             .font(.system(size: 10))
                             .foregroundStyle(.secondary)
                     } else if item.state == .failed {
@@ -375,6 +375,10 @@ struct DownloadRow: View {
                             .font(.system(size: 10))
                             .foregroundStyle(.red.opacity(0.85))
                             .lineLimit(2)
+                    } else if !item.note.isEmpty {
+                        Text(item.note)
+                            .font(.system(size: 10))
+                            .foregroundStyle(.orange.opacity(0.9))
                     } else {
                         Text(item.sizeText)
                             .font(.system(size: 10))

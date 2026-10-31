@@ -361,19 +361,11 @@ struct PlayerScreen: View {
                 endPoint: .bottom
             )
             .ignoresSafeArea()
+            // 渐变只做视觉，不参与点击，避免把整屏点击都吃掉
+            .allowsHitTesting(false)
         )
         .opacity(showControls ? 1 : 0)
         .allowsHitTesting(showControls)
-        // 控件层本身会挡住下层手势，这里补一套：单击收起、双击仍然快进快退
-        .contentShape(Rectangle())
-        .gesture(
-            SpatialTapGesture(count: 2)
-                .onEnded { value in
-                    let isLeft = value.location.x < UIScreen.main.bounds.width / 2
-                    seekRelative(isLeft ? -10 : 10)
-                }
-                .exclusively(before: TapGesture().onEnded { toggleControls() })
-        )
         .animation(.easeInOut(duration: 0.2), value: showControls)
     }
 
@@ -438,6 +430,8 @@ struct PlayerScreen: View {
             }
             .buttonStyle(.plain)
         }
+        // 顶部这一条属于控件区，点空白也不切换显隐（用几乎透明的底把点击拦下来）
+        .background(Color.black.opacity(0.001))
     }
 
     private var playPauseButton: some View {
@@ -559,6 +553,7 @@ struct PlayerScreen: View {
                 .buttonStyle(.plain)
             }
         }
+        .background(Color.black.opacity(0.001))
     }
 
     private var rateLabel: String {

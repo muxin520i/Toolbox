@@ -115,6 +115,35 @@ enum BrowserInject {
         var head = document.head || root;
         var n = document.getElementById('vl-night-style');
 
+        // 脚本镜像站整体强制浅色：系统深色模式会把 Bulma 的深色变量带出来，
+        // 页面会变成黑底，这里统一压回白底，并跳过夜间反色
+        var host = (location.hostname || '').toLowerCase();
+        var forceLight = /(^|\\.)greasyfork\\.(icu|org\\.cn)$/.test(host)
+          || /(^|\\.)greasyfork\\.org$/.test(host);
+        var lightStyle = document.getElementById('vl-force-light');
+
+        if (forceLight) {
+          if (!lightStyle) {
+            lightStyle = document.createElement('style');
+            lightStyle.id = 'vl-force-light';
+            lightStyle.textContent =
+              'html{color-scheme:light!important;background:#fff!important}'
+              + 'body{background:#fff!important;color:#1b1f27!important}'
+              + ':root{--bulma-scheme-main-l:100%!important;--bulma-scheme-main-bis-l:98%!important;'
+              + '--bulma-scheme-main-ter-l:96%!important;--bulma-background-l:96%!important;'
+              + '--bulma-text-l:21%!important;--bulma-text-strong-l:14%!important;'
+              + '--bulma-border-l:86%!important;--bulma-scheme-invert-l:21%!important}'
+              + 'html[data-vl-night]{filter:none!important}';
+          }
+          if (!lightStyle.parentNode) { head.appendChild(lightStyle); }
+          if (n && n.parentNode) { n.parentNode.removeChild(n); }
+          n = null;
+          root.removeAttribute('data-vl-night');
+          night = false;
+        } else if (lightStyle && lightStyle.parentNode) {
+          lightStyle.parentNode.removeChild(lightStyle);
+        }
+
         function pageIsDark() {
           try {
             var els = [document.body, root];
@@ -264,6 +293,39 @@ enum BrowserInject {
 
     static let readerRun = "window.__vlReader ? window.__vlReader() : false"
 
+    /// 脚本镜像站：这些站点一律按浅色渲染，避免跟随系统深色变黑
+    static func isLightSite(_ host: String?) -> Bool {
+        guard let h = host?.lowercased(), !h.isEmpty else { return false }
+        if h == "greasyfork.icu" || h.hasSuffix(".greasyfork.icu") { return true }
+        if h == "greasyfork.org" || h.hasSuffix(".greasyfork.org") { return true }
+        if h == "greasyfork.org.cn" || h.hasSuffix(".greasyfork.org.cn") { return true }
+        return false
+    }
+
+    /// 兜底：页面自身写死了深色 class/样式时，再把主背景压白一遍
+    static let forceLightSite = """
+    (function() {
+      try {
+        var host = (location.hostname || '').toLowerCase();
+        var hit = /(^|\\.)greasyfork\\.(icu|org\\.cn)$/.test(host) || /(^|\\.)greasyfork\\.org$/.test(host);
+        if (!hit) { return; }
+        if (document.getElementById('vl-force-light')) { return; }
+        var s = document.createElement('style');
+        s.id = 'vl-force-light';
+        s.textContent = 'html{color-scheme:light!important;background:#fff!important}'
+          + 'body{background:#fff!important;color:#1b1f27!important}'
+          + ':root{--bulma-scheme-main-l:100%!important;--bulma-scheme-main-bis-l:98%!important;'
+          + '--bulma-scheme-main-ter-l:96%!important;--bulma-background-l:96%!important;'
+          + '--bulma-text-l:21%!important;--bulma-text-strong-l:14%!important;'
+          + '--bulma-border-l:86%!important;--bulma-scheme-invert-l:21%!important}';
+        (document.head || document.documentElement).appendChild(s);
+        document.documentElement.removeAttribute('data-vl-night');
+        var n = document.getElementById('vl-night-style');
+        if (n && n.parentNode) { n.parentNode.removeChild(n); }
+      } catch (e) {}
+    })();
+    """
+
     static func appearanceJS(night: Bool, noImage: Bool) -> String {
         let a = night ? "true" : "false"
         let b = noImage ? "true" : "false"
@@ -277,7 +339,7 @@ enum BrowserInject {
                         userscripts: [Userscript]) {
         controller.removeAllUserScripts()
 
-        let startScripts = [sniffer, shell, adBlock ? adBlockScript : "", installHook].filter { !$0.isEmpty }
+        let startScripts = [sniffer, shell, adBlock ? adBlockScript : "", installHook, forceLightSite].filter { !$0.isEmpty }
         for code in startScripts {
             controller.addUserScript(
                 WKUserScript(source: code, injectionTime: .atDocumentStart, forMainFrameOnly: false)

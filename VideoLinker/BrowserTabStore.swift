@@ -431,6 +431,10 @@ final class TabCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScri
             webView.evaluateJavaScript(BrowserInject.scanOnce, completionHandler: nil)
         }
 
+        // 脚本镜像站固定浅色：页面自带的深色变量在这里被压回白底
+        applySiteAppearance(webView, host: webView.url?.host)
+        webView.evaluateJavaScript(BrowserInject.forceLightSite, completionHandler: nil)
+
         if let store = store {
             let js = BrowserInject.appearanceJS(night: store.options.night, noImage: store.options.noImage)
             webView.evaluateJavaScript(js, completionHandler: nil)
@@ -443,6 +447,15 @@ final class TabCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScri
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         report(error)
+    }
+
+    /// 脚本站固定浅色渲染（同时把 WebView 底色改白，避免加载间隙透出黑）
+    private func applySiteAppearance(_ webView: WKWebView, host: String?) {
+        let light = BrowserInject.isLightSite(host)
+        webView.overrideUserInterfaceStyle = light ? .light : .unspecified
+        let bg: UIColor = light ? .white : .black
+        if webView.backgroundColor != bg { webView.backgroundColor = bg }
+        if webView.scrollView.backgroundColor != bg { webView.scrollView.backgroundColor = bg }
     }
 
     private func report(_ error: Error) {
@@ -469,6 +482,10 @@ final class TabCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScri
             UIApplication.shared.open(url, options: [:], completionHandler: nil)
             decisionHandler(.cancel)
             return
+        }
+        // 主框架切站时同步外观：脚本站走浅色，其它站跟随系统
+        if navigationAction.targetFrame?.isMainFrame ?? false {
+            applySiteAppearance(webView, host: url.host)
         }
         if navigationAction.shouldPerformDownload {
             decisionHandler(.download)
