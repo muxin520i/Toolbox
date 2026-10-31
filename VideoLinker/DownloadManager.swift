@@ -513,7 +513,7 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
 
         Task.detached(priority: .utility) {
             do {
-                try Self.merge(parts: dir, job: job, to: target)
+                try Self.writeParts(dir: dir, job: job, to: target)
 
                 // 拼出来的是裸流，换成 MP4 播放器才认
                 var finalURL = target
@@ -549,7 +549,7 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
     }
 
     /// 按顺序写入：初始化段 → 每片解密 → 拼成一个文件
-    private static func merge(parts dir: URL, job: HLSJob, to dest: URL) throws {
+    private static func writeParts(dir: URL, job: HLSJob, to dest: URL) throws {
         try? FileManager.default.removeItem(at: dest)
         FileManager.default.createFile(atPath: dest.path, contents: nil)
         guard let handle = try? FileHandle(forWritingTo: dest) else {
@@ -782,7 +782,7 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         // 分片任务：成功的那条已经在 didFinishDownloadingTo 处理过
         if takeSegment(task.taskIdentifier) != nil {
-            guard let error = error else { return }
+            guard error != nil else { return }
             let segItem = takeItem(task.taskIdentifier)
             DispatchQueue.main.async {
                 guard let item = segItem else { return }
