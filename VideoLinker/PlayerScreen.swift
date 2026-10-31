@@ -101,6 +101,12 @@ struct PlayerScreen: View {
             }
             .ignoresSafeArea()
 
+            // VLC 兜底时用它的画面层盖住 AVPlayerLayer
+            if let engine = model.vlcEngine {
+                VLCVideoView(engine: engine)
+                    .ignoresSafeArea()
+            }
+
             gestureLayer
 
             if model.isLoading {
@@ -720,6 +726,11 @@ struct PlayerScreen: View {
     }
 
     private func togglePictureInPicture() {
+        if model.usingVLC {
+            showHint("VLC 兜底的视频暂不支持画中画")
+            hideHintSoon()
+            return
+        }
         guard let controller = pipController else {
             showHint("这个视频不支持画中画")
             hideHintSoon()
@@ -880,8 +891,14 @@ final class PlayerModel: ObservableObject {
     @Published private(set) var isPlaying = false
     @Published private(set) var currentTime: Double = 0
     @Published private(set) var duration: Double = 0
+    /// 当前是不是在用 VLC 兜底
+    @Published private(set) var usingVLC = false
     @Published var rate: Double = 1.0 {
         didSet {
+            if usingVLC {
+                vlcEngine?.setRate(rate)
+                return
+            }
             player.defaultRate = Float(rate)
             if player.timeControlStatus == .playing {
                 player.rate = Float(rate)
@@ -895,6 +912,8 @@ final class PlayerModel: ObservableObject {
     var onProgress: ((Double, Double) -> Void)?
 
     let player = AVPlayer()
+
+    private(set) var vlcEngine: VLCPlayback?
 
     private var statusObserver: NSKeyValueObservation?
     private var timeObserver: Any?
@@ -949,6 +968,10 @@ final class PlayerModel: ObservableObject {
     /// 强制生效：同时写 defaultRate 和当前 rate，缓冲中也能记住
     func forceRate(_ value: Double) {
         rate = value
+        if usingVLC {
+            vlcEngine?.setRate(value)
+            return
+        }
         player.defaultRate = Float(value)
         switch player.timeControlStatus {
         case .playing, .waitingToPlayAtSpecifiedRate:
@@ -965,6 +988,7 @@ final class PlayerModel: ObservableObject {
     func load(_ url: URL, startAt: Double? = nil) {
         configureAudioSession()
 
+        teardownVLC()
         statusObserver?.invalidate()
         timeoutWorkItem?.cancel()
         removeEndObserver()
@@ -975,6 +999,13 @@ final class PlayerModel: ObservableObject {
         duration = 0
         lastSavedSecond = -100
         pendingSeek = startAt
+
+        // mkv / flv / avi 这些系统播放器基本没戏，直接交给 VLC，省一次失败等待
+        if VLCPlayback.isAvailable,
+           Self.vlcOnlyExtensions.contains(url.pathExtension.lowercased()) {
+            startVLC(url: url, startAt: startAt)
+            return
+        }
 
         let item = AVPlayerItem(url: url)
         item.preferredForwardBufferDuration = 4
@@ -995,8 +1026,11 @@ final class PlayerModel: ObservableObject {
                         self.player.rate = Float(self.rate)
                     }
                 case .failed:
-                    self.isLoading = false
-                    self.errorMessage = Self.describe(failureReason)
+                    if failureReason != nil {
+                        print("AVPlayer failed:", failureReason!.localizedDescription)
+                    }
+                    // 系统播放器不认这个容器，换 VLC 再试一次
+                    self.switchToVLC(url: url, startAt: self.pendingSeek)
                 default:
                     break
                 }
@@ -1017,8 +1051,8 @@ final class PlayerModel: ObservableObject {
 
         let workItem = DispatchWorkItem { [weak self] in
             guard let self = self, self.isLoading else { return }
-            self.isLoading = false
-            self.errorMessage = "加载超时。链接可能已失效、需要登录，或该地址不允许被外部播放器访问。"
+            // 超时不直接判死，VLC 对某些流更宽容
+            self.switchToVLC(url: url, startAt: self.pendingSeek)
         }
         timeoutWorkItem = workItem
         DispatchQueue.main.asyncAfter(deadline: .now() + 20, execute: workItem)
@@ -1039,15 +1073,27 @@ final class PlayerModel: ObservableObject {
     }
 
     func play() {
+        if usingVLC {
+            vlcEngine?.play()
+            return
+        }
         player.play()
         player.rate = Float(rate)
     }
 
     func pause() {
+        if usingVLC {
+            vlcEngine?.pause()
+            return
+        }
         player.pause()
     }
 
     func togglePlay() {
+        if usingVLC {
+            vlcEngine?.togglePlay()
+            return
+        }
         if isPlaying {
             player.pause()
         } else {
@@ -1062,6 +1108,11 @@ final class PlayerModel: ObservableObject {
         guard seconds.isFinite else { return }
         let clamped = max(0, duration > 0 ? min(seconds, duration) : seconds)
         currentTime = clamped
+
+        if usingVLC {
+            vlcEngine?.seek(to: clamped)
+            return
+        }
         player.seek(
             to: CMTime(seconds: clamped, preferredTimescale: 600),
             toleranceBefore: .zero,
@@ -1074,9 +1125,78 @@ final class PlayerModel: ObservableObject {
         statusObserver?.invalidate()
         statusObserver = nil
         removeEndObserver()
+        teardownVLC()
         player.pause()
         player.replaceCurrentItem(with: nil)
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+
+    // MARK: - VLC 兜底
+
+    /// 系统播放器处理不了的容器：直接走 VLC 更稳，也更快
+    private static let vlcOnlyExtensions: Set<String> = [
+        "mkv", "flv", "avi", "rmvb", "rm", "wmv", "webm",
+        "m2ts", "mts", "ts", "mpg", "mpeg", "ogv", "3gp", "asf", "vob", "f4v"
+    ]
+
+    private func switchToVLC(url: URL, startAt: Double?) {
+        guard VLCPlayback.isAvailable else {
+            isLoading = false
+            errorMessage = "视频格式不受支持，或链接不是可直接播放的媒体地址。"
+            return
+        }
+        guard vlcEngine == nil else {
+            isLoading = false
+            errorMessage = "这个地址没能识别出视频内容，换台设备或换个源试试。"
+            return
+        }
+        timeoutWorkItem?.cancel()
+        statusObserver?.invalidate()
+        statusObserver = nil
+        player.pause()
+        player.replaceCurrentItem(with: nil)
+        startVLC(url: url, startAt: startAt)
+    }
+
+    private func startVLC(url: URL, startAt: Double?) {
+        isLoading = true
+        errorMessage = nil
+        duration = 0
+        currentTime = max(0, startAt ?? 0)
+
+        let engine = VLCPlayback()
+        engine.onTime = { [weak self] time, total in
+            guard let self = self else { return }
+            self.currentTime = time
+            if total > 0 { self.duration = total }
+            if self.currentTime - self.lastSavedSecond >= 5 {
+                self.lastSavedSecond = self.currentTime
+                self.onProgress?(self.currentTime, self.duration)
+            }
+        }
+        engine.onState = { [weak self] playing, buffering in
+            guard let self = self else { return }
+            self.isPlaying = playing
+            if !buffering { self.isLoading = false }
+        }
+        engine.onEnded = { [weak self] in
+            self?.onFinished?()
+        }
+        engine.onFailed = { [weak self] message in
+            guard let self = self else { return }
+            self.isLoading = false
+            self.errorMessage = message
+        }
+
+        vlcEngine = engine
+        usingVLC = true
+        engine.load(url, rate: rate, startAt: startAt)
+    }
+
+    private func teardownVLC() {
+        vlcEngine?.stop()
+        vlcEngine = nil
+        usingVLC = false
     }
 
     private func removeEndObserver() {

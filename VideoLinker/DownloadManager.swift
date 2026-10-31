@@ -52,6 +52,8 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate {
     static let shared = DownloadManager()
 
     @Published private(set) var items: [DownloadItem] = []
+    /// 当前正在下载的那一条。items 数组本身不随进度变化，首页要靠它才能拿到最新进度
+    @Published private(set) var runningItem: DownloadItem?
 
     private var timers: [UUID: Timer] = [:]
     private var live: [ObjectIdentifier: DownloadItem] = [:]
@@ -179,6 +181,7 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate {
         item.localPath = dest.path
         items.insert(item, at: 0)
         items = Array(items.prefix(60))
+        refreshRunning()
 
         var request = URLRequest(url: url)
         request.timeoutInterval = 30
@@ -270,6 +273,7 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate {
             item = DownloadItem(fileName: name + ".ts", source: source)
             items.insert(item, at: 0)
             items = Array(items.prefix(60))
+            refreshRunning()
         }
 
         let referer = Self.referer(for: url)
@@ -404,12 +408,17 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate {
     }
 
     private func save() {
+        refreshRunning()
         let records = items
             .filter { $0.state == .finished && !$0.localPath.isEmpty }
             .map { Record(fileName: $0.fileName, source: $0.source, localPath: $0.localPath, date: $0.createdAt) }
         if let data = try? JSONEncoder().encode(records) {
             UserDefaults.standard.set(data, forKey: Self.storeKey)
         }
+    }
+
+    private func refreshRunning() {
+        runningItem = items.first { $0.state == .running }
     }
 
     private func load() {

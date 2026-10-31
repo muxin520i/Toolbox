@@ -202,7 +202,7 @@ struct ContentView: View {
     // MARK: - 下载入口
 
     private var runningDownload: DownloadItem? {
-        downloads.items.first { $0.state == .running }
+        downloads.runningItem
     }
 
     private var downloadEntry: some View {
@@ -230,14 +230,11 @@ struct ContentView: View {
                 Spacer()
 
                 if let running = runningDownload {
-                    Text(running.fileName)
-                        .font(.system(size: 11))
-                        .foregroundStyle(theme.textTertiary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    Text("\(Int(running.progress * 100))%")
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
-                        .foregroundStyle(theme.accent)
+                    DownloadRunningLabel(
+                        item: running,
+                        secondary: theme.textTertiary,
+                        accent: theme.accent
+                    )
                 }
 
                 Image(systemName: "chevron.right")
@@ -518,5 +515,28 @@ struct ContentView: View {
 struct ContentView_Previews: PreviewProvider {
     static var previews: some View {
         ContentView()
+    }
+}
+
+/// 首页下载条右侧的进度。
+/// 必须单独观察 DownloadItem：外层只观察 DownloadManager，
+/// 数组没变时不会因为 item.progress 更新而重绘，进度就会一直停在 0%。
+private struct DownloadRunningLabel: View {
+    @ObservedObject var item: DownloadItem
+    let secondary: Color
+    let accent: Color
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(item.fileName)
+                .font(.system(size: 11))
+                .foregroundStyle(secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+
+            Text(item.note.isEmpty ? "\(Int(item.progress * 100))%" : item.note)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(accent)
+        }
     }
 }
