@@ -26,6 +26,47 @@ struct HLSSegment {
     }
 }
 
+/// 可落盘的分片记录：重启后按它继续下缺的那几片
+struct HLSSegmentRecord: Codable {
+    var url: String
+    var length: Int?
+    var offset: Int?
+
+    var segment: HLSSegment? {
+        guard let url = URL(string: url) else { return nil }
+        if let length = length, let offset = offset {
+            return HLSSegment(url: url, range: (length, offset))
+        }
+        return HLSSegment(url: url, range: nil)
+    }
+
+    init(url: String, length: Int? = nil, offset: Int? = nil) {
+        self.url = url
+        self.length = length
+        self.offset = offset
+    }
+
+    init(segment: HLSSegment) {
+        self.url = segment.url.absoluteString
+        self.length = segment.range?.length
+        self.offset = segment.range?.offset
+    }
+}
+
+/// 一条 HLS 下载任务的全部信息，存成 meta.json 就能跨启动续传
+struct HLSJob: Codable {
+    var segments: [HLSSegmentRecord]
+    var initSegment: HLSSegmentRecord?
+    var keyBase64: String?
+    var ivBase64: String?
+    var mediaSequence: Int
+    var fileExtension: String
+
+    var total: Int { segments.count }
+    var key: Data? { keyBase64.flatMap { Data(base64Encoded: $0) } }
+    var explicitIV: Data? { ivBase64.flatMap { Data(base64Encoded: $0) } }
+}
+
 /// 解析好的播放清单
 struct HLSPlaylist {
     var segments: [HLSSegment]
@@ -336,19 +377,49 @@ enum HLSDownloader {
         progress(1)
     }
 
+    /// 单独取一次 AES-128 密钥（分片交给后台任务下载时，密钥提前拿好存进 meta）
+    static func fetchKey(for playlist: HLSPlaylist, referer: String?) async throws -> Data? {
+        guard let keyURI = playlist.keyURI else { return nil }
+        var request = URLRequest(url: keyURI)
+        request.timeoutInterval = 20
+        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        if let referer = referer { request.setValue(referer, forHTTPHeaderField: "Referer") }
+        let data = try await fetchData(request, retry: 2)
+        guard data.count == 16 else { throw HLSFailure(message: "取解密密钥失败") }
+        return data
+    }
+
+    static func makeJob(from playlist: HLSPlaylist, key: Data?) -> HLSJob {
+        HLSJob(
+            segments: playlist.segments.map { HLSSegmentRecord(segment: $0) },
+            initSegment: playlist.initSegment.map { HLSSegmentRecord(segment: $0) },
+            keyBase64: key?.base64EncodedString(),
+            ivBase64: playlist.explicitIV?.base64EncodedString(),
+            mediaSequence: playlist.mediaSequence,
+            fileExtension: playlist.fileExtension
+        )
+    }
+
+    /// 拼装时用：按序号解密分片
+    static func decrypt(_ data: Data, job: HLSJob, index: Int) -> Data? {
+        guard let key = job.key else { return data }
+        let iv = job.explicitIV ?? sequenceIV(job.mediaSequence + index)
+        return aes128Decrypt(data, key: key, iv: iv)
+    }
+
     private static func segmentData(_ segment: HLSSegment, referer: String?) async throws -> Data {
         try await fetchData(segment.request(referer: referer, ua: userAgent), retry: 3)
     }
 
     /// 没有显式 IV 时，IV 就是分片序号（大端 16 字节）
-    private static func sequenceIV(_ sequence: Int) -> Data {
+    static func sequenceIV(_ sequence: Int) -> Data {
         var value = UInt64(sequence).bigEndian
         var data = Data(repeating: 0, count: 8)
         withUnsafeBytes(of: &value) { data.append(contentsOf: $0) }
         return data
     }
 
-    private static func aes128Decrypt(_ data: Data, key: Data, iv: Data) -> Data? {
+    static func aes128Decrypt(_ data: Data, key: Data, iv: Data) -> Data? {
         guard key.count == 16, iv.count == 16, !data.isEmpty else { return nil }
 
         let inputCount = data.count

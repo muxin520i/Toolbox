@@ -505,28 +505,34 @@ struct DownloadRow: View {
     var onTap: () -> Void
 
     var body: some View {
-        HStack(spacing: 10) {
-            leading
+        HStack(spacing: 8) {
+            // 内容区单独做成按钮：整行不再挂 onTapGesture，
+            // 否则右边那颗暂停/继续按钮的点击会被行手势抢走
+            Button {
+                guard item.state == .finished else { return }
+                onTap()
+            } label: {
+                HStack(spacing: 10) {
+                    leading
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text(item.fileName)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(item.fileName)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
 
-                statusLine
+                        statusLine
+                    }
+
+                    Spacer(minLength: 6)
+                }
+                .contentShape(Rectangle())
             }
-
-            Spacer(minLength: 6)
+            .buttonStyle(.plain)
 
             actionButton
         }
         .padding(.vertical, 5)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            guard item.state == .finished else { return }
-            onTap()
-        }
     }
 
     // MARK: 左侧
@@ -556,26 +562,14 @@ struct DownloadRow: View {
     @ViewBuilder
     private var statusLine: some View {
         if item.state == .running || item.state == .queued {
-            ProgressView(value: item.state == .queued ? 0 : item.progress)
+            ProgressView(value: item.state == .queued ? 0 : min(max(item.progress, 0), 1))
                 .progressViewStyle(.linear)
                 .tint(.accentColor)
 
-            HStack(spacing: 6) {
-                if item.state == .queued {
-                    Text("排队中")
-                } else {
-                    Text("\(Int(item.progress * 100))%")
-                }
-
-                if !item.note.isEmpty {
-                    Text(item.note)
-                } else if !item.transferText.isEmpty {
-                    Text(item.transferText)
-                }
-            }
-            .font(.system(size: 10))
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
+            Text(item.state == .queued ? "排队中" : runningDetail)
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
         } else if item.state == .paused {
             Text(item.progress > 0
                  ? "已暂停 · \(Int(item.progress * 100))%，点右边的按钮接着下"
@@ -598,6 +592,21 @@ struct DownloadRow: View {
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
         }
+    }
+
+    /// 下载中那行：「2.4 MB/s · 34% · 12.1 MB / 40 MB」
+    private var runningDetail: String {
+        var parts: [String] = []
+        if !item.speedText.isEmpty { parts.append(item.speedText) }
+
+        if !item.note.isEmpty {
+            parts.append(item.note)
+        } else {
+            parts.append("\(Int(item.progress * 100))%")
+            if !item.transferText.isEmpty { parts.append(item.transferText) }
+        }
+
+        return parts.joined(separator: " · ")
     }
 
     // MARK: 右侧按钮
@@ -630,9 +639,9 @@ struct DownloadRow: View {
 
     private func actionIcon(_ name: String) -> some View {
         Image(systemName: name)
-            .font(.system(size: 20))
+            .font(.system(size: 21))
             .foregroundStyle(.secondary)
-            .frame(width: 34, height: 34)
+            .frame(width: 44, height: 44)
             .contentShape(Rectangle())
     }
 

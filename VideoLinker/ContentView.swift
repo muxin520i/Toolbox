@@ -570,7 +570,9 @@ private struct DownloadRunningLabel: View {
         case .queued: return "排队中"
         case .paused: return "已暂停"
         case .failed: return "失败"
-        default: return "\(Int(item.progress * 100))%"
+        default:
+            let speed = item.speedText
+            return speed.isEmpty ? "\(Int(item.progress * 100))%" : speed
         }
     }
 }

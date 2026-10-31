@@ -38,6 +38,8 @@ final class DownloadItem: ObservableObject, Identifiable {
     @Published var note: String = ""
     @Published var received: Int64 = 0
     @Published var expected: Int64 = 0
+    /// 实时速度（字节/秒），下载页直接显示
+    @Published var speed: Double = 0
 
     /// HLS 走自研分片下载，拿不到系统的 resumeData
     var isHLS = false
@@ -72,6 +74,18 @@ final class DownloadItem: ObservableObject, Identifiable {
         let total = ByteCountFormatter.string(fromByteCount: expected, countStyle: .file)
         return done + " / " + total
     }
+
+    /// 「2.4 MB/s」「860 KB/s」这种，按量级自动选单位
+    var speedText: String {
+        guard speed > 0 else { return "" }
+        if speed >= 1024 * 1024 {
+            return String(format: "%.1f MB/s", speed / 1024 / 1024)
+        }
+        if speed >= 1024 {
+            return String(format: "%.0f KB/s", speed / 1024)
+        }
+        return String(format: "%.0f B/s", speed)
+    }
 }
 
 // MARK: - 下载管理
@@ -94,6 +108,19 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
     private var live: [ObjectIdentifier: DownloadItem] = [:]
     private var jobs: [UUID: Task<Void, Never>] = [:]
     private var itemForTask: [Int: DownloadItem] = [:]
+    /// 后台回调跑在独立串行队列，索引必须加锁，否则会读到半成品甚至崩
+    private let indexLock = NSLock()
+    /// 正在跑的分片任务：taskID → (哪一条, 第几片，-1 表示初始化段)
+    private var segTasks: [Int: (itemID: UUID, index: Int)] = [:]
+    /// 解析好的 HLS 任务（含密钥与分片清单），继续和重启恢复都靠它
+    private var hlsJobs: [UUID: HLSJob] = [:]
+    /// 正在拼文件的，避免重复进入
+    private var hlsAssembling: Set<UUID> = []
+    /// 速度采样：每秒算一次 received 的增量
+    private var speedTimer: Timer?
+    private var lastSample: [UUID: (bytes: Int64, at: Date)] = [:]
+    /// 同时在下的分片数
+    private let segmentWindow = 4
     private var session: URLSession?
     private var pendingCompletion: (() -> Void)?
 
@@ -119,6 +146,24 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
         session.getAllTasks { tasks in
             DispatchQueue.main.async {
                 for task in tasks {
+                    // 分片任务：按 taskDescription 里记的「哪一条 + 第几片」认回来
+                    if let desc = task.taskDescription, desc.hasPrefix("seg:") {
+                        let fields = desc.split(separator: ":")
+                        if fields.count == 3,
+                           let itemID = UUID(uuidString: String(fields[1])),
+                           let index = Int(fields[2]),
+                           let item = self.items.first(where: { $0.id == itemID }) {
+                            self.linkSegment(taskID: task.taskIdentifier,
+                                             itemID: itemID, index: index, item: item)
+                            if item.state == .paused {
+                                task.cancel()
+                            } else {
+                                item.state = .running
+                            }
+                        }
+                        continue
+                    }
+
                     guard let url = task.originalRequest?.url?.absoluteString else { continue }
                     guard let item = self.items.first(where: {
                         $0.source == url && !$0.isHLS && $0.state != .finished
@@ -126,7 +171,7 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
 
                     item.taskID = task.taskIdentifier
                     item.state = .running
-                    self.itemForTask[task.taskIdentifier] = item
+                    self.link(item, to: task.taskIdentifier)
                 }
 
                 self.refreshRunning()
@@ -143,9 +188,11 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
         let config = URLSessionConfiguration.background(withIdentifier: Self.sessionID)
         config.sessionSendsLaunchEvents = true
         config.isDiscretionary = false
-        config.timeoutIntervalForRequest = 60
-        config.timeoutIntervalForResource = 60 * 60 * 6
-        config.httpMaximumConnectionsPerHost = 4
+        // 后台会话在挂起时不会像前台那样持续重试，60 秒超时会让锁屏后的任务频繁失败
+        config.timeoutIntervalForRequest = 300
+        config.timeoutIntervalForResource = 60 * 60 * 12
+        config.waitsForConnectivity = true
+        config.httpMaximumConnectionsPerHost = 6
 
         let queue = OperationQueue()
         queue.maxConcurrentOperationCount = 1
@@ -154,6 +201,52 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
         let created = URLSession(configuration: config, delegate: self, delegateQueue: queue)
         session = created
         return created
+    }
+
+    // MARK: 索引读写（后台回调在别的线程，必须加锁）
+
+    private func link(_ item: DownloadItem, to taskID: Int) {
+        indexLock.lock()
+        itemForTask[taskID] = item
+        indexLock.unlock()
+    }
+
+    private func linkedItem(_ taskID: Int) -> DownloadItem? {
+        indexLock.lock()
+        defer { indexLock.unlock() }
+        return itemForTask[taskID]
+    }
+
+    /// 取走并解绑（一个任务只处理一次）
+    private func takeItem(_ taskID: Int) -> DownloadItem? {
+        indexLock.lock()
+        defer { indexLock.unlock() }
+        return itemForTask.removeValue(forKey: taskID)
+    }
+
+    private func linkSegment(taskID: Int, itemID: UUID, index: Int, item: DownloadItem?) {
+        indexLock.lock()
+        segTasks[taskID] = (itemID, index)
+        if let item = item { itemForTask[taskID] = item }
+        indexLock.unlock()
+    }
+
+    private func takeSegment(_ taskID: Int) -> (itemID: UUID, index: Int)? {
+        indexLock.lock()
+        defer { indexLock.unlock() }
+        return segTasks.removeValue(forKey: taskID)
+    }
+
+    private func segmentCount(of itemID: UUID) -> Int {
+        indexLock.lock()
+        defer { indexLock.unlock() }
+        return segTasks.values.filter { $0.itemID == itemID }.count
+    }
+
+    private func segmentIndexes(of itemID: UUID) -> Set<Int> {
+        indexLock.lock()
+        defer { indexLock.unlock() }
+        return Set(segTasks.values.filter { $0.itemID == itemID }.map { $0.index })
     }
 
     /// 系统把 App 唤醒来处理后台下载事件时，AppDelegate 把 completion 交过来
@@ -184,6 +277,9 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
         }
 
         refreshRunning()
+        if items.contains(where: { $0.state == .running }) {
+            startSpeedTimer()
+        }
     }
 
     private func beginDirect(_ item: DownloadItem) {
@@ -197,8 +293,20 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
         item.state = .running
         item.note = ""
         item.failReason = ""
-        item.progress = 0
-        item.received = 0
+        item.speed = 0
+
+        let hasResume = !(item.resumeData?.isEmpty ?? true)
+        if hasResume {
+            // 接着上次的字节数显示，别一继续就跳回 0%
+            item.note = "正在接着上次的位置…"
+        } else {
+            if item.received > 0 {
+                // 服务器没给断点数据（不支持 Range），只能从头下，明说一句
+                item.note = "服务器不支持断点，已从头开始"
+            }
+            item.progress = 0
+            item.received = 0
+        }
 
         if item.destURL == nil {
             let known = ["mp4", "m4v", "mov", "ts", "mkv", "webm", "flv",
@@ -224,83 +332,60 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
 
         item.resumeData = nil
         item.taskID = task.taskIdentifier
-        itemForTask[task.taskIdentifier] = item
+        link(item, to: task.taskIdentifier)
         task.resume()
         save()
+        startSpeedTimer()
     }
 
-    /// m3u8：解析清单 → 并发拉分片 → 解密 → 顺序拼接
+    /// m3u8：解析清单 → 取密钥 → 分片交给后台下载任务 → 拼装 → 换封装
     private func beginHLS(_ item: DownloadItem) {
         guard let url = URL(string: item.source) else {
-            item.state = .failed
-            item.failReason = "链接格式不对"
-            save()
+            fail(item, "链接格式不对")
             return
         }
 
         item.state = .running
-        item.note = ""
         item.failReason = ""
+        item.note = ""
+        item.speed = 0
+
+        // 之前解析过（暂停后继续、杀掉重开）：直接从缺的分片接着下，不再从头来
+        if let job = loadJob(for: item.id) {
+            hlsJobs[item.id] = job
+            prepareDestination(item, ext: job.fileExtension)
+            item.progress = max(item.progress, progress(of: item, job: job))
+            pumpSegments(item, job: job)
+            save()
+            startSpeedTimer()
+            return
+        }
+
+        item.note = "正在解析清单…"
         item.progress = 0
+        item.received = 0
 
         let referer = Self.referer(for: url)
-        let baseName = (item.fileName as NSString).deletingPathExtension
-
         let job = Task { [weak self] in
             guard let self = self else { return }
             do {
                 let playlist = try await HLSDownloader.parse(playlistURL: url, referer: referer)
-                try Task.checkCancellation()
-
-                let target: URL
-                if let existing = item.destURL,
-                   existing.pathExtension.lowercased() == playlist.fileExtension {
-                    target = existing
-                } else {
-                    target = Self.unique(in: Self.directory(),
-                                         name: baseName + "." + playlist.fileExtension)
-                }
-                item.destURL = target
-                // HLS 没法真正断点续传，重来时先把旧文件清掉，避免残留字节接在后面
-                try? FileManager.default.removeItem(at: target)
+                let key = try await HLSDownloader.fetchKey(for: playlist, referer: referer)
+                let record = HLSDownloader.makeJob(from: playlist, key: key)
+                try Self.saveJob(record, for: item.id)
 
                 await MainActor.run {
-                    item.fileName = target.lastPathComponent
-                    item.localPath = target.path
-                }
-
-                try await HLSDownloader.download(playlist, referer: referer, to: target) { value in
-                    DispatchQueue.main.async {
-                        item.progress = min(value, 0.99)
-                    }
-                }
-
-                // 分片拼出来的是裸流，容器不对播放器认不出来，
-                // 这里换成 MP4（只转封装，不重新编码），换完才能直接播
-                await MainActor.run {
-                    item.progress = 0.99
-                    item.note = "正在合并为 MP4…"
-                }
-
-                var finalURL = target
-                var mergeFailed = false
-                do {
-                    finalURL = try await MediaRemuxer.remuxIfNeeded(target)
-                } catch {
-                    mergeFailed = true
-                }
-
-                await MainActor.run {
-                    item.note = mergeFailed ? "已保存为 .ts，播放器可能不支持" : ""
-                    item.fileName = finalURL.lastPathComponent
-                    item.localPath = finalURL.path
-                    item.destURL = finalURL
-                    item.progress = 1
-                    item.state = .finished
                     self.jobs.removeValue(forKey: item.id)
+                    guard item.state != .paused else {
+                        self.save()
+                        self.pump()
+                        return
+                    }
+                    self.hlsJobs[item.id] = record
+                    self.prepareDestination(item, ext: record.fileExtension)
+                    item.note = ""
+                    self.pumpSegments(item, job: record)
                     self.save()
-                    self.archive(item)
-                    self.pump()
                 }
             } catch {
                 await MainActor.run {
@@ -310,14 +395,243 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
                         self.pump()
                         return
                     }
-                    item.state = .failed
-                    item.failReason = (error as? HLSFailure)?.message ?? "分片下载中断，可点重试"
-                    self.save()
-                    self.pump()
+                    self.fail(item, (error as? HLSFailure)?.message ?? "清单解析失败，点重试会重新解析")
                 }
             }
         }
         jobs[item.id] = job
+        startSpeedTimer()
+    }
+
+    /// 目标文件在排队时就定好，重试不会再生成新名字
+    private func prepareDestination(_ item: DownloadItem, ext: String) {
+        if let existing = item.destURL, existing.pathExtension.lowercased() == ext { return }
+        let baseName = (item.fileName as NSString).deletingPathExtension
+        let target = Self.unique(in: Self.directory(), name: baseName + "." + ext)
+        item.destURL = target
+        item.fileName = target.lastPathComponent
+    }
+
+    private func progress(of item: DownloadItem, job: HLSJob) -> Double {
+        guard job.total > 0 else { return 0 }
+        let dir = Self.partsDirectory(item.id)
+        var done = 0
+        for index in 0..<job.total where
+            FileManager.default.fileExists(atPath: dir.appendingPathComponent("seg-\(index)").path) {
+            done += 1
+        }
+        return min(0.99, Double(done) / Double(job.total))
+    }
+
+    /// 把缺的分片排进后台任务，窗口没满就补满
+    private func pumpSegments(_ item: DownloadItem, job: HLSJob) {
+        guard item.state == .running, !hlsAssembling.contains(item.id) else { return }
+
+        let dir = Self.partsDirectory(item.id)
+        Self.ensureDirectory(dir)
+
+        // fMP4 的初始化段先拿
+        if let initSegment = job.initSegment?.segment,
+           !FileManager.default.fileExists(atPath: dir.appendingPathComponent("init").path),
+           !segmentIndexes(of: item.id).contains(-1) {
+            scheduleSegment(initSegment, index: -1, item: item)
+        }
+
+        var inFlight = segmentIndexes(of: item.id)
+        var slots = max(0, segmentWindow - inFlight.count)
+        var missing = 0
+
+        for index in 0..<job.total {
+            if FileManager.default.fileExists(atPath: dir.appendingPathComponent("seg-\(index)").path) {
+                continue
+            }
+            missing += 1
+            guard slots > 0, !inFlight.contains(index),
+                  let segment = job.segments[index].segment else { continue }
+            scheduleSegment(segment, index: index, item: item)
+            inFlight.insert(index)
+            slots -= 1
+        }
+
+        if job.total > 0 {
+            item.progress = min(0.99, Double(job.total - missing) / Double(job.total))
+        }
+
+        if missing == 0, segmentIndexes(of: item.id).isEmpty {
+            assemble(item, job: job)
+        }
+    }
+
+    private func scheduleSegment(_ segment: HLSSegment, index: Int, item: DownloadItem) {
+        let referer = Self.referer(for: URL(string: item.source) ?? segment.url)
+        var request = segment.request(referer: referer, ua: Self.mobileUA)
+        request.timeoutInterval = 300
+
+        let task = backgroundSession.downloadTask(with: request)
+        task.taskDescription = "seg:\(item.id.uuidString):\(index)"
+        linkSegment(taskID: task.taskIdentifier, itemID: item.id, index: index, item: item)
+        task.resume()
+    }
+
+    /// 一片落地：存进 parts 目录，补排下一片，全部到齐就拼装
+    private func handleSegmentFinished(taskID: Int, location: URL) -> Bool {
+        guard let info = takeSegment(taskID) else { return false }
+        _ = takeItem(taskID)
+
+        let dir = Self.partsDirectory(info.itemID)
+        Self.ensureDirectory(dir)
+        let name = info.index < 0 ? "init" : "seg-\(info.index)"
+        let dest = dir.appendingPathComponent(name)
+        try? FileManager.default.removeItem(at: dest)
+        try? FileManager.default.moveItem(at: location, to: dest)
+
+        let size = Self.fileSize(dest)
+
+        DispatchQueue.main.async {
+            guard let item = self.items.first(where: { $0.id == info.itemID }) else { return }
+            item.received += size
+            if let job = self.hlsJobs[item.id] ?? self.loadJob(for: item.id) {
+                self.hlsJobs[item.id] = job
+                self.pumpSegments(item, job: job)
+            }
+        }
+        return true
+    }
+
+    private func assemble(_ item: DownloadItem, job: HLSJob) {
+        guard !hlsAssembling.contains(item.id) else { return }
+        hlsAssembling.insert(item.id)
+
+        item.progress = 0.99
+        item.note = "正在合并…"
+
+        let dir = Self.partsDirectory(item.id)
+        let target = item.destURL ?? Self.unique(
+            in: Self.directory(),
+            name: (item.fileName as NSString).deletingPathExtension + "." + job.fileExtension
+        )
+
+        Task.detached(priority: .utility) {
+            do {
+                try Self.merge(parts: dir, job: job, to: target)
+
+                // 拼出来的是裸流，换成 MP4 播放器才认
+                var finalURL = target
+                var mergeFailed = false
+                do {
+                    finalURL = try await MediaRemuxer.remuxIfNeeded(target)
+                } catch {
+                    mergeFailed = true
+                }
+
+                await MainActor.run {
+                    self.hlsAssembling.remove(item.id)
+                    item.note = mergeFailed ? "已保存为 .ts，播放器可能不支持" : ""
+                    item.fileName = finalURL.lastPathComponent
+                    item.localPath = finalURL.path
+                    item.destURL = finalURL
+                    item.progress = 1
+                    item.state = .finished
+                    item.speed = 0
+                    self.hlsJobs.removeValue(forKey: item.id)
+                    self.clearParts(item.id)
+                    self.save()
+                    self.archive(item)
+                    self.pump()
+                }
+            } catch {
+                await MainActor.run {
+                    self.hlsAssembling.remove(item.id)
+                    self.fail(item, "合并失败，点重试会重新合一次")
+                }
+            }
+        }
+    }
+
+    /// 按顺序写入：初始化段 → 每片解密 → 拼成一个文件
+    private static func merge(parts dir: URL, job: HLSJob, to dest: URL) throws {
+        try? FileManager.default.removeItem(at: dest)
+        FileManager.default.createFile(atPath: dest.path, contents: nil)
+        guard let handle = try? FileHandle(forWritingTo: dest) else {
+            throw HLSFailure(message: "写文件失败，存储空间可能不够")
+        }
+        defer { try? handle.close() }
+
+        if job.initSegment != nil,
+           let initData = try? Data(contentsOf: dir.appendingPathComponent("init")) {
+            try? handle.write(contentsOf: initData)
+        }
+
+        for index in 0..<job.total {
+            let data = try Data(contentsOf: dir.appendingPathComponent("seg-\(index)"))
+            guard let plain = HLSDownloader.decrypt(data, job: job, index: index) else {
+                throw HLSFailure(message: "分片解密失败")
+            }
+            try handle.write(contentsOf: plain)
+        }
+    }
+
+    /// 暂停时把这条的分片任务全停掉，已下好的分片留在盘上，继续时接着用
+    private func cancelSegments(of itemID: UUID) {
+        indexLock.lock()
+        let ids = segTasks.filter { $0.value.itemID == itemID }.map { $0.key }
+        for id in ids {
+            segTasks.removeValue(forKey: id)
+            itemForTask.removeValue(forKey: id)
+        }
+        indexLock.unlock()
+
+        guard !ids.isEmpty else { return }
+        backgroundSession.getAllTasks { tasks in
+            for task in tasks where ids.contains(task.taskIdentifier) {
+                task.cancel()
+            }
+        }
+    }
+
+    private func fail(_ item: DownloadItem, _ reason: String) {
+        item.state = .failed
+        item.failReason = reason
+        item.note = ""
+        item.speed = 0
+        save()
+        pump()
+    }
+
+    // MARK: 速度采样
+
+    private func startSpeedTimer() {
+        guard speedTimer == nil else { return }
+        let timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            self?.sampleSpeed()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        speedTimer = timer
+    }
+
+    private func sampleSpeed() {
+        let now = Date()
+        var active = false
+        for item in items {
+            guard item.state == .running else {
+                if item.speed != 0 { item.speed = 0 }
+                lastSample.removeValue(forKey: item.id)
+                continue
+            }
+            active = true
+            if let last = lastSample[item.id] {
+                let seconds = now.timeIntervalSince(last.at)
+                if seconds > 0.2 {
+                    let delta = item.received - last.bytes
+                    item.speed = delta > 0 ? Double(delta) / seconds : 0
+                }
+            }
+            lastSample[item.id] = (item.received, now)
+        }
+        if !active {
+            speedTimer?.invalidate()
+            speedTimer = nil
+        }
     }
 
     // MARK: 暂停 / 继续 / 重试
@@ -327,12 +641,15 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
         item.state = .paused
         item.note = ""
 
+        item.speed = 0
+
         if item.isHLS {
             jobs[item.id]?.cancel()
             jobs.removeValue(forKey: item.id)
+            cancelSegments(of: item.id)
         } else if item.taskID != 0 {
             // 暂停时尽量把断点数据留下来，继续时能接着下
-            session?.getAllTasks { tasks in
+            backgroundSession.getAllTasks { tasks in
                 for task in tasks where task.taskIdentifier == item.taskID {
                     if let downloadTask = task as? URLSessionDownloadTask {
                         downloadTask.cancel(byProducingResumeData: { data in
@@ -362,8 +679,23 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
 
     func retry(_ item: DownloadItem) {
         guard item.state == .failed else { return }
+
+        var keepParts = false
+        if item.isHLS {
+            // 分片下到一半断的，已下的分片留着接着下；
+            // 清单过期、密钥失效这类失败必须重新解析，留着旧分片反而会拼错
+            keepParts = item.failReason.contains("中断") && loadJob(for: item.id) != nil
+            if !keepParts {
+                clearParts(item.id)
+                hlsJobs.removeValue(forKey: item.id)
+            }
+        }
+
         item.state = .queued
-        item.progress = 0
+        if !keepParts {
+            item.progress = 0
+            item.received = 0
+        }
         item.failReason = ""
         save()
         pump()
@@ -390,7 +722,7 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
                     didWriteData bytesWritten: Int64,
                     totalBytesWritten: Int64,
                     totalBytesExpectedToWrite: Int64) {
-        guard let item = itemForTask[downloadTask.taskIdentifier] else { return }
+        guard let item = linkedItem(downloadTask.taskIdentifier) else { return }
         let expected = totalBytesExpectedToWrite
         DispatchQueue.main.async {
             item.received = totalBytesWritten
@@ -402,8 +734,10 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
     }
 
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
-        guard let item = itemForTask[downloadTask.taskIdentifier] else { return }
-        itemForTask.removeValue(forKey: downloadTask.taskIdentifier)
+        // 分片任务：存进 parts 目录后继续排下一片
+        if handleSegmentFinished(taskID: downloadTask.taskIdentifier, location: location) { return }
+
+        guard let item = takeItem(downloadTask.taskIdentifier) else { return }
 
         let dest = item.destURL ?? Self.unique(in: Self.directory(), name: item.fileName)
         item.destURL = dest
@@ -446,8 +780,23 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        guard let item = itemForTask[task.taskIdentifier] else { return }
-        itemForTask.removeValue(forKey: task.taskIdentifier)
+        // 分片任务：成功的那条已经在 didFinishDownloadingTo 处理过
+        if takeSegment(task.taskIdentifier) != nil {
+            guard let error = error else { return }
+            let segItem = takeItem(task.taskIdentifier)
+            DispatchQueue.main.async {
+                guard let item = segItem else { return }
+                if item.state == .paused || item.state == .queued {
+                    self.save()
+                    self.pump()
+                    return
+                }
+                self.fail(item, "分片下载中断，点「继续」会接着下")
+            }
+            return
+        }
+
+        guard let item = takeItem(task.taskIdentifier) else { return }
 
         // 正常结束已经在 didFinishDownloadingTo 里处理过
         guard let error = error else { return }
@@ -690,6 +1039,9 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
         jobs[item.id]?.cancel()
         jobs.removeValue(forKey: item.id)
         stopTimer(item.id)
+        cancelSegments(of: item.id)
+        hlsJobs.removeValue(forKey: item.id)
+        clearParts(item.id)
 
         if !item.isHLS, item.taskID != 0 {
             session?.getAllTasks { tasks in
@@ -698,7 +1050,7 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
                 }
             }
         }
-        itemForTask.removeValue(forKey: item.taskID)
+        _ = takeItem(item.taskID)
 
         if let url = item.fileURL {
             try? FileManager.default.removeItem(at: url)
@@ -712,6 +1064,7 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
     func clearFinished() {
         for item in items where item.state != .running {
             if let url = item.fileURL { try? FileManager.default.removeItem(at: url) }
+            if item.isHLS { clearParts(item.id) }
         }
         items.removeAll { $0.state != .running }
         save()
@@ -848,6 +1201,43 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
 
         items = Array(restored.prefix(80))
         refreshRunning()
+    }
+
+    // MARK: HLS 分片缓存
+
+    /// 分片放在 Caches 下，系统清理缓存也不会丢，退出重进还能接着拼
+    static func partsDirectory(_ id: UUID) -> URL {
+        let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        return base.appendingPathComponent("HLSParts", isDirectory: true)
+            .appendingPathComponent(id.uuidString, isDirectory: true)
+    }
+
+    static func ensureDirectory(_ url: URL) {
+        if !FileManager.default.fileExists(atPath: url.path) {
+            try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        }
+    }
+
+    static func fileSize(_ url: URL) -> Int64 {
+        let attr = try? FileManager.default.attributesOfItem(atPath: url.path)
+        return (attr?[.size] as? NSNumber)?.int64Value ?? 0
+    }
+
+    static func saveJob(_ job: HLSJob, for id: UUID) throws {
+        let dir = partsDirectory(id)
+        ensureDirectory(dir)
+        let data = try JSONEncoder().encode(job)
+        try data.write(to: dir.appendingPathComponent("meta.json"))
+    }
+
+    func loadJob(for id: UUID) -> HLSJob? {
+        let file = Self.partsDirectory(id).appendingPathComponent("meta.json")
+        guard let data = try? Data(contentsOf: file) else { return nil }
+        return try? JSONDecoder().decode(HLSJob.self, from: data)
+    }
+
+    func clearParts(_ id: UUID) {
+        try? FileManager.default.removeItem(at: Self.partsDirectory(id))
     }
 
     // MARK: 路径
