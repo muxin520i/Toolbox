@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import GRDB
 
 // MARK: - 书签
 
@@ -38,7 +39,28 @@ final class BookmarkLibrary: ObservableObject {
         items = Self.read()
     }
 
+    private struct Row: Codable, FetchableRecord {
+        var id: String
+        var title: String
+        var url: String
+        var addedAt: Double
+    }
+
     private static func read() -> [Bookmark] {
+        if let rows = AppDB.read({ db in
+            try Row.fetchAll(db, sql: "SELECT id, title, url, addedAt FROM bookmark ORDER BY addedAt DESC")
+        }) {
+            return rows.compactMap { row -> Bookmark? in
+                guard let bookmarkID = UUID(uuidString: row.id) else { return nil }
+                return Bookmark(
+                    id: bookmarkID,
+                    title: row.title,
+                    url: row.url,
+                    addedAt: Date(timeIntervalSince1970: row.addedAt)
+                )
+            }
+        }
+
         guard let data = UserDefaults.standard.data(forKey: storeKey),
               let list = try? JSONDecoder().decode([Bookmark].self, from: data) else {
             return []
@@ -48,6 +70,17 @@ final class BookmarkLibrary: ObservableObject {
 
     private func commit(_ next: [Bookmark]) {
         items = next
+
+        AppDB.write { db in
+            try db.execute(sql: "DELETE FROM bookmark")
+            for bookmark in next {
+                try db.execute(
+                    sql: "INSERT OR REPLACE INTO bookmark (id, title, url, addedAt) VALUES (?, ?, ?, ?)",
+                    arguments: [bookmark.id.uuidString, bookmark.title, bookmark.url, bookmark.addedAt.timeIntervalSince1970]
+                )
+            }
+        }
+
         if let data = try? JSONEncoder().encode(next) {
             UserDefaults.standard.set(data, forKey: Self.storeKey)
         }

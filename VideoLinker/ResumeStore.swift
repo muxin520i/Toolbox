@@ -1,4 +1,5 @@
 import Foundation
+import GRDB
 
 // MARK: - 观看进度记忆
 
@@ -13,11 +14,39 @@ enum ResumeStore {
     private static let favoriteKey = "video.favorites.v1"
     private static let limit = 200
 
+    /// 进度是全 App 调用最频繁的查询（列表每一行都要问一次），整表缓存在内存里；
+    /// 所有写入都经过这个类，写完立刻刷新缓存，所以不会读到旧值。
+    private static var cache: [String: ResumeEntry]?
+
+    private struct Row: Codable, FetchableRecord {
+        var url: String
+        var position: Double
+        var duration: Double
+        var updatedAt: Double
+    }
+
     // MARK: 进度
 
     static func all() -> [String: ResumeEntry] {
-        guard let data = UserDefaults.standard.data(forKey: key) else { return [:] }
-        return (try? JSONDecoder().decode([String: ResumeEntry].self, from: data)) ?? [:]
+        if let cached = cache { return cached }
+
+        var table: [String: ResumeEntry] = [:]
+        if let rows = AppDB.read({ db in
+            try Row.fetchAll(db, sql: "SELECT url, position, duration, updatedAt FROM resume")
+        }) {
+            for row in rows {
+                table[row.url] = ResumeEntry(
+                    position: row.position,
+                    duration: row.duration,
+                    updated: Date(timeIntervalSince1970: row.updatedAt)
+                )
+            }
+        } else {
+            table = legacyAll()
+        }
+
+        cache = table
+        return table
     }
 
     /// 只返回“值得续播”的位置：太靠前、快到结尾、时长未知的都当作从头开始
@@ -50,27 +79,74 @@ enum ResumeStore {
         let cutoff = Date().addingTimeInterval(-90 * 24 * 3600)
         table = table.filter { $0.value.updated > cutoff }
 
-        if let data = try? JSONEncoder().encode(table) {
-            UserDefaults.standard.set(data, forKey: key)
-        }
+        persist(table)
     }
 
     static func remove(url: String) {
         var table = all()
         table.removeValue(forKey: url)
+        persist(table)
+    }
+
+    static func clear() {
+        cache = [:]
+        AppDB.write { db in
+            try db.execute(sql: "DELETE FROM resume")
+        }
+        UserDefaults.standard.removeObject(forKey: key)
+    }
+
+    private static func persist(_ table: [String: ResumeEntry]) {
+        cache = table
+
+        AppDB.write { db in
+            try db.execute(sql: "DELETE FROM resume")
+            for (url, entry) in table {
+                try db.execute(
+                    sql: "INSERT OR REPLACE INTO resume (url, position, duration, updatedAt) VALUES (?, ?, ?, ?)",
+                    arguments: [url, entry.position, entry.duration, entry.updated.timeIntervalSince1970]
+                )
+            }
+        }
+
         if let data = try? JSONEncoder().encode(table) {
             UserDefaults.standard.set(data, forKey: key)
         }
     }
 
+    private static func legacyAll() -> [String: ResumeEntry] {
+        guard let data = UserDefaults.standard.data(forKey: key) else { return [:] }
+        return (try? JSONDecoder().decode([String: ResumeEntry].self, from: data)) ?? [:]
+    }
+
     // MARK: 收藏
 
     static func favorites() -> Set<String> {
-        Set(UserDefaults.standard.stringArray(forKey: favoriteKey) ?? [])
+        if let urls = AppDB.read({ db in
+            try String.fetchAll(db, sql: "SELECT url FROM favorite ORDER BY addedAt DESC")
+        }) {
+            return Set(urls)
+        }
+        return Set(UserDefaults.standard.stringArray(forKey: favoriteKey) ?? [])
     }
 
     static func isFavorite(_ url: String) -> Bool {
         favorites().contains(url)
+    }
+
+    /// 整表覆盖，供导入备份等场景使用
+    static func setFavorites(_ set: Set<String>) {
+        AppDB.write { db in
+            try db.execute(sql: "DELETE FROM favorite")
+            let now = Date().timeIntervalSince1970
+            for url in set {
+                try db.execute(
+                    sql: "INSERT OR REPLACE INTO favorite (url, addedAt) VALUES (?, ?)",
+                    arguments: [url, now]
+                )
+            }
+        }
+        UserDefaults.standard.set(Array(set), forKey: favoriteKey)
     }
 
     /// 切换收藏，返回切换后的状态
@@ -81,9 +157,18 @@ enum ResumeStore {
         if set.contains(url) {
             set.remove(url)
             starred = false
+            AppDB.write { db in
+                try db.execute(sql: "DELETE FROM favorite WHERE url = ?", arguments: [url])
+            }
         } else {
             set.insert(url)
             starred = true
+            AppDB.write { db in
+                try db.execute(
+                    sql: "INSERT OR REPLACE INTO favorite (url, addedAt) VALUES (?, ?)",
+                    arguments: [url, Date().timeIntervalSince1970]
+                )
+            }
         }
         UserDefaults.standard.set(Array(set), forKey: favoriteKey)
         return starred

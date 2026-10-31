@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import GRDB
 import WebKit
 
 // MARK: - 一条下载
@@ -428,11 +429,36 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate {
         let date: Date
     }
 
+    private struct StoredRow: Codable, FetchableRecord {
+        var fileName: String
+        var source: String
+        var localPath: String
+        var createdAt: Double
+    }
+
     private func save() {
         refreshRunning()
-        let records = items
-            .filter { $0.state == .finished && !$0.localPath.isEmpty }
-            .map { Record(fileName: $0.fileName, source: $0.source, localPath: $0.localPath, date: $0.createdAt) }
+        let finished = items.filter { $0.state == .finished && !$0.localPath.isEmpty }
+
+        AppDB.write { db in
+            try db.execute(sql: "DELETE FROM download")
+            for item in finished {
+                try db.execute(
+                    sql: """
+                        INSERT OR REPLACE INTO download (id, fileName, source, localPath, createdAt)
+                        VALUES (?, ?, ?, ?, ?)
+                        """,
+                    arguments: [
+                        item.id.uuidString, item.fileName, item.source,
+                        item.localPath, item.createdAt.timeIntervalSince1970
+                    ]
+                )
+            }
+        }
+
+        let records = finished.map {
+            Record(fileName: $0.fileName, source: $0.source, localPath: $0.localPath, date: $0.createdAt)
+        }
         if let data = try? JSONEncoder().encode(records) {
             UserDefaults.standard.set(data, forKey: Self.storeKey)
         }
@@ -443,8 +469,27 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate {
     }
 
     private func load() {
-        guard let data = UserDefaults.standard.data(forKey: Self.storeKey),
-              let records = try? JSONDecoder().decode([Record].self, from: data) else { return }
+        var records: [Record] = []
+
+        if let rows = AppDB.read({ db in
+            try StoredRow.fetchAll(
+                db,
+                sql: "SELECT fileName, source, localPath, createdAt FROM download ORDER BY createdAt DESC"
+            )
+        }) {
+            records = rows.map {
+                Record(
+                    fileName: $0.fileName,
+                    source: $0.source,
+                    localPath: $0.localPath,
+                    date: Date(timeIntervalSince1970: $0.createdAt)
+                )
+            }
+        } else if let data = UserDefaults.standard.data(forKey: Self.storeKey),
+                  let legacy = try? JSONDecoder().decode([Record].self, from: data) {
+            records = legacy
+        }
+
         items = records
             .filter { FileManager.default.fileExists(atPath: $0.localPath) }
             .map { record in

@@ -16,6 +16,8 @@ struct SettingsView: View {
     @State private var newListName = ""
     @State private var confirmClearResume = false
     @State private var confirmClearHistory = false
+    @State private var showStorage = false
+    @State private var storage = AppDB.report()
     @State private var toast: String?
 
     private let rates: [Double] = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
@@ -31,6 +33,7 @@ struct SettingsView: View {
                         playbackCard
                         downloadCard
                         dataCard
+                        storageCard
                         aboutCard
                     }
                     .padding(.horizontal, 20)
@@ -59,7 +62,7 @@ struct SettingsView: View {
         }
         .confirmationDialog("清除所有观看进度？", isPresented: $confirmClearResume, titleVisibility: .visible) {
             Button("清除", role: .destructive) {
-                UserDefaults.standard.removeObject(forKey: "video.resume.v1")
+                ResumeStore.clear()
                 showToast("观看进度已清除")
             }
             Button("取消", role: .cancel) {}
@@ -232,6 +235,49 @@ struct SettingsView: View {
         }
     }
 
+    // MARK: 存储
+
+    private var storageCard: some View {
+        card(title: "存储", icon: "cylinder.split.1x2.fill") {
+            VStack(spacing: 0) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("本地数据库")
+                            .font(.system(size: 14))
+                            .foregroundStyle(theme.text)
+                        Text(storage.ready
+                             ? "历史、列表、脚本、下载都在一个 SQLite 库里"
+                             : "未启用，正在使用旧的 UserDefaults 存储")
+                            .font(.system(size: 11))
+                            .foregroundStyle(theme.textTertiary)
+                    }
+
+                    Spacer(minLength: 8)
+
+                    Text(storage.size)
+                        .font(.system(size: 13))
+                        .foregroundStyle(theme.textSecondary)
+                }
+                .padding(.vertical, 6)
+
+                Divider().overlay(theme.cardStroke)
+
+                Button {
+                    showStorage = true
+                } label: {
+                    actionRow("存储详情与一致性校验", symbol: "checklist")
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .sheet(isPresented: $showStorage) {
+            StorageDetailSheet()
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+        }
+        .onAppear { storage = AppDB.report() }
+    }
+
     // MARK: 关于
 
     private var aboutCard: some View {
@@ -342,5 +388,144 @@ struct SettingsView: View {
 struct SettingsView_Previews: PreviewProvider {
     static var previews: some View {
         SettingsView()
+    }
+}
+
+
+// MARK: - 存储详情
+
+struct StorageDetailSheet: View {
+    @Environment(\.theme) private var theme
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var report = AppDB.report()
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                BackgroundView()
+
+                ScrollView {
+                    VStack(spacing: 14) {
+                        summaryCard
+                        countsCard
+                        checkCard
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 12)
+                    .padding(.bottom, 36)
+                }
+            }
+            .navigationTitle("存储详情")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(theme.navBg, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") { dismiss() }
+                }
+            }
+            .onAppear { report = AppDB.report() }
+        }
+    }
+
+    private var summaryCard: some View {
+        card(title: "数据库", icon: "cylinder.split.1x2.fill") {
+            VStack(alignment: .leading, spacing: 10) {
+                line("状态", report.ready ? "正常" : "不可用（已回落旧存储）")
+                line("结构版本", report.schema)
+                line("占用空间", report.size)
+                Text(report.path)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(theme.textTertiary)
+                    .lineLimit(3)
+                    .textSelection(.enabled)
+            }
+        }
+    }
+
+    private var countsCard: some View {
+        card(title: "记录数", icon: "list.number") {
+            VStack(spacing: 0) {
+                ForEach(Array(report.counts.enumerated()), id: \.offset) { index, row in
+                    if index > 0 { Divider().overlay(theme.cardStroke) }
+                    HStack {
+                        Text(row.name)
+                            .font(.system(size: 13))
+                            .foregroundStyle(theme.text)
+                        Spacer()
+                        Text("\(row.count)")
+                            .font(.system(size: 13, weight: .medium, design: .rounded))
+                            .foregroundStyle(theme.textSecondary)
+                    }
+                    .padding(.vertical, 8)
+                }
+            }
+        }
+    }
+
+    private var checkCard: some View {
+        card(title: "一致性校验", icon: "checkmark.seal") {
+            VStack(alignment: .leading, spacing: 8) {
+                if !report.ready {
+                    Text("数据库没有打开，本次运行使用旧存储。可以重启 App 再试；如果一直这样，说明磁盘写入有问题。")
+                        .font(.system(size: 12))
+                        .foregroundStyle(theme.textSecondary)
+                } else if report.mismatch.isEmpty {
+                    Text("数据库与旧存储条数一致，双写正常。")
+                        .font(.system(size: 12))
+                        .foregroundStyle(theme.textSecondary)
+                    Text("旧数据在首次升级时已整包备份到 App 的 Application Support/VideoLinker 目录，文件名以 legacy-backup- 开头。")
+                        .font(.system(size: 11))
+                        .foregroundStyle(theme.textTertiary)
+                } else {
+                    ForEach(report.mismatch, id: \.self) { row in
+                        Text("· " + row)
+                            .font(.system(size: 12))
+                            .foregroundStyle(.orange)
+                    }
+                    Text("库里比旧存储少，通常是旧存储已被裁剪或写入还没同步；数据不会因此丢失。")
+                        .font(.system(size: 11))
+                        .foregroundStyle(theme.textTertiary)
+                }
+            }
+        }
+    }
+
+    private func line(_ title: String, _ value: String) -> some View {
+        HStack {
+            Text(title)
+                .font(.system(size: 13))
+                .foregroundStyle(theme.text)
+            Spacer()
+            Text(value)
+                .font(.system(size: 13))
+                .foregroundStyle(theme.textSecondary)
+        }
+    }
+
+    private func card<Content: View>(
+        title: String,
+        icon: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 7) {
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(theme.accent)
+                Text(title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(theme.textSecondary)
+            }
+            content()
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(theme.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(theme.cardStroke, lineWidth: 1)
+        )
     }
 }

@@ -1,4 +1,5 @@
 import Foundation
+import GRDB
 
 /// 播放列表里的一个条目
 struct PlaylistItem: Codable, Identifiable, Hashable {
@@ -59,7 +60,7 @@ struct Playlist: Codable, Identifiable, Hashable {
     var createdAt: Date = Date()
 }
 
-/// 播放列表存储（UserDefaults + JSON）
+/// 播放列表存储（SQLite + UserDefaults 双写）
 enum PlaylistStore {
     private static let key = "video.playlists.v1"
     private static let maxPlaylists = 20
@@ -72,15 +73,103 @@ enum PlaylistStore {
     static let autoTarget = "auto"
     static let defaultDownloadListName = "下载"
 
+    /// 列表页、播放页都会频繁读，整份缓存在内存；写入统一走 save()，写完即刷新
+    private static var cache: [Playlist]?
+
+    private struct ListRow: Codable, FetchableRecord {
+        var id: String
+        var name: String
+        var createdAt: Double
+    }
+
+    private struct ItemRow: Codable, FetchableRecord {
+        var id: String
+        var playlistID: String
+        var url: String
+        var title: String
+        var localPath: String?
+    }
+
     static func load() -> [Playlist] {
-        guard let data = UserDefaults.standard.data(forKey: key) else { return [] }
-        return (try? JSONDecoder().decode([Playlist].self, from: data)) ?? []
+        if let cached = cache { return cached }
+
+        let lists = AppDB.read { db -> [Playlist] in
+            let listRows = try ListRow.fetchAll(
+                db,
+                sql: "SELECT id, name, createdAt FROM playlist ORDER BY position ASC"
+            )
+            let itemRows = try ItemRow.fetchAll(
+                db,
+                sql: "SELECT id, playlistID, url, title, localPath FROM playlistItem ORDER BY playlistID, position ASC"
+            )
+
+            var grouped: [String: [PlaylistItem]] = [:]
+            for row in itemRows {
+                guard let itemID = UUID(uuidString: row.id) else { continue }
+                let path = (row.localPath?.isEmpty == false) ? row.localPath : nil
+                grouped[row.playlistID, default: []].append(
+                    PlaylistItem(id: itemID, url: row.url, title: row.title, localPath: path)
+                )
+            }
+
+            return listRows.compactMap { row -> Playlist? in
+                guard let listID = UUID(uuidString: row.id) else { return nil }
+                return Playlist(
+                    id: listID,
+                    name: row.name,
+                    items: grouped[row.id] ?? [],
+                    createdAt: Date(timeIntervalSince1970: row.createdAt)
+                )
+            }
+        }
+
+        let result = lists ?? legacyLoad()
+        cache = result
+        return result
     }
 
     static func save(_ playlists: [Playlist]) {
-        if let data = try? JSONEncoder().encode(Array(playlists.prefix(maxPlaylists))) {
+        let limited = Array(playlists.prefix(maxPlaylists)).map { list -> Playlist in
+            var copy = list
+            copy.items = Array(list.items.prefix(maxItems))
+            return copy
+        }
+        cache = limited
+
+        // 整表重写：列表最多 20 个、条目最多 100，量很小，
+        // 这样排序、移动、去重都不会留下错位的 position
+        AppDB.write { db in
+            try db.execute(sql: "DELETE FROM playlistItem")
+            try db.execute(sql: "DELETE FROM playlist")
+            for (index, list) in limited.enumerated() {
+                try db.execute(
+                    sql: "INSERT INTO playlist (id, name, createdAt, position) VALUES (?, ?, ?, ?)",
+                    arguments: [list.id.uuidString, list.name, list.createdAt.timeIntervalSince1970, index]
+                )
+                for (order, item) in list.items.enumerated() {
+                    try db.execute(
+                        sql: """
+                            INSERT OR REPLACE INTO playlistItem
+                            (id, playlistID, url, title, localPath, position) VALUES (?, ?, ?, ?, ?, ?)
+                            """,
+                        arguments: [
+                            item.id.uuidString, list.id.uuidString, item.url, item.title,
+                            item.localPath ?? "", order
+                        ]
+                    )
+                }
+            }
+        }
+
+        // 双写，回退旧版本时列表还在
+        if let data = try? JSONEncoder().encode(limited) {
             UserDefaults.standard.set(data, forKey: key)
         }
+    }
+
+    private static func legacyLoad() -> [Playlist] {
+        guard let data = UserDefaults.standard.data(forKey: key) else { return [] }
+        return (try? JSONDecoder().decode([Playlist].self, from: data)) ?? []
     }
 
     @discardableResult

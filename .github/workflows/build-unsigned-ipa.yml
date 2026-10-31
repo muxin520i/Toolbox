@@ -60,6 +60,23 @@ jobs:
           ls -la Vendor
           du -sh Vendor/*.framework
 
+      # GRDB 走 Swift Package Manager，先把依赖拉下来；失败时这一步就会报，节省排查时间
+      - name: Cache SwiftPM
+        uses: actions/cache@v4
+        with:
+          path: build/SourcePackages
+          key: spm-${{ hashFiles('VideoLinker.xcodeproj/project.pbxproj') }}
+          restore-keys: |
+            spm-
+
+      - name: Resolve Swift packages
+        run: |
+          set -o pipefail
+          xcodebuild -project VideoLinker.xcodeproj \
+            -scheme VideoLinker \
+            -derivedDataPath build \
+            -resolvePackageDependencies 2>&1 | tail -40
+
       - name: Build (no code signing)
         run: |
           set -x

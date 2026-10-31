@@ -1,4 +1,5 @@
 import Foundation
+import GRDB
 import WebKit
 
 // MARK: - 油猴兼容层
@@ -20,7 +21,47 @@ final class GMBridge {
 
     // MARK: 存储
 
+    private struct ValueRow: Codable, FetchableRecord {
+        var scriptID: String
+        var key: String
+        var value: String
+    }
+
     private func loadAll() -> [String: [String: Any]] {
+        guard let rows = AppDB.read({ db in
+            try ValueRow.fetchAll(db, sql: "SELECT scriptID, key, value FROM scriptValue")
+        }) else {
+            return legacyLoadAll()
+        }
+
+        var map: [String: [String: Any]] = [:]
+        for row in rows {
+            guard let raw = Self.decodeValue(row.value) else { continue }
+            map[row.scriptID, default: [:]][row.key] = raw
+        }
+        return map
+    }
+
+    private func saveAll(_ map: [String: [String: Any]]) {
+        AppDB.write { db in
+            try db.execute(sql: "DELETE FROM scriptValue")
+            for (scope, values) in map {
+                for (key, raw) in values {
+                    guard let text = Self.encodeValue(raw) else { continue }
+                    try db.execute(
+                        sql: "INSERT OR REPLACE INTO scriptValue (scriptID, key, value) VALUES (?, ?, ?)",
+                        arguments: [scope, key, text]
+                    )
+                }
+            }
+        }
+
+        if let data = try? JSONSerialization.data(withJSONObject: map) {
+            UserDefaults.standard.set(data, forKey: storeKey)
+        }
+    }
+
+    private func legacyLoadAll() -> [String: [String: Any]] {
         guard let data = UserDefaults.standard.data(forKey: storeKey),
               let object = try? JSONSerialization.jsonObject(with: data),
               let map = object as? [String: [String: Any]] else {
@@ -29,9 +70,17 @@ final class GMBridge {
         return map
     }
 
-    private func saveAll(_ map: [String: [String: Any]]) {
-        guard let data = try? JSONSerialization.data(withJSONObject: map) else { return }
-        UserDefaults.standard.set(data, forKey: storeKey)
+    /// GM_setValue 允许存字符串 / 数字 / 布尔 / 数组 / 字典，这里统一按 JSON 片段存
+    static func encodeValue(_ raw: Any) -> String? {
+        guard let data = try? JSONSerialization.data(withJSONObject: raw, options: [.fragmentsAllowed]) else {
+            return nil
+        }
+        return String(data: data, encoding: .utf8)
+    }
+
+    static func decodeValue(_ text: String) -> Any? {
+        guard let data = text.data(using: .utf8) else { return nil }
+        return try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
     }
 
     /// 某个脚本已经存下的值，注入时直接带给页面，这样 GM_getValue 可以同步返回

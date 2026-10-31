@@ -160,3 +160,12 @@ python3 -m http.server 8080
 ## 数据都存在哪
 
 播放历史和列表存在浏览器的 `localStorage` 里，只在本机、只在这个域名下。换浏览器或清除网站数据会丢失。没有任何数据被上传。
+
+### 原生 App（v2.7 起）
+
+App 用 GRDB 把数据统一存在一个 SQLite 库里：`Application Support/VideoLinker/videolinker.sqlite`。
+
+- 表：`history`（播放历史）、`resume`（观看进度）、`favorite`（收藏）、`playlist` / `playlistItem`（播放列表）、`script` / `scriptValue`（用户脚本与 GM 存储值）、`download`（下载记录）、`webVisit`（网页历史）、`bookmark`、`shortcut`
+- 首次升级会把旧版 UserDefaults 里的 JSON 全量搬进库，搬之前先备份成 `legacy-backup-<时间>.json`
+- 写入仍然双写 UserDefaults，装回旧版本也能看到全部数据
+- 设置 → 存储 → 「存储详情与一致性校验」可以看条数、体积和双写一致性

@@ -315,7 +315,7 @@ struct PlaylistListView: View {
 
         if !backup.favorites.isEmpty {
             let set = ResumeStore.favorites().union(backup.favorites)
-            UserDefaults.standard.set(Array(set), forKey: "video.favorites.v1")
+            ResumeStore.setFavorites(set)
         }
 
         playlists = PlaylistStore.load()

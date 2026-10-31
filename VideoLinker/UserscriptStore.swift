@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import GRDB
 
 // MARK: - 用户脚本模型
 
@@ -113,14 +114,72 @@ enum UserscriptParser {
 enum UserscriptStore {
     private static let key = "userscripts.v1"
 
+    private struct Row: Codable, FetchableRecord {
+        var id: String
+        var name: String
+        var matches: String
+        var code: String
+        var enabled: Int
+        var documentStart: Int
+        var updatedAt: Double
+    }
+
     static func load() -> [Userscript] {
-        guard let data = UserDefaults.standard.data(forKey: key) else { return [] }
-        return (try? JSONDecoder().decode([Userscript].self, from: data)) ?? []
+        if let rows = AppDB.read({ db in
+            try Row.fetchAll(
+                db,
+                sql: """
+                    SELECT id, name, matches, code, enabled, documentStart, updatedAt
+                    FROM script ORDER BY position ASC
+                    """
+            )
+        }) {
+            return rows.compactMap { row -> Userscript? in
+                guard let scriptID = UUID(uuidString: row.id) else { return nil }
+                let patterns = (try? JSONDecoder().decode([String].self, from: Data(row.matches.utf8))) ?? []
+                return Userscript(
+                    id: scriptID,
+                    name: row.name,
+                    matches: patterns,
+                    code: row.code,
+                    enabled: row.enabled != 0,
+                    documentStart: row.documentStart != 0,
+                    updatedAt: Date(timeIntervalSince1970: row.updatedAt)
+                )
+            }
+        }
+        return legacyLoad()
     }
 
     static func save(_ scripts: [Userscript]) {
-        guard let data = try? JSONEncoder().encode(scripts) else { return }
-        UserDefaults.standard.set(data, forKey: key)
+        AppDB.write { db in
+            try db.execute(sql: "DELETE FROM script")
+            for (index, script) in scripts.enumerated() {
+                let patterns = (try? JSONEncoder().encode(script.matches))
+                    .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+                try db.execute(
+                    sql: """
+                        INSERT OR REPLACE INTO script
+                        (id, name, matches, code, enabled, documentStart, updatedAt, position)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                    arguments: [
+                        script.id.uuidString, script.name, patterns, script.code,
+                        script.enabled ? 1 : 0, script.documentStart ? 1 : 0,
+                        script.updatedAt.timeIntervalSince1970, index
+                    ]
+                )
+            }
+        }
+
+        if let data = try? JSONEncoder().encode(scripts) {
+            UserDefaults.standard.set(data, forKey: key)
+        }
+    }
+
+    private static func legacyLoad() -> [Userscript] {
+        guard let data = UserDefaults.standard.data(forKey: key) else { return [] }
+        return (try? JSONDecoder().decode([Userscript].self, from: data)) ?? []
     }
 }
 

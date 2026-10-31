@@ -1,4 +1,5 @@
 import Foundation
+import GRDB
 
 /// 一条播放历史
 struct HistoryItem: Codable, Identifiable, Hashable {
@@ -26,18 +27,43 @@ struct HistoryItem: Codable, Identifiable, Hashable {
     }
 }
 
-/// 历史记录本地存储（UserDefaults + JSON，最多保留 30 条）
+/// 历史记录存储：SQLite 为主，UserDefaults 双写留退路（最多保留 30 条）
 enum HistoryStore {
     private static let key = "video.history.v1"
     private static let limit = 30
 
+    private struct Row: Codable, FetchableRecord {
+        var url: String
+        var playedAt: Double
+    }
+
     static func load() -> [HistoryItem] {
-        guard let data = UserDefaults.standard.data(forKey: key) else { return [] }
-        return (try? JSONDecoder().decode([HistoryItem].self, from: data)) ?? []
+        if let rows = AppDB.read({ db in
+            try Row.fetchAll(
+                db,
+                sql: "SELECT url, playedAt FROM history ORDER BY playedAt DESC LIMIT ?",
+                arguments: [limit]
+            )
+        }) {
+            return rows.map { HistoryItem(url: $0.url, date: Date(timeIntervalSince1970: $0.playedAt)) }
+        }
+        return legacyLoad()
     }
 
     static func save(_ items: [HistoryItem]) {
         let trimmed = Array(items.prefix(limit))
+
+        AppDB.write { db in
+            try db.execute(sql: "DELETE FROM history")
+            for item in trimmed {
+                try db.execute(
+                    sql: "INSERT OR REPLACE INTO history (url, playedAt) VALUES (?, ?)",
+                    arguments: [item.url, item.date.timeIntervalSince1970]
+                )
+            }
+        }
+
+        // 双写：旧版本回退时还能读到完整历史
         if let data = try? JSONEncoder().encode(trimmed) {
             UserDefaults.standard.set(data, forKey: key)
         }
@@ -62,7 +88,17 @@ enum HistoryStore {
     }
 
     static func clear() -> [HistoryItem] {
+        AppDB.write { db in
+            try db.execute(sql: "DELETE FROM history")
+        }
         UserDefaults.standard.removeObject(forKey: key)
         return []
+    }
+
+    // MARK: 只有数据库不可用时才会走这里
+
+    private static func legacyLoad() -> [HistoryItem] {
+        guard let data = UserDefaults.standard.data(forKey: key) else { return [] }
+        return (try? JSONDecoder().decode([HistoryItem].self, from: data)) ?? []
     }
 }

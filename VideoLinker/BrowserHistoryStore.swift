@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import GRDB
 
 // MARK: - 网页浏览历史
 
@@ -29,16 +30,51 @@ final class BrowserHistory: ObservableObject {
 
     @Published private(set) var items: [WebVisit] = []
 
+    private struct Row: Codable, FetchableRecord {
+        var id: String
+        var title: String
+        var url: String
+        var visitedAt: Double
+    }
+
     private init() {
-        if let data = UserDefaults.standard.data(forKey: Self.storeKey),
-           let list = try? JSONDecoder().decode([WebVisit].self, from: data) {
+        if let rows = AppDB.read({ db in
+            try Row.fetchAll(
+                db,
+                sql: "SELECT id, title, url, visitedAt FROM webVisit ORDER BY visitedAt DESC LIMIT ?",
+                arguments: [limit]
+            )
+        }) {
+            items = rows.compactMap { row -> WebVisit? in
+                guard let visitID = UUID(uuidString: row.id) else { return nil }
+                return WebVisit(
+                    id: visitID,
+                    title: row.title,
+                    url: row.url,
+                    date: Date(timeIntervalSince1970: row.visitedAt)
+                )
+            }
+        } else if let data = UserDefaults.standard.data(forKey: Self.storeKey),
+                  let list = try? JSONDecoder().decode([WebVisit].self, from: data) {
             items = list
         }
     }
 
     private func commit(_ next: [WebVisit]) {
         items = next
-        if let data = try? JSONEncoder().encode(next) {
+        let trimmed = Array(next.prefix(limit))
+
+        AppDB.write { db in
+            try db.execute(sql: "DELETE FROM webVisit")
+            for visit in trimmed {
+                try db.execute(
+                    sql: "INSERT OR REPLACE INTO webVisit (id, title, url, visitedAt) VALUES (?, ?, ?, ?)",
+                    arguments: [visit.id.uuidString, visit.title, visit.url, visit.date.timeIntervalSince1970]
+                )
+            }
+        }
+
+        if let data = try? JSONEncoder().encode(trimmed) {
             UserDefaults.standard.set(data, forKey: Self.storeKey)
         }
     }

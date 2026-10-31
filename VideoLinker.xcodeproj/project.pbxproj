@@ -37,6 +37,8 @@
 		1A0000000000000000000319 /* BrowserHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000000000000000000021A /* BrowserHomeView.swift */; };
 		1A000000000000000000031A /* BrowserOverlays.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000000000000000000021B /* BrowserOverlays.swift */; };
 		1A000000000000000000031B /* BrowserLibraryViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000000000000000000021C /* BrowserLibraryViews.swift */; };
+		1A0000000000000000000360 /* AppDatabase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000260 /* AppDatabase.swift */; };
+		1A0000000000000000000361 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = 1A00000000000000000004A0 /* GRDB */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -72,6 +74,7 @@
 		1A000000000000000000021A /* BrowserHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserHomeView.swift; sourceTree = "<group>"; };
 		1A000000000000000000021B /* BrowserOverlays.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserOverlays.swift; sourceTree = "<group>"; };
 		1A000000000000000000021C /* BrowserLibraryViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserLibraryViews.swift; sourceTree = "<group>"; };
+		1A0000000000000000000260 /* AppDatabase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDatabase.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -79,6 +82,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1A0000000000000000000361 /* GRDB in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -135,6 +139,7 @@
 				1A000000000000000000021A /* BrowserHomeView.swift */,
 				1A000000000000000000021B /* BrowserOverlays.swift */,
 				1A000000000000000000021C /* BrowserLibraryViews.swift */,
+				1A0000000000000000000260 /* AppDatabase.swift */,
 			);
 			path = VideoLinker;
 			sourceTree = "<group>";
@@ -155,6 +160,9 @@
 			dependencies = (
 			);
 			name = VideoLinker;
+			packageProductDependencies = (
+				1A00000000000000000004A0 /* GRDB */,
+			);
 			productName = VideoLinker;
 			productReference = 1A0000000000000000000104 /* VideoLinker.app */;
 			productType = "com.apple.product-type.application";
@@ -183,6 +191,9 @@
 				Base,
 			);
 			mainGroup = 1A0000000000000000000101;
+			packageReferences = (
+				1A0000000000000000000490 /* XCRemoteSwiftPackageReference "GRDB.swift" */,
+			);
 			productRefGroup = 1A0000000000000000000102 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -237,6 +248,7 @@
 				1A0000000000000000000319 /* BrowserHomeView.swift in Sources */,
 				1A000000000000000000031A /* BrowserOverlays.swift in Sources */,
 				1A000000000000000000031B /* BrowserLibraryViews.swift in Sources */,
+				1A0000000000000000000360 /* AppDatabase.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -368,7 +380,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 20;
+				CURRENT_PROJECT_VERSION = 21;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = VideoLinker/Info.plist;
@@ -376,7 +388,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2.6;
+				MARKETING_VERSION = 2.7;
 				PRODUCT_BUNDLE_IDENTIFIER = com.example.VideoLinker;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -391,7 +403,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 20;
+				CURRENT_PROJECT_VERSION = 21;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = VideoLinker/Info.plist;
@@ -399,7 +411,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2.6;
+				MARKETING_VERSION = 2.7;
 				PRODUCT_BUNDLE_IDENTIFIER = com.example.VideoLinker;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -409,6 +421,25 @@
 			name = Release;
 		};
 /* End XCBuildConfiguration section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		1A0000000000000000000490 /* XCRemoteSwiftPackageReference "GRDB.swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/groue/GRDB.swift.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 6.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		1A00000000000000000004A0 /* GRDB */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1A0000000000000000000490 /* XCRemoteSwiftPackageReference "GRDB.swift" */;
+			productName = GRDB;
+		};
+/* End XCSwiftPackageProductDependency section */
 
 /* Begin XCConfigurationList section */
 		1A0000000000000000000106 /* Build configuration list for PBXProject "VideoLinker" */ = {
