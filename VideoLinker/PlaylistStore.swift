@@ -238,6 +238,97 @@ enum PlaylistStore {
         return load()
     }
 
+    // MARK: 列表排序
+
+    /// 列表总览的排序方式
+    enum ListSort: String, CaseIterable, Identifiable {
+        case nameAscending
+        case nameDescending
+        case itemCount
+        case newest
+        case oldest
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .nameAscending: return "名称 A → Z"
+            case .nameDescending: return "名称 Z → A"
+            case .itemCount: return "视频多的在前"
+            case .newest: return "最近创建的在前"
+            case .oldest: return "最早创建的在前"
+            }
+        }
+
+        var icon: String {
+            switch self {
+            case .nameAscending, .nameDescending: return "textformat.abc"
+            case .itemCount: return "number"
+            case .newest: return "clock"
+            case .oldest: return "clock.arrow.circlepath"
+            }
+        }
+    }
+
+    /// 手动拖动排序（列表总览）
+    @discardableResult
+    static func move(fromOffsets source: IndexSet, toOffset destination: Int) -> [Playlist] {
+        var playlists = load()
+        playlists.move(fromOffsets: source, toOffset: destination)
+        save(playlists)
+        return load()
+    }
+
+    /// 把一个列表挪到最前面
+    @discardableResult
+    static func moveToTop(_ id: UUID) -> [Playlist] {
+        var playlists = load()
+        guard let index = playlists.firstIndex(where: { $0.id == id }), index > 0 else {
+            return playlists
+        }
+        let list = playlists.remove(at: index)
+        playlists.insert(list, at: 0)
+        save(playlists)
+        return load()
+    }
+
+    @discardableResult
+    static func sort(_ order: ListSort) -> [Playlist] {
+        var playlists = load()
+        switch order {
+        case .nameAscending:
+            playlists.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        case .nameDescending:
+            playlists.sort { $0.name.localizedStandardCompare($1.name) == .orderedDescending }
+        case .itemCount:
+            playlists.sort {
+                if $0.items.count != $1.items.count { return $0.items.count > $1.items.count }
+                return $0.name.localizedStandardCompare($1.name) == .orderedAscending
+            }
+        case .newest:
+            playlists.sort { $0.createdAt > $1.createdAt }
+        case .oldest:
+            playlists.sort { $0.createdAt < $1.createdAt }
+        }
+        save(playlists)
+        return load()
+    }
+
+    /// 改某一条视频的标题
+    @discardableResult
+    static func renameItem(_ itemID: UUID, in playlistID: UUID, to title: String) -> [Playlist] {
+        var playlists = load()
+        guard let listIndex = playlists.firstIndex(where: { $0.id == playlistID }),
+              let itemIndex = playlists[listIndex].items.firstIndex(where: { $0.id == itemID }) else {
+            return playlists
+        }
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return playlists }
+        playlists[listIndex].items[itemIndex].title = trimmed
+        save(playlists)
+        return load()
+    }
+
     @discardableResult
     static func moveItem(in playlistID: UUID, from source: IndexSet, to destination: Int) -> [Playlist] {
         var playlists = load()

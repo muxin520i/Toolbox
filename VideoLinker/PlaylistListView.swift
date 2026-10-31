@@ -29,6 +29,91 @@ struct BackupDocument: FileDocument {
     }
 }
 
+// MARK: - 列表命名
+
+/// 新建 / 重命名播放入口，用一个 sheet 统一处理
+struct NameRequest: Identifiable {
+    enum Mode {
+        case create
+        case rename
+    }
+
+    let id = UUID()
+    var mode: Mode
+    var playlistID: UUID?
+    var itemID: UUID?
+    var initialName: String = ""
+
+    var isCreate: Bool { mode == .create }
+}
+
+struct NameEditorSheet: View {
+    let title: String
+    let prompt: String
+    let confirmTitle: String
+    let initialName: String
+    var onConfirm: (String) -> Void
+
+    @Environment(\.theme) private var theme
+    @Environment(\.dismiss) private var dismiss
+    @FocusState private var focused: Bool
+    @State private var text = ""
+
+    private var trimmed: String {
+        text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(title)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(theme.text)
+                .padding(.top, 22)
+
+            TextField("", text: $text,
+                      prompt: Text(prompt).foregroundColor(theme.textTertiary))
+                .font(.system(size: 15))
+                .foregroundStyle(theme.text)
+                .focused($focused)
+                .submitLabel(.done)
+                .onSubmit { confirm() }
+                .padding(.horizontal, 14)
+                .frame(height: 46)
+                .background(theme.field, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+
+            Button {
+                confirm()
+            } label: {
+                Text(confirmTitle)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 46)
+                    .background(theme.gradient, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+                    .opacity(trimmed.isEmpty ? 0.4 : 1)
+            }
+            .buttonStyle(.plain)
+            .disabled(trimmed.isEmpty)
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 20)
+        .background(theme.bg)
+        .onAppear {
+            text = initialName
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                focused = true
+            }
+        }
+    }
+
+    private func confirm() {
+        guard !trimmed.isEmpty else { return }
+        onConfirm(trimmed)
+        dismiss()
+    }
+}
+
 // MARK: - 列表总览
 
 struct PlaylistListView: View {
@@ -37,8 +122,10 @@ struct PlaylistListView: View {
     @State private var playlists: [Playlist] = PlaylistStore.load()
     @State private var downloadListID: UUID? = PlaylistStore.existingDownloadListID()
     @AppStorage(PlaylistStore.downloadTargetKey) private var downloadTarget = PlaylistStore.autoTarget
-    @State private var showCreateSheet = false
-    @State private var newName = ""
+
+    @State private var path: [UUID] = []
+    @State private var editMode: EditMode = .inactive
+    @State private var nameRequest: NameRequest?
 
     @State private var showExporter = false
     @State private var showImporter = false
@@ -47,51 +134,72 @@ struct PlaylistListView: View {
     @State private var alertText: String?
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             ZStack {
                 BackgroundView()
 
-                ScrollView {
-                    VStack(spacing: 10) {
-                        if playlists.isEmpty {
-                            emptyState
-                        } else {
-                            ForEach(playlists) { playlist in
-                                NavigationLink {
-                                    PlaylistDetailView(playlistID: playlist.id)
-                                } label: {
-                                    row(playlist)
-                                }
-                                .buttonStyle(.plain)
-                                .contextMenu {
-                                    Button(role: .destructive) {
-                                        withAnimation(.easeInOut(duration: 0.2)) {
-                                            playlists = PlaylistStore.delete(playlist.id)
-                                        }
-                                    } label: {
-                                        Label("删除列表", systemImage: "trash")
-                                    }
-                                }
-                            }
+                List {
+                    if playlists.isEmpty {
+                        emptyState
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                            .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+                    } else {
+                        ForEach(playlists) { playlist in
+                            listRow(playlist)
                         }
-
-                        backupHint
+                        .onMove { source, destination in
+                            playlists = PlaylistStore.move(fromOffsets: source, toOffset: destination)
+                        }
                     }
-                    .padding(.horizontal, 20)
-                    .padding(.top, 12)
-                    .padding(.bottom, 40)
+
+                    footerHint
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(EdgeInsets(top: 8, leading: 20, bottom: 40, trailing: 20))
                 }
-                .sheet(isPresented: $showLocalMedia) {
-                    LocalMediaView()
-                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .environment(\.editMode, $editMode)
             }
             .navigationTitle("播放列表")
             .navigationBarTitleDisplayMode(.large)
+            .navigationDestination(for: UUID.self) { id in
+                PlaylistDetailView(playlistID: id)
+            }
             .toolbarBackground(theme.navBg, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Menu {
+                        if !playlists.isEmpty {
+                            Menu {
+                                ForEach(PlaylistStore.ListSort.allCases) { order in
+                                    Button {
+                                        withAnimation(.easeInOut(duration: 0.25)) {
+                                            playlists = PlaylistStore.sort(order)
+                                        }
+                                    } label: {
+                                        Label(order.title, systemImage: order.icon)
+                                    }
+                                }
+
+                                Divider()
+
+                                Button {
+                                    withAnimation(.easeInOut(duration: 0.2)) {
+                                        editMode = .active
+                                    }
+                                } label: {
+                                    Label("手动拖动排序", systemImage: "line.3.horizontal")
+                                }
+                            } label: {
+                                Label("排序", systemImage: "arrow.up.arrow.down")
+                            }
+
+                            Divider()
+                        }
+
                         Button {
                             exportBackup()
                         } label: {
@@ -117,12 +225,24 @@ struct PlaylistListView: View {
                 }
 
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button {
-                        newName = ""
-                        showCreateSheet = true
-                    } label: {
-                        Image(systemName: "plus")
-                            .font(.system(size: 16, weight: .semibold))
+                    HStack(spacing: 14) {
+                        if !playlists.isEmpty {
+                            Button(editMode == .active ? "完成" : "编辑") {
+                                withAnimation(.easeInOut(duration: 0.2)) {
+                                    editMode = editMode == .active ? .inactive : .active
+                                }
+                            }
+                            .font(.system(size: 15, weight: .medium))
+                        }
+
+                        if editMode == .inactive {
+                            Button {
+                                nameRequest = NameRequest(mode: .create)
+                            } label: {
+                                Image(systemName: "plus")
+                                    .font(.system(size: 16, weight: .semibold))
+                            }
+                        }
                     }
                 }
             }
@@ -131,10 +251,27 @@ struct PlaylistListView: View {
             playlists = PlaylistStore.load()
             downloadListID = PlaylistStore.existingDownloadListID()
         }
-        .sheet(isPresented: $showCreateSheet) {
-            createSheet
-                .presentationDetents([.height(230)])
-                .presentationDragIndicator(.visible)
+        .onChange(of: editMode) { newValue in
+            if newValue == .inactive { playlists = PlaylistStore.load() }
+        }
+        .sheet(isPresented: $showLocalMedia) {
+            LocalMediaView()
+        }
+        .sheet(item: $nameRequest) { request in
+            NameEditorSheet(
+                title: request.isCreate ? "新建播放列表" : "重命名列表",
+                prompt: request.isCreate ? "给列表起个名字" : "列表名称",
+                confirmTitle: request.isCreate ? "创建" : "保存",
+                initialName: request.initialName
+            ) { name in
+                if request.isCreate {
+                    playlists = PlaylistStore.create(named: name)
+                } else if let id = request.playlistID {
+                    playlists = PlaylistStore.rename(id, to: name)
+                }
+            }
+            .presentationDetents([.height(230)])
+            .presentationDragIndicator(.visible)
         }
         .fileExporter(
             isPresented: $showExporter,
@@ -158,10 +295,13 @@ struct PlaylistListView: View {
         }
     }
 
-    private var backupHint: some View {
-        Text("点左上角 ⋯ 可以导出/导入备份，换机或重装不会丢列表")
+    private var footerHint: some View {
+        Text(editMode == .active
+             ? "按住右侧「≡」拖动可以调整顺序，改完点右上角「完成」"
+             : "长按列表可重命名；点左上角 ⋯ 里可以排序，也能导出/导入备份")
             .font(.system(size: 11))
             .foregroundStyle(theme.textTertiary)
+            .multilineTextAlignment(.center)
             .frame(maxWidth: .infinity)
             .padding(.top, 18)
     }
@@ -235,37 +375,54 @@ struct PlaylistListView: View {
         )
     }
 
-    private var createSheet: some View {        VStack(alignment: .leading, spacing: 16) {
-            Text("新建播放列表")
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(theme.text)
-                .padding(.top, 22)
+    private func listRow(_ playlist: Playlist) -> some View {
+        Group {
+            // 编辑模式下整行交给 List 处理拖动，避免手势被按钮吃掉
+            if editMode == .active {
+                row(playlist)
+            } else {
+                Button {
+                    path.append(playlist.id)
+                } label: {
+                    row(playlist)
+                }
+                .buttonStyle(.plain)
+                .contextMenu {
+                    Button {
+                        nameRequest = NameRequest(
+                            mode: .rename,
+                            playlistID: playlist.id,
+                            initialName: playlist.name
+                        )
+                    } label: {
+                        Label("重命名", systemImage: "pencil")
+                    }
 
-            TextField("", text: $newName,
-                      prompt: Text("给列表起个名字").foregroundColor(theme.textTertiary))
-                .font(.system(size: 15))
-                .foregroundStyle(theme.text)
-                .padding(.horizontal, 14)
-                .frame(height: 46)
-                .background(theme.field, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+                    if playlists.first?.id != playlist.id {
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                playlists = PlaylistStore.moveToTop(playlist.id)
+                            }
+                        } label: {
+                            Label("置顶", systemImage: "arrow.up.to.line")
+                        }
+                    }
 
-            Button {
-                playlists = PlaylistStore.create(named: newName)
-                showCreateSheet = false
-            } label: {
-                Text("创建")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 46)
-                    .background(theme.gradient, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+                    Divider()
+
+                    Button(role: .destructive) {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            playlists = PlaylistStore.delete(playlist.id)
+                        }
+                    } label: {
+                        Label("删除列表", systemImage: "trash")
+                    }
+                }
             }
-            .buttonStyle(.plain)
-
-            Spacer(minLength: 0)
         }
-        .padding(.horizontal, 20)
-        .background(theme.bg)
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+        .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 4, trailing: 20))
     }
 
     // MARK: 备份
@@ -356,6 +513,7 @@ struct PlaylistDetailView: View {
     @State private var toast: String?
     @State private var showMoveSheet = false
     @State private var pendingMoveIDs = Set<UUID>()
+    @State private var renameRequest: NameRequest?
 
     var body: some View {
         ZStack {
@@ -469,6 +627,22 @@ struct PlaylistDetailView: View {
                 }
             )
             .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+        }
+        .sheet(item: $renameRequest) { request in
+            NameEditorSheet(
+                title: "重命名视频",
+                prompt: "视频标题",
+                confirmTitle: "保存",
+                initialName: request.initialName
+            ) { name in
+                guard let itemID = request.itemID else { return }
+                PlaylistStore.renameItem(itemID, in: playlistID, to: name)
+                reload()
+                toast = "已重命名"
+                hideToastSoon()
+            }
+            .presentationDetents([.height(230)])
             .presentationDragIndicator(.visible)
         }
         .fullScreenCover(item: $request) { req in
@@ -602,6 +776,16 @@ struct PlaylistDetailView: View {
         }
         .buttonStyle(.plain)
         .contextMenu {
+            Button {
+                renameRequest = NameRequest(
+                    mode: .rename,
+                    itemID: item.id,
+                    initialName: item.title.isEmpty ? item.displayTitle : item.title
+                )
+            } label: {
+                Label("重命名", systemImage: "pencil")
+            }
+
             if item.isLocal {
                 Button {
                     UIPasteboard.general.string = item.localPath ?? item.url
