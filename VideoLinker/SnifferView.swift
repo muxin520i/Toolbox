@@ -114,6 +114,8 @@ struct BrowserView: View {
     @FocusState private var addressFocused: Bool
 
     @State private var sheet: BrowserSheet?
+    /// 当前 sheet 里正在显示的内容。换面板时只改它，不再“先关再开”
+    @State private var renderedSheet: BrowserSheet?
     @State private var pendingSheet: BrowserSheet?
     @State private var draft: ShortcutDraft?
     @State private var pendingDraft: ShortcutDraft?
@@ -176,7 +178,7 @@ struct BrowserView: View {
                         FloatingSniffButton(count: tab.found.count) {
                             addressFocused = false
                             editing = false
-                            sheet = .sniff
+                            present(.sniff)
                         }
                     }
                 }
@@ -235,8 +237,19 @@ struct BrowserView: View {
         .fullScreenCover(item: $request) { req in
             PlayerScreen(request: req)
         }
-        .sheet(item: $sheet, onDismiss: handleDismiss) { item in
-            sheetContent(item)
+        .sheet(isPresented: sheetPresented, onDismiss: handleDismiss) {
+            if let item = renderedSheet {
+                if item == .menu {
+                    sheetContent(item)
+                        .id(item.rawValue)
+                } else {
+                    // 菜单是半屏，其余面板给足高度
+                    sheetContent(item)
+                        .id(item.rawValue)
+                        .presentationDetents([.large])
+                        .presentationDragIndicator(.visible)
+                }
+            }
         }
         .sheet(item: $draft) { item in
             ShortcutEditor(draft: item)
@@ -394,8 +407,8 @@ struct BrowserView: View {
                 address = url
                 store.load(url)
             },
-            onOpenHistory: { sheet = .history },
-            onOpenBookmarks: { sheet = .bookmarks },
+            onOpenHistory: { present(.history) },
+            onOpenBookmarks: { present(.bookmarks) },
             onAddShortcut: {
                 pendingDraft = ShortcutDraft(item: nil, prefillURL: nil, prefillTitle: nil)
                 sheet = nil
@@ -453,7 +466,7 @@ struct BrowserView: View {
         Button {
             addressFocused = false
             editing = false
-            sheet = .tabs
+            present(.tabs)
         } label: {
             ZStack {
                 RoundedRectangle(cornerRadius: 5, style: .continuous)
@@ -613,6 +626,7 @@ struct BrowserView: View {
     }
 
     private func handleDismiss() {
+        renderedSheet = nil
         if let item = pendingDraft {
             pendingDraft = nil
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.28) {
@@ -623,14 +637,23 @@ struct BrowserView: View {
         if let next = pendingSheet {
             pendingSheet = nil
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.28) {
-                sheet = next
+                present(next)
             }
         }
     }
 
+    private var sheetPresented: Binding<Bool> {
+        Binding(get: { sheet != nil }, set: { if !$0 { sheet = nil } })
+    }
+
+    /// 在同一个 sheet 里换面板：菜单点书签/历史直接切内容，省掉关闭+重新弹出的 0.6 秒
+    private func present(_ next: BrowserSheet) {
+        renderedSheet = next
+        sheet = next
+    }
+
     private func openPanel(_ next: BrowserSheet) {
-        sheet = nil
-        pendingSheet = next
+        present(next)
     }
 
     // MARK: 动作
@@ -690,7 +713,7 @@ struct BrowserView: View {
         addressFocused = false
         editing = false
         if tab == nil { return }
-        sheet = .menu
+        present(.menu)
     }
 
     private func handle(_ action: BrowserMenuAction) {

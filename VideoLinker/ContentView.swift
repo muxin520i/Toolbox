@@ -104,7 +104,7 @@ struct ContentView: View {
                 .font(.system(size: 30, weight: .bold))
                 .foregroundStyle(theme.text)
 
-            Text("粘贴视频直链即可播放，支持在线流")
+            Text("粘贴视频直链即可播放，支持在线流与 20+ 格式")
                 .font(.subheadline)
                 .foregroundStyle(theme.textSecondary)
         }
@@ -465,6 +465,19 @@ struct ContentView: View {
 
     // MARK: - 底部说明
 
+    private func formatLine(_ title: String, _ value: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text(title)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(theme.textSecondary)
+                .frame(width: 62, alignment: .leading)
+            Text(value)
+                .font(.system(size: 11))
+                .foregroundStyle(theme.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
     private var footer: some View {
         VStack(alignment: .leading, spacing: 6) {
             Divider().overlay(theme.cardStroke)
@@ -472,10 +485,19 @@ struct ContentView: View {
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(theme.textSecondary)
                 .padding(.top, 8)
-            Text("MP4 / MOV / M4V 直链，以及 HLS 直播流（.m3u8）。\nYouTube、B 站等网页链接不是视频直链，需要先取得真实播放地址。")
+            VStack(alignment: .leading, spacing: 5) {
+                formatLine("系统播放器", "MP4 / M4V / MOV / HLS（.m3u8，含 AES-128 加密分片）")
+                formatLine("VLC 兜底", "MKV / FLV / AVI / RMVB / WMV / WebM / TS / M2TS / MPG / OGV / 3GP / ASF / VOB / F4V")
+                formatLine("音频", "M4A / MP3 / AAC / WAV / FLAC")
+                formatLine("下载", "直链原样保存；m3u8 自动抓取全部分片并合并为 MP4")
+            }
+            .padding(.top, 2)
+
+            Text("YouTube、B 站等网页链接不是视频直链，需要先取得真实播放地址。")
                 .font(.system(size: 12))
                 .foregroundStyle(theme.textTertiary)
                 .lineSpacing(3)
+                .padding(.top, 6)
         }
     }
 
