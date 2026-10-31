@@ -364,9 +364,16 @@ struct PlayerScreen: View {
         )
         .opacity(showControls ? 1 : 0)
         .allowsHitTesting(showControls)
-        // 显示状态下点空白处也能收起，点一下显示、再点一下隐藏
+        // 控件层本身会挡住下层手势，这里补一套：单击收起、双击仍然快进快退
         .contentShape(Rectangle())
-        .onTapGesture { toggleControls() }
+        .gesture(
+            SpatialTapGesture(count: 2)
+                .onEnded { value in
+                    let isLeft = value.location.x < UIScreen.main.bounds.width / 2
+                    seekRelative(isLeft ? -10 : 10)
+                }
+                .exclusively(before: TapGesture().onEnded { toggleControls() })
+        )
         .animation(.easeInOut(duration: 0.2), value: showControls)
     }
 
