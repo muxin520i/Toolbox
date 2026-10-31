@@ -218,6 +218,9 @@ App 用 GRDB 把数据统一存在一个 SQLite 库里：`Application Support/Vi
   - 播放走 `AVURLAsset` 的 `AVURLAssetHTTPHeaderFieldsKey` 带 `Authorization`，HLS 分片请求也会继承；VLC 兜底时改传 `:http-user` / `:http-pwd`
   - 仅 WebDAV。SMB / AFP 要额外的系统组件，这一版没做
 
+### v3.1.0 修复与调整
 
-
-
+- **播完可直接重播**：把片子看到结尾后，中间的大按钮变成「重播」图标，点一下从 0 秒重新开始，不再出现「点了没反应」。往回拖进度条会退回到播放/暂停按钮
+- **音量提示**：播放页里藏着一个 1×1 的 `MPVolumeView`（滑动手势改音量要用它），系统自带的音量 HUD 因此不会出现。现在改为监听 `AVAudioSession.outputVolume`（并用滑块 `value` 兜底），按手机侧键时在顶部弹一条自己画的提示：喇叭图标 + 进度条 + 百分比，1.3 秒后自动消失
+- **悬浮球改为开结果页**：点右下角悬浮球不再替用户盲下一条地址，统一打开嗅探结果页自己挑；长按的「挑清晰度」逻辑一并去掉，短按就够了
+- **嗅探结果补时长和分辨率**：每行第二行从「域名」变成「域名 · 12:34 · 1920×1080」。先用 `AVURLAsset` 读 duration 和 `naturalSize`（按 `preferredTransform` 摆正竖屏视频），读不到就把 m3u8 当文本解一遍：master 里按 RESOLUTION 选最高码率那档，再累加 `#EXTINF` 算总时长。9 秒没结果就放弃，同一地址只探一次，最多并发 3 条

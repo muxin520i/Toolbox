@@ -299,9 +299,8 @@ struct BrowserMenuSheet: View {
 
 struct FloatingSniffButton: View {
     var count: Int
+    /// 点击：打开嗅探结果页
     var onTap: () -> Void
-    /// 长按：有多个地址时打开列表挑清晰度
-    var onLongPress: () -> Void = {}
 
     @AppStorage(SettingsKey.fabX) private var storedX = -1.0
     @AppStorage(SettingsKey.fabY) private var storedY = -1.0
@@ -309,7 +308,6 @@ struct FloatingSniffButton: View {
     @State private var dragOffset: CGSize = .zero
     @State private var dragging = false
     @State private var suppressTap = false
-    @State private var longFired = false
 
     private let diameter: CGFloat = 50
 
@@ -356,20 +354,8 @@ struct FloatingSniffButton: View {
                             }
                         }
                 )
-                .simultaneousGesture(
-                    LongPressGesture(minimumDuration: 0.55)
-                        .onEnded { _ in
-                            guard !dragging, !suppressTap else { return }
-                            longFired = true
-                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                            onLongPress()
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-                                longFired = false
-                            }
-                        }
-                )
                 .onTapGesture {
-                    guard !suppressTap, !longFired else { return }
+                    guard !suppressTap else { return }
                     onTap()
                 }
         }
@@ -424,6 +410,8 @@ struct SniffResultsPanel: View {
     var onAddToPlaylist: (SniffedVideo) -> Void
 
     @Environment(\.dismiss) private var dismiss
+    /// 时长 / 分辨率的探测结果，按地址缓存，翻列表不会重复问
+    @ObservedObject private var probe = MediaProbeStore.shared
     @State private var hint: String?
     @State private var filter = "全部"
     @State private var selecting = false
@@ -753,7 +741,7 @@ struct SniffResultsPanel: View {
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
-                Text(video.host)
+                Text(detailText(video))
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -798,6 +786,17 @@ struct SniffResultsPanel: View {
                 onPlay(video)
             }
         }
+        .task(id: video.url) {
+            probe.request(video.url)
+        }
+    }
+
+    /// 第二行：域名 + 时长 + 分辨率，后两项探到才有
+    private func detailText(_ video: SniffedVideo) -> String {
+        guard let summary = probe.info(for: video.url)?.summary, !summary.isEmpty else {
+            return video.host
+        }
+        return video.host + " · " + summary
     }
 }
 

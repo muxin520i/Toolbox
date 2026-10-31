@@ -47,6 +47,7 @@
 		1A0000000000000000000376 /* PrivacyLock.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000276 /* PrivacyLock.swift */; };
 		1A0000000000000000000377 /* WebDAVClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000277 /* WebDAVClient.swift */; };
 		1A0000000000000000000378 /* WebDAVView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000278 /* WebDAVView.swift */; };
+		1A0000000000000000000379 /* MediaProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000279 /* MediaProbe.swift */; };
 		1A0000000000000000000361 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = 1A00000000000000000004A0 /* GRDB */; };
 /* End PBXBuildFile section */
 
@@ -93,6 +94,7 @@
 		1A0000000000000000000276 /* PrivacyLock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrivacyLock.swift; sourceTree = "<group>"; };
 		1A0000000000000000000277 /* WebDAVClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebDAVClient.swift; sourceTree = "<group>"; };
 		1A0000000000000000000278 /* WebDAVView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebDAVView.swift; sourceTree = "<group>"; };
+		1A0000000000000000000279 /* MediaProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaProbe.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -167,6 +169,7 @@
 				1A0000000000000000000276 /* PrivacyLock.swift */,
 				1A0000000000000000000277 /* WebDAVClient.swift */,
 				1A0000000000000000000278 /* WebDAVView.swift */,
+				1A0000000000000000000279 /* MediaProbe.swift */,
 			);
 			path = VideoLinker;
 			sourceTree = "<group>";
@@ -285,6 +288,7 @@
 				1A0000000000000000000376 /* PrivacyLock.swift in Sources */,
 				1A0000000000000000000377 /* WebDAVClient.swift in Sources */,
 				1A0000000000000000000378 /* WebDAVView.swift in Sources */,
+				1A0000000000000000000379 /* MediaProbe.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -416,7 +420,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 31;
+				CURRENT_PROJECT_VERSION = 32;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = VideoLinker/Info.plist;
@@ -424,7 +428,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.0.0;
+				MARKETING_VERSION = 3.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.example.VideoLinker;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -439,7 +443,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 31;
+				CURRENT_PROJECT_VERSION = 32;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = VideoLinker/Info.plist;
@@ -447,7 +451,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.0.0;
+				MARKETING_VERSION = 3.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.example.VideoLinker;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

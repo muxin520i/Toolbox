@@ -41,6 +41,8 @@ struct PlayerScreen: View {
 
     @Environment(\.dismiss) private var dismiss
     @StateObject private var model = PlayerModel()
+    /// 跟着系统音量变化走的提示条（侧键调音量时显示）
+    @StateObject private var volumeMonitor = VolumeMonitor()
 
     @State private var index: Int
     @State private var isTheater = false
@@ -154,6 +156,15 @@ struct PlayerScreen: View {
                     .allowsHitTesting(false)
             }
 
+            // 音量提示：按手机侧键时系统 HUD 被隐藏的 MPVolumeView 顶掉了，这里自己画一个
+            if volumeMonitor.visible, dragMode != 2 {
+                volumeHUD
+                    .padding(.top, isTheater ? 64 : 74)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .transition(.opacity)
+                    .allowsHitTesting(false)
+            }
+
             if let hint = hint {
                 Text(hint)
                     .font(.system(size: 14, weight: .semibold))
@@ -178,6 +189,7 @@ struct PlayerScreen: View {
             model.rate = currentRate
             loadCurrent()
             startSubtitleTicker()
+            volumeMonitor.refresh()
         }
         .onDisappear {
             saveProgress()
@@ -384,6 +396,42 @@ struct PlayerScreen: View {
         hideHintSoon()
     }
 
+    /// 音量提示条：喇叭图标 + 进度 + 百分比，跟系统 HUD 一个意思
+    private var volumeHUD: some View {
+        HStack(spacing: 10) {
+            Image(systemName: volumeSymbol)
+                .font(.system(size: 15, weight: .semibold))
+                .frame(width: 22)
+
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Color.white.opacity(0.24))
+                    .frame(width: 108, height: 5)
+                Capsule()
+                    .fill(Color.white)
+                    .frame(width: max(2, 108 * CGFloat(volumeMonitor.value)), height: 5)
+            }
+
+            Text("\(Int((volumeMonitor.value * 100).rounded()))%")
+                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .frame(width: 40, alignment: .trailing)
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay(Capsule().strokeBorder(Color.white.opacity(0.18), lineWidth: 0.8))
+        .shadow(color: .black.opacity(0.3), radius: 10, y: 3)
+    }
+
+    private var volumeSymbol: String {
+        let v = volumeMonitor.value
+        if v <= 0.001 { return "speaker.slash.fill" }
+        if v < 0.34 { return "speaker.wave.1.fill" }
+        if v < 0.67 { return "speaker.wave.2.fill" }
+        return "speaker.wave.3.fill"
+    }
+
     /// 长按时的醒目提示，让人一眼看出当前在快进
     private var boostBadge: some View {
         VStack(spacing: 5) {
@@ -560,7 +608,9 @@ struct PlayerScreen: View {
         Button {
             model.togglePlay()
         } label: {
-            Image(systemName: model.isPlaying ? "pause.fill" : "play.fill")
+            Image(systemName: model.didReachEnd
+                  ? "arrow.counterclockwise"
+                  : (model.isPlaying ? "pause.fill" : "play.fill"))
                 .font(.system(size: 28, weight: .bold))
                 .foregroundStyle(.white)
                 .frame(width: 72, height: 72)
@@ -1054,6 +1104,63 @@ struct SystemVolumeSlider: UIViewRepresentable {
     }
 }
 
+// MARK: - 音量监听
+
+/// 盯着系统音量：按侧键时系统 HUD 因为藏着 MPVolumeView 不显示，改由播放页自己弹一条
+final class VolumeMonitor: ObservableObject {
+    @Published private(set) var value: Float = 0
+    @Published private(set) var visible = false
+
+    private var observation: NSKeyValueObservation?
+    private var sliderObservation: NSKeyValueObservation?
+    private var hideWork: DispatchWorkItem?
+
+    init() {
+        value = AVAudioSession.sharedInstance().outputVolume
+        observation = AVAudioSession.sharedInstance().observe(\.outputVolume, options: [.new]) { [weak self] session, _ in
+            let now = session.outputVolume
+            DispatchQueue.main.async {
+                self?.apply(now, flash: true)
+            }
+        }
+    }
+
+    /// 进播放页时先把当前音量读进来（不弹提示），顺便把滑块也盯上
+    func refresh() {
+        apply(AVAudioSession.sharedInstance().outputVolume, flash: false)
+        observeSliderIfNeeded()
+        // MPVolumeView 的滑块是布局之后才生出来的，晚一点再找一次
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+            self?.observeSliderIfNeeded()
+        }
+    }
+
+    /// 有些系统版本上 outputVolume 的 KVO 不吭声，滑块的 value 变化补上
+    private func observeSliderIfNeeded() {
+        guard sliderObservation == nil,
+              let slider = SystemVolumeSlider.shared.volumeSlider else { return }
+        sliderObservation = slider.observe(\.value, options: [.new]) { [weak self] slider, _ in
+            let now = slider.value
+            DispatchQueue.main.async {
+                self?.apply(now, flash: true)
+            }
+        }
+    }
+
+    private func apply(_ raw: Float, flash: Bool) {
+        value = min(1, max(0, raw))
+        guard flash else { return }
+
+        withAnimation(.easeOut(duration: 0.12)) { visible = true }
+        hideWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            withAnimation(.easeOut(duration: 0.25)) { self?.visible = false }
+        }
+        hideWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.3, execute: work)
+    }
+}
+
 // MARK: - 播放状态管理
 
 final class PlayerModel: ObservableObject {
@@ -1064,6 +1171,8 @@ final class PlayerModel: ObservableObject {
     @Published private(set) var duration: Double = 0
     /// 当前是不是在用 VLC 兜底
     @Published private(set) var usingVLC = false
+    /// 这条已经播到结尾，中间按钮改成「重播」
+    @Published private(set) var didReachEnd = false
     @Published var rate: Double = 1.0 {
         didSet {
             if usingVLC {
@@ -1170,6 +1279,7 @@ final class PlayerModel: ObservableObject {
         duration = 0
         lastSavedSecond = -100
         pendingSeek = startAt
+        didReachEnd = false
 
         // mkv / flv / avi 这些系统播放器基本没戏，直接交给 VLC，省一次失败等待
         if VLCPlayback.isAvailable,
@@ -1213,6 +1323,7 @@ final class PlayerModel: ObservableObject {
             object: item,
             queue: .main
         ) { [weak self] _ in
+            self?.didReachEnd = true
             self?.onFinished?()
         }
 
@@ -1273,6 +1384,11 @@ final class PlayerModel: ObservableObject {
     }
 
     func togglePlay() {
+        // 已经播到结尾：中间按钮点下去就是从 0 重来，而不是在末尾空按一下
+        if didReachEnd {
+            restart()
+            return
+        }
         if usingVLC {
             vlcEngine?.togglePlay()
             return
@@ -1287,10 +1403,38 @@ final class PlayerModel: ObservableObject {
         }
     }
 
+    /// 从头重播当前这条
+    func restart() {
+        didReachEnd = false
+        currentTime = 0
+        lastSavedSecond = -100
+
+        if usingVLC {
+            vlcEngine?.seek(to: 0)
+            vlcEngine?.play()
+            return
+        }
+        player.seek(
+            to: .zero,
+            toleranceBefore: .zero,
+            toleranceAfter: .zero
+        ) { [weak self] _ in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.player.play()
+                self.player.rate = Float(self.rate)
+            }
+        }
+    }
+
     func seek(to seconds: Double) {
         guard seconds.isFinite else { return }
         let clamped = max(0, duration > 0 ? min(seconds, duration) : seconds)
         currentTime = clamped
+        // 拖回去一点就不再算「已播完」，中间按钮回到播放/暂停
+        if duration <= 0 || clamped < duration - 0.5 {
+            didReachEnd = false
+        }
 
         if usingVLC {
             vlcEngine?.seek(to: clamped)
@@ -1363,6 +1507,7 @@ final class PlayerModel: ObservableObject {
             if !buffering { self.isLoading = false }
         }
         engine.onEnded = { [weak self] in
+            self?.didReachEnd = true
             self?.onFinished?()
         }
         engine.onFailed = { [weak self] message in
