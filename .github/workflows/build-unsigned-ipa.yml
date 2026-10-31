@@ -42,30 +42,38 @@ jobs:
           curl -L --retry 5 --retry-delay 5 --max-time 1500 -o /tmp/vlc.tar.xz "$URL"
           ls -lh /tmp/vlc.tar.xz
           tar -xf /tmp/vlc.tar.xz -C /tmp/vlc
-          echo "--- archive ---"
-          find /tmp/vlc -maxdepth 3 \( -name "*.framework" -o -name "*.xcframework" \) | head -20
-          FW="$(find /tmp/vlc -type d -name 'MobileVLCKit.framework' | grep -v -i simulator | head -1)"
+          echo "--- archive tree ---"
+          find /tmp/vlc -maxdepth 6 -type d | head -50
+          echo "--- frameworks ---"
+          find /tmp/vlc -type d -name "*.framework" | head -20
+          # 优先 iOS 真机切片，退一步取任意非模拟器切片
+          FW="$(find /tmp/vlc -type d -name '*.framework' | grep -i 'ios-arm64' | grep -Ei 'vlckit' | head -1)"
           if [ -z "$FW" ]; then
-            XCF="$(find /tmp/vlc -type d -name 'MobileVLCKit.xcframework' | head -1)"
-            if [ -n "$XCF" ]; then
-              FW="$(find "$XCF" -maxdepth 2 -type d -name 'MobileVLCKit.framework' | grep -i 'ios-arm64' | head -1)"
-            fi
+            FW="$(find /tmp/vlc -type d -name '*.framework' | grep -Ei 'vlckit' | grep -v -i simulator | head -1)"
           fi
           if [ -z "$FW" ]; then
-            echo "::error::MobileVLCKit.framework not found in archive"
+            echo "::error::VLCKit framework not found in archive"
             exit 1
           fi
           echo "using $FW"
           cp -R "$FW" Vendor/
-          du -sh Vendor/MobileVLCKit.framework
+          ls -la Vendor
+          du -sh Vendor/*.framework
 
       - name: Build (no code signing)
         run: |
           set -x
           VLC_ARGS=()
-          if [ -d Vendor/MobileVLCKit.framework ]; then
+          VLC_MODULE=""
+          if [ -d Vendor/VLCKit.framework ]; then
+            VLC_MODULE="VLCKit"
+          elif [ -d Vendor/MobileVLCKit.framework ]; then
+            VLC_MODULE="MobileVLCKit"
+          fi
+          if [ -n "$VLC_MODULE" ]; then
             VLC_ARGS+=("FRAMEWORK_SEARCH_PATHS=$(pwd)/Vendor \$(inherited)")
-            VLC_ARGS+=("OTHER_LDFLAGS=\$(inherited) -framework MobileVLCKit -lc++ -lz -lbz2 -liconv -lxml2 -ObjC")
+            VLC_ARGS+=("OTHER_LDFLAGS=\$(inherited) -framework $VLC_MODULE -lc++ -lz -lbz2 -liconv -lxml2 -ObjC")
+            echo "linking $VLC_MODULE"
           fi
           xcodebuild \
             -project VideoLinker.xcodeproj \
@@ -86,11 +94,11 @@ jobs:
           rm -rf Payload VideoLinker-unsigned.ipa
           mkdir -p Payload
           cp -R "$APP_PATH" Payload/
-          if [ -d Vendor/MobileVLCKit.framework ]; then
+          if ls Vendor/*.framework >/dev/null 2>&1; then
             mkdir -p Payload/VideoLinker.app/Frameworks
-            cp -R Vendor/MobileVLCKit.framework Payload/VideoLinker.app/Frameworks/
-            echo "embedded VLCKit:"
-            du -sh Payload/VideoLinker.app/Frameworks/MobileVLCKit.framework
+            cp -R Vendor/*.framework Payload/VideoLinker.app/Frameworks/
+            echo "embedded frameworks:"
+            du -sh Payload/VideoLinker.app/Frameworks/*
           fi
           zip -qry VideoLinker-unsigned.ipa Payload
           rm -rf Payload

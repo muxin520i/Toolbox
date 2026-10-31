@@ -1,8 +1,13 @@
 import Foundation
 import SwiftUI
 
-#if canImport(MobileVLCKit)
+#if canImport(VLCKit)
+import VLCKit
+#elseif canImport(MobileVLCKit)
 import MobileVLCKit
+#endif
+
+#if canImport(VLCKit) || canImport(MobileVLCKit)
 
 /// AVPlayer 认不出的容器（mkv / flv / avi / rmvb / 老式 ts 等）交给 VLC 兜底。
 /// 只负责播放，下载、嗅探、油猴都还走原来的逻辑。
