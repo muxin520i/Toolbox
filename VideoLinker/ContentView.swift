@@ -262,24 +262,19 @@ struct ContentView: View {
         )
     }
 
-    /// 直接把当前链接当文件下下来
+    /// 直链直接下，m3u8 走分片下载
     private func downloadCurrent() {
         guard let url = resolvedURL else { return }
         inputFocused = false
 
         let raw = url.absoluteString
-        if DownloadManager.isStream(raw) {
-            downloadHint = "这是流媒体地址（m3u8 之类），没法整段下成一个文件，先播放再看。"
-            return
+        switch downloads.start(from: raw) {
+        case .started(let item):
+            items = HistoryStore.add(HistoryItem(url: raw, date: Date()))
+            downloadHint = "已开始下载「\(item.fileName)」，进度在「下载管理」里看。"
+        case .failed(let reason):
+            downloadHint = reason
         }
-
-        guard let item = downloads.start(from: raw) else {
-            downloadHint = "这个链接下载不了，换视频直链试试（.mp4 结尾那种）。"
-            return
-        }
-
-        items = HistoryStore.add(HistoryItem(url: raw, date: Date()))
-        downloadHint = "已开始下载「\(item.fileName)」，进度可以在「下载管理」里看。"
     }
 
     // MARK: - 历史记录

@@ -24,6 +24,8 @@ final class DownloadItem: ObservableObject, Identifiable {
     @Published var state: DownloadState = .running
     @Published var localPath: String = ""
     @Published var createdAt: Date = Date()
+    /// 失败原因，直接显示给用户看
+    @Published var failReason: String = ""
 
     init(fileName: String, source: String) {
         self.fileName = fileName
@@ -52,6 +54,7 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate {
     private var timers: [UUID: Timer] = [:]
     private var live: [ObjectIdentifier: DownloadItem] = [:]
     private var sessions: [UUID: URLSessionDownloadTask] = [:]
+    private var jobs: [UUID: Task<Void, Never>] = [:]
 
     private static let storeKey = "browser.downloads.v1"
 
@@ -131,46 +134,51 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate {
         timers.removeValue(forKey: id)
     }
 
-    // MARK: 直接下载（首页 / 播放页）
+    // MARK: 下载入口（首页 / 播放页）
 
-    private static let mobileUA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
-        + "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
+    private static let mobileUA = HLSDownloader.userAgent
 
-    /// m3u8/mpd 这类是播放列表，不是一个整文件，下载下来也放不了
-    static func isStream(_ urlString: String) -> Bool {
-        let lower = urlString.lowercased()
-        if lower.hasPrefix("blob:") || lower.hasPrefix("data:") { return true }
-        guard let url = URL(string: urlString) else { return true }
-        return ["m3u8", "m3u", "mpd", "ism", "ts"].contains(url.pathExtension.lowercased())
+    enum Outcome {
+        case started(DownloadItem)
+        case failed(String)
     }
 
-    /// 直接按链接下一个文件，返回这一条记录（失败返回 nil）
-    @discardableResult
-    func start(from urlString: String, title: String? = nil) -> DownloadItem? {
+    /// 直链和 m3u8 都从这里进：m3u8 走分片下载，其余当普通文件下
+    func start(from urlString: String, title: String? = nil) -> Outcome {
         let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !Self.isStream(trimmed), let url = URL(string: trimmed) else { return nil }
-        guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return nil }
-
-        var name = (title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        if name.isEmpty {
-            name = url.lastPathComponent.removingPercentEncoding ?? ""
+        guard let url = URL(string: trimmed) else { return .failed("链接格式不对") }
+        guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
+            return .failed("只支持 http/https 链接")
         }
-        if name.isEmpty { name = "video" }
-        if (name as NSString).pathExtension.isEmpty { name += ".mp4" }
 
-        let dest = Self.unique(in: Self.directory(), name: name)
+        let ext = url.pathExtension.lowercased()
+        if ext == "mpd" || ext == "ism" {
+            return .failed("这是 DASH 流（mpd），暂时只能下 m3u8，看看站点有没有 m3u8 地址")
+        }
 
-        let item = DownloadItem(fileName: dest.lastPathComponent, source: trimmed)
+        let baseName = Self.displayName(title: title, url: url)
+
+        if HLSDownloader.looksLikeHLS(trimmed) {
+            return .started(startHLS(url: url, name: baseName, source: trimmed))
+        }
+
+        return .started(startDirect(url: url, name: baseName, source: trimmed))
+    }
+
+    /// 普通文件：一个 GET 到底
+    private func startDirect(url: URL, name: String, source: String) -> DownloadItem {
+        let dest = Self.unique(in: Self.directory(), name: name + ".mp4")
+
+        let item = DownloadItem(fileName: dest.lastPathComponent, source: source)
         item.localPath = dest.path
-
         items.insert(item, at: 0)
         items = Array(items.prefix(60))
 
         var request = URLRequest(url: url)
         request.timeoutInterval = 30
         request.setValue(Self.mobileUA, forHTTPHeaderField: "User-Agent")
-        if let host = url.host {
-            request.setValue("\(scheme)://\(host)/", forHTTPHeaderField: "Referer")
+        if let referer = Self.referer(for: url) {
+            request.setValue(referer, forHTTPHeaderField: "Referer")
         }
 
         let task = URLSession.shared.downloadTask(with: request) { tempURL, _, error in
@@ -180,9 +188,19 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate {
 
                 guard let tempURL = tempURL, error == nil else {
                     item.state = .failed
+                    item.failReason = "网络请求失败，可能是链接过期或需要登录"
                     self.save()
                     return
                 }
+
+                // 有些地址没有后缀，下回来才发现是 m3u8：转成分片下载
+                if let head = try? FileHandle(forReadingFrom: tempURL).readData(ofLength: 96),
+                   HLSDownloader.isPlaylistContent(head) {
+                    try? FileManager.default.removeItem(at: tempURL)
+                    self.promoteToHLS(item: item, url: url, name: name, source: source)
+                    return
+                }
+
                 do {
                     try? FileManager.default.removeItem(at: dest)
                     try FileManager.default.moveItem(at: tempURL, to: dest)
@@ -190,6 +208,7 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate {
                     item.state = .finished
                 } catch {
                     item.state = .failed
+                    item.failReason = "保存失败，存储空间可能不够"
                 }
                 self.save()
             }
@@ -198,6 +217,61 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate {
         sessions[item.id] = task
         startTimer(task: task, item: item)
         task.resume()
+        return item
+    }
+
+    /// 直链下回来发现是播放列表，就地转成分片任务，复用同一条记录
+    private func promoteToHLS(item: DownloadItem, url: URL, name: String, source: String) {
+        item.progress = 0
+        item.state = .running
+        startHLS(url: url, name: name, source: source, existing: item)
+    }
+
+    /// m3u8：解析清单 → 并发拉分片 → 解密 → 顺序拼接
+    @discardableResult
+    private func startHLS(url: URL, name: String, source: String, existing: DownloadItem? = nil) -> DownloadItem {
+        let item: DownloadItem
+        if let existing = existing {
+            item = existing
+        } else {
+            item = DownloadItem(fileName: name + ".ts", source: source)
+            items.insert(item, at: 0)
+            items = Array(items.prefix(60))
+        }
+
+        let referer = Self.referer(for: url)
+
+        let job = Task { [weak self] in
+            guard let self = self else { return }
+            do {
+                let playlist = try await HLSDownloader.parse(playlistURL: url, referer: referer)
+                let dest = Self.unique(in: Self.directory(), name: name + "." + playlist.fileExtension)
+
+                await MainActor.run {
+                    item.fileName = dest.lastPathComponent
+                    item.localPath = dest.path
+                }
+
+                try await HLSDownloader.download(playlist, referer: referer, to: dest) { value in
+                    DispatchQueue.main.async { item.progress = value }
+                }
+
+                await MainActor.run {
+                    item.progress = 1
+                    item.state = .finished
+                    self.jobs.removeValue(forKey: item.id)
+                    self.save()
+                }
+            } catch {
+                await MainActor.run {
+                    item.state = .failed
+                    item.failReason = (error as? HLSFailure)?.message ?? error.localizedDescription
+                    self.jobs.removeValue(forKey: item.id)
+                    self.save()
+                }
+            }
+        }
+        jobs[item.id] = job
         return item
     }
 
@@ -217,9 +291,29 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate {
         timers[item.id] = timer
     }
 
+    private static func referer(for url: URL) -> String? {
+        guard let scheme = url.scheme, let host = url.host else { return nil }
+        return "\(scheme)://\(host)/"
+    }
+
+    private static func displayName(title: String?, url: URL) -> String {
+        var name = (title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if name.isEmpty {
+            name = url.lastPathComponent.removingPercentEncoding ?? ""
+            name = (name as NSString).deletingPathExtension
+        }
+        if name.isEmpty { name = "video" }
+        return String(name.prefix(60))
+    }
+
     // MARK: 增删
 
     func remove(_ item: DownloadItem) {
+        jobs[item.id]?.cancel()
+        jobs.removeValue(forKey: item.id)
+        sessions[item.id]?.cancel()
+        sessions.removeValue(forKey: item.id)
+        stopTimer(item.id)
         if let url = item.fileURL {
             try? FileManager.default.removeItem(at: url)
         }

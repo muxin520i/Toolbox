@@ -364,6 +364,9 @@ struct PlayerScreen: View {
         )
         .opacity(showControls ? 1 : 0)
         .allowsHitTesting(showControls)
+        // 显示状态下点空白处也能收起，点一下显示、再点一下隐藏
+        .contentShape(Rectangle())
+        .onTapGesture { toggleControls() }
         .animation(.easeInOut(duration: 0.2), value: showControls)
     }
 
@@ -433,13 +436,14 @@ struct PlayerScreen: View {
     private var playPauseButton: some View {
         Button {
             model.togglePlay()
-            scheduleAutoHide()
         } label: {
             Image(systemName: model.isPlaying ? "pause.fill" : "play.fill")
-                .font(.system(size: 26, weight: .bold))
+                .font(.system(size: 28, weight: .bold))
                 .foregroundStyle(.white)
-                .frame(width: 66, height: 66)
+                .frame(width: 72, height: 72)
                 .background(.ultraThinMaterial, in: Circle())
+                .overlay(Circle().strokeBorder(.white.opacity(0.18), lineWidth: 1))
+                .shadow(color: .black.opacity(0.35), radius: 12, y: 4)
         }
         .buttonStyle(.plain)
         .opacity(showControls ? 1 : 0)
@@ -467,7 +471,6 @@ struct PlayerScreen: View {
                         } else {
                             scrubbing = false
                             model.seek(to: scrubValue)
-                            scheduleAutoHide()
                         }
                     }
                 )
@@ -608,19 +611,15 @@ struct PlayerScreen: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0, execute: task)
     }
 
-    /// 下载当前正在播的这个
+    /// 下载当前正在播的这个（m3u8 会分片下载再拼成一个文件）
     private func downloadCurrent() {
         guard let item = currentItem, !item.url.isEmpty else { return }
 
-        if DownloadManager.isStream(item.url) {
-            toast("这是流媒体地址（m3u8 之类），没法整段下载")
-            return
-        }
-
-        if let record = DownloadManager.shared.start(from: item.url, title: titleText) {
+        switch DownloadManager.shared.start(from: item.url, title: titleText) {
+        case .started(let record):
             toast("已加入下载：\(record.fileName)")
-        } else {
-            toast("这个地址下载不了，换视频直链试试")
+        case .failed(let reason):
+            toast(reason)
         }
     }
 
@@ -656,7 +655,6 @@ struct PlayerScreen: View {
             hideHintSoon()
         }
 
-        scheduleAutoHide()
     }
 
     private func saveProgress() {
@@ -697,26 +695,17 @@ struct PlayerScreen: View {
         lastRate = value
         showHint("\(rateText(value)) 倍速")
         hideHintSoon()
-        scheduleAutoHide()
     }
 
     // MARK: 控制条显隐
 
+    /// 点一下显示、再点一下隐藏，不做定时自动消失
     private func toggleControls() {
         withAnimation(.easeInOut(duration: 0.2)) {
             showControls.toggle()
         }
-        if showControls { scheduleAutoHide() }
     }
 
-    private func scheduleAutoHide() {
-        guard model.isPlaying else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 4.5) {
-            if showControls && !scrubbing && model.isPlaying {
-                withAnimation(.easeInOut(duration: 0.25)) { showControls = false }
-            }
-        }
-    }
 
     // MARK: 画中画
 
@@ -739,7 +728,6 @@ struct PlayerScreen: View {
         } else {
             controller.startPictureInPicture()
         }
-        scheduleAutoHide()
     }
 
     // MARK: 睡眠定时
@@ -779,7 +767,6 @@ struct PlayerScreen: View {
         guard currentURL != nil else { return }
         withAnimation(.easeInOut(duration: 0.2)) { isTheater = true }
         OrientationLock.apply(.landscape)
-        scheduleAutoHide()
     }
 
     private func leaveTheater() {

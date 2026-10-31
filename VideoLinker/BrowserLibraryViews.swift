@@ -370,8 +370,13 @@ struct DownloadRow: View {
                         Text("\(Int(item.progress * 100))%")
                             .font(.system(size: 10))
                             .foregroundStyle(.secondary)
+                    } else if item.state == .failed {
+                        Text(item.failReason.isEmpty ? "失败" : item.failReason)
+                            .font(.system(size: 10))
+                            .foregroundStyle(.red.opacity(0.85))
+                            .lineLimit(2)
                     } else {
-                        Text(item.state == .failed ? "失败" : item.sizeText)
+                        Text(item.sizeText)
                             .font(.system(size: 10))
                             .foregroundStyle(.secondary)
                     }
