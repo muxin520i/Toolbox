@@ -481,7 +481,7 @@ struct PlaylistDetailView: View {
     }
 
     private func itemList(_ playlist: Playlist) -> some View {
-        List(selection: $selection) {
+        List {
             ForEach(Array(playlist.items.enumerated()), id: \.element.id) { index, item in
                 row(item, index: index)
                     .listRowBackground(Color.clear)
@@ -508,7 +508,11 @@ struct PlaylistDetailView: View {
 
     private func row(_ item: PlaylistItem, index: Int) -> some View {
         Button {
-            guard editMode == .inactive, let playlist = playlist else { return }
+            if editMode == .active {
+                toggleSelection(item.id)
+                return
+            }
+            guard let playlist = playlist else { return }
 
             if item.isLocal && !item.localFileExists {
                 toast = "文件已被删除，可以重新下载一次"
@@ -526,10 +530,17 @@ struct PlaylistDetailView: View {
             request = PlayRequest(items: playbackItems, startIndex: start)
         } label: {
             HStack(spacing: 13) {
-                Text(String(format: "%02d", index + 1))
-                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(theme.textTertiary)
-                    .frame(width: 26, alignment: .leading)
+                if editMode == .active {
+                    Image(systemName: selection.contains(item.id) ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 19, weight: .regular))
+                        .foregroundStyle(selection.contains(item.id) ? theme.accent : theme.textTertiary)
+                        .frame(width: 26, alignment: .leading)
+                } else {
+                    Text(String(format: "%02d", index + 1))
+                        .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(theme.textTertiary)
+                        .frame(width: 26, alignment: .leading)
+                }
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(item.displayTitle)
@@ -556,11 +567,13 @@ struct PlaylistDetailView: View {
                         .foregroundStyle(theme.accent.opacity(0.8))
                 }
 
-                Image(systemName: "play.fill")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(theme.textSecondary)
-                    .frame(width: 30, height: 30)
-                    .background(theme.field, in: Circle())
+                if editMode == .inactive {
+                    Image(systemName: "play.fill")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(theme.textSecondary)
+                        .frame(width: 30, height: 30)
+                        .background(theme.field, in: Circle())
+                }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 11)
@@ -769,6 +782,14 @@ struct PlaylistDetailView: View {
         selection.removeAll()
         editMode = .inactive
         reload()
+    }
+
+    private func toggleSelection(_ id: UUID) {
+        if selection.contains(id) {
+            selection.remove(id)
+        } else {
+            selection.insert(id)
+        }
     }
 
     private var normalizedURL: String? {
