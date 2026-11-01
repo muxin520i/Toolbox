@@ -50,6 +50,11 @@
 		1A0000000000000000000379 /* MediaProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000279 /* MediaProbe.swift */; };
 		1A000000000000000000037A /* LocalMedia.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000000000000000000027A /* LocalMedia.swift */; };
 		1A000000000000000000037B /* LocalMediaView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000000000000000000027B /* LocalMediaView.swift */; };
+		1A0000000000000000000384 /* WBModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000284 /* WBModels.swift */; };
+		1A0000000000000000000385 /* WBApi.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000285 /* WBApi.swift */; };
+		1A0000000000000000000386 /* WBCheckinStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000286 /* WBCheckinStore.swift */; };
+		1A0000000000000000000387 /* WBCheckinView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000287 /* WBCheckinView.swift */; };
+		1A0000000000000000000388 /* WBLoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000288 /* WBLoginView.swift */; };
 		1A0000000000000000000383 /* LocalNetwork.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000283 /* LocalNetwork.swift */; };
 		1A000000000000000000037F /* MediaSpec.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000000000000000000027F /* MediaSpec.swift */; };
 		1A0000000000000000000380 /* MediaInfoSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000280 /* MediaInfoSheet.swift */; };
@@ -107,6 +112,11 @@
 		1A0000000000000000000279 /* MediaProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaProbe.swift; sourceTree = "<group>"; };
 		1A000000000000000000027A /* LocalMedia.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalMedia.swift; sourceTree = "<group>"; };
 		1A000000000000000000027B /* LocalMediaView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalMediaView.swift; sourceTree = "<group>"; };
+		1A0000000000000000000284 /* WBModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WBModels.swift; sourceTree = "<group>"; };
+		1A0000000000000000000285 /* WBApi.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WBApi.swift; sourceTree = "<group>"; };
+		1A0000000000000000000286 /* WBCheckinStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WBCheckinStore.swift; sourceTree = "<group>"; };
+		1A0000000000000000000287 /* WBCheckinView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WBCheckinView.swift; sourceTree = "<group>"; };
+		1A0000000000000000000288 /* WBLoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WBLoginView.swift; sourceTree = "<group>"; };
 		1A0000000000000000000283 /* LocalNetwork.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalNetwork.swift; sourceTree = "<group>"; };
 		1A000000000000000000027F /* MediaSpec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaSpec.swift; sourceTree = "<group>"; };
 		1A0000000000000000000280 /* MediaInfoSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaInfoSheet.swift; sourceTree = "<group>"; };
@@ -192,6 +202,11 @@
 				1A0000000000000000000279 /* MediaProbe.swift */,
 				1A000000000000000000027A /* LocalMedia.swift */,
 				1A000000000000000000027B /* LocalMediaView.swift */,
+				1A0000000000000000000284 /* WBModels.swift */,
+				1A0000000000000000000285 /* WBApi.swift */,
+				1A0000000000000000000286 /* WBCheckinStore.swift */,
+				1A0000000000000000000287 /* WBCheckinView.swift */,
+				1A0000000000000000000288 /* WBLoginView.swift */,
 				1A0000000000000000000283 /* LocalNetwork.swift */,
 				1A000000000000000000027F /* MediaSpec.swift */,
 				1A0000000000000000000280 /* MediaInfoSheet.swift */,
@@ -321,6 +336,11 @@
 				1A0000000000000000000379 /* MediaProbe.swift in Sources */,
 				1A000000000000000000037A /* LocalMedia.swift in Sources */,
 				1A000000000000000000037B /* LocalMediaView.swift in Sources */,
+				1A0000000000000000000384 /* WBModels.swift in Sources */,
+				1A0000000000000000000385 /* WBApi.swift in Sources */,
+				1A0000000000000000000386 /* WBCheckinStore.swift in Sources */,
+				1A0000000000000000000387 /* WBCheckinView.swift in Sources */,
+				1A0000000000000000000388 /* WBLoginView.swift in Sources */,
 				1A0000000000000000000383 /* LocalNetwork.swift in Sources */,
 				1A000000000000000000037F /* MediaSpec.swift in Sources */,
 				1A0000000000000000000380 /* MediaInfoSheet.swift in Sources */,
@@ -460,7 +480,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 38;
+				CURRENT_PROJECT_VERSION = 39;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = VideoLinker/Info.plist;
@@ -468,7 +488,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.4.1;
+				MARKETING_VERSION = 3.5.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.example.VideoLinker;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -483,7 +503,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 38;
+				CURRENT_PROJECT_VERSION = 39;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = VideoLinker/Info.plist;
@@ -491,7 +511,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.4.1;
+				MARKETING_VERSION = 3.5.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.example.VideoLinker;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

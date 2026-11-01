@@ -281,3 +281,17 @@ App 用 GRDB 把数据统一存在一个 SQLite 库里：`Application Support/Vi
 - 服务起来后自动**端到端自检**：App 自己去请求 `http://手机IP:端口/ping`。通过说明端口和权限都正常；失败会提示先查权限，而不是让用户对着地址干猜
 - 局域网收件箱启动时也顺手触发一次授权（同一个权限，两边共用）
 - 超时（25 秒）只提示「没有响应」，**不取消 Bonjour 浏览**——弹窗可能还挂在屏幕上，这时取消会把弹窗一起收掉，用户就没机会点「允许」了；等用户点了，状态会自动变成「已允许」并重跑自检
+
+### v3.5.0 新增：签到（底部第三个标签）
+
+- **入口**：底部标签栏「列表」和「嗅探」之间新增「签到」
+- **协议来源**：移植自开源项目 [wb-checkin-android](https://github.com/Luckyboy-daidai/wb-checkin-android)（MIT，其本身是 workbuddy-switch 的 Java 移植）。登录、刷新、签到、积分四条链路与原实现对齐
+- **添加账号**：点右上角 +，用内置浏览器走官方授权页（手机号验证码登录），完成后自动轮询换 token 并保存，不用手动复制
+  - 国内版 `codebuddy.cn` / 国际版 `workbuddy.ai` 可切
+  - 也支持「浏览器打开」跳系统浏览器完成授权，回来照样能收到
+- **一键签到**：先查 `checkin-activity-status`（404 回落 `checkin-status`），已签到直接标记；未签到再 POST `daily-checkin`，「已签到」按成功处理
+- **自动签到**：默认开启，每天首次打开 App 自动补签，当天签过的不重复请求；可在页面上关掉
+- **积分查询**：POST `billing/meter/get-user-resource-summary`，过期包不计入，列表行显示剩余积分与最近到期
+- **token 保活**：距过期不足 24 小时自动用 refresh token 换新，凭证失效时标红提示重新登录
+- **签到日志**：本地保留最近 100 条，页面显示最近 6 条
+- 账号凭证写在 Application Support（不在开启了文件共享的 Documents 里），卸载即清除

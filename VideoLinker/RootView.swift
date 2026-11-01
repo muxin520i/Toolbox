@@ -31,7 +31,7 @@ final class Router: ObservableObject {
 
 struct RootView: View {
     enum Tab: Int {
-        case play, lists, sniffer, settings
+        case play, lists, checkin, sniffer, settings
     }
 
     @Environment(\.colorScheme) private var systemScheme
@@ -64,6 +64,12 @@ struct RootView: View {
                     Label("列表", systemImage: "list.bullet.rectangle.portrait.fill")
                 }
                 .tag(Tab.lists)
+
+            WBCheckinView()
+                .tabItem {
+                    Label("签到", systemImage: "checkmark.seal.fill")
+                }
+                .tag(Tab.checkin)
 
             SnifferView()
                 .tabItem {
