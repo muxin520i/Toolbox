@@ -8,11 +8,14 @@ struct WBPointsView: View {
 
     /// 作为 tab 常驻时，只在自己被选中时刷新
     var active: Bool
+    /// 嵌入签到中心时，背景与导航栏由外层提供
+    var embedded: Bool
 
     @State private var refreshing = false
 
-    init(active: Bool = true) {
+    init(active: Bool = true, embedded: Bool = false) {
         self.active = active
+        self.embedded = embedded
     }
 
     private var accounts: [WBAccount] { store.accounts }
@@ -38,45 +41,57 @@ struct WBPointsView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                BackgroundView()
-
-                ScrollView {
-                    VStack(spacing: 14) {
-                        heroCard
-
-                        if accounts.isEmpty {
-                            emptyCard
-                        } else {
-                            accountsCard
+        Group {
+            if embedded {
+                contentBody
+            } else {
+                NavigationStack {
+                    contentBody
+                        .navigationTitle("积分")
+                        .navigationBarTitleDisplayMode(.large)
+                        .toolbarBackground(theme.navBg, for: .navigationBar)
+                        .toolbarBackground(.visible, for: .navigationBar)
+                        .toolbar {
+                            ToolbarItem(placement: .navigationBarTrailing) {
+                                Button {
+                                    Task { await reload() }
+                                } label: {
+                                    Image(systemName: "arrow.clockwise")
+                                        .font(.system(size: 15, weight: .semibold))
+                                }
+                                .disabled(refreshing)
+                            }
                         }
-                    }
-                    .padding(.horizontal, 20)
-                    .padding(.top, 10)
-                    .padding(.bottom, 40)
-                }
-                .refreshable { await reload() }
-            }
-            .navigationTitle("积分")
-            .navigationBarTitleDisplayMode(.large)
-            .toolbarBackground(theme.navBg, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button {
-                        Task { await reload() }
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 15, weight: .semibold))
-                    }
-                    .disabled(refreshing)
                 }
             }
         }
         .task(id: active) {
             guard active else { return }
             await reload()
+        }
+    }
+
+    private var contentBody: some View {
+        ZStack {
+            if !embedded {
+                BackgroundView()
+            }
+
+            ScrollView {
+                VStack(spacing: 14) {
+                    heroCard
+
+                    if accounts.isEmpty {
+                        emptyCard
+                    } else {
+                        accountsCard
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 10)
+                .padding(.bottom, 40)
+            }
+            .refreshable { await reload() }
         }
     }
 

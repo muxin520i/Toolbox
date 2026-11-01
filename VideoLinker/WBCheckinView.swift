@@ -1,5 +1,178 @@
 import SwiftUI
 
+// MARK: - 签到中心（签到 / 积分 / 旅行）
+
+struct WBHubView: View {
+    enum Page: Int, CaseIterable {
+        case checkin, points, travel
+
+        var title: String {
+            switch self {
+            case .checkin: return "签到"
+            case .points: return "积分"
+            case .travel: return "旅行"
+            }
+        }
+
+        var navTitle: String {
+            switch self {
+            case .checkin: return "签到"
+            case .points: return "积分"
+            case .travel: return "派猫猫旅行"
+            }
+        }
+
+        var icon: String {
+            switch self {
+            case .checkin: return "checkmark.seal.fill"
+            case .points: return "creditcard.fill"
+            case .travel: return "pawprint.fill"
+            }
+        }
+    }
+
+    @Environment(\.theme) private var theme
+    @ObservedObject private var store = WBCheckinStore.shared
+    @ObservedObject private var travel = WBTravelStore.shared
+
+    @State private var page: Page = .checkin
+    /// 只有这个 tab 可见时才刷新，切走就停
+    @State private var visible = false
+    @State private var showLogin = false
+    @State private var refreshingPoints = false
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                BackgroundView()
+
+                VStack(spacing: 0) {
+                    segmentBar
+                        .padding(.horizontal, 20)
+                        .padding(.top, 4)
+                        .padding(.bottom, 8)
+
+                    ZStack {
+                        panel(.checkin) {
+                            WBCheckinView(active: visible && page == .checkin, embedded: true)
+                        }
+                        panel(.points) {
+                            WBPointsView(active: visible && page == .points, embedded: true)
+                        }
+                        panel(.travel) {
+                            WBTravelView(active: visible && page == .travel, embedded: true)
+                        }
+                    }
+                }
+            }
+            .navigationTitle(page.navTitle)
+            .navigationBarTitleDisplayMode(.large)
+            .toolbarBackground(theme.navBg, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    trailingAction
+                }
+            }
+        }
+        .onAppear { visible = true }
+        .onDisappear { visible = false }
+        .sheet(isPresented: $showLogin) {
+            WBLoginView { account in
+                store.add(account)
+                Task {
+                    await store.refreshState(account.id)
+                    await store.loadCredits(account.id)
+                }
+            }
+        }
+    }
+
+    // MARK: 三个入口
+
+    private var segmentBar: some View {
+        HStack(spacing: 3) {
+            ForEach(Page.allCases, id: \.self) { item in
+                Button {
+                    guard page != item else { return }
+                    withAnimation(.easeInOut(duration: 0.16)) { page = item }
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: item.icon)
+                            .font(.system(size: 11, weight: .semibold))
+
+                        Text(item.title)
+                            .font(.system(size: 13, weight: .semibold))
+                    }
+                    .foregroundStyle(page == item ? Color.white : theme.textSecondary)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 33)
+                    .background {
+                        if page == item {
+                            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                .fill(theme.gradient)
+                                .shadow(color: theme.accent.opacity(0.22), radius: 5, y: 2)
+                        }
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(3)
+        .background(theme.field, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(theme.cardStroke, lineWidth: 1)
+        )
+    }
+
+    private func panel<Content: View>(_ item: Page, @ViewBuilder content: () -> Content) -> some View {
+        ZStack {
+            content()
+        }
+        .opacity(page == item ? 1 : 0)
+        .allowsHitTesting(page == item)
+        .accessibilityHidden(page != item)
+    }
+
+    @ViewBuilder
+    private var trailingAction: some View {
+        switch page {
+        case .checkin:
+            Button {
+                showLogin = true
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 16, weight: .semibold))
+            }
+        case .points:
+            Button {
+                Task { await refreshPoints() }
+            } label: {
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 15, weight: .semibold))
+            }
+            .disabled(refreshingPoints)
+        case .travel:
+            Button {
+                Task { await travel.load() }
+            } label: {
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 15, weight: .semibold))
+            }
+            .disabled(travel.loading || travel.running)
+        }
+    }
+
+    private func refreshPoints() async {
+        guard !refreshingPoints else { return }
+        refreshingPoints = true
+        await store.loadAllCredits()
+        refreshingPoints = false
+    }
+}
+
 // MARK: - 签到页
 
 struct WBCheckinView: View {
@@ -8,52 +181,39 @@ struct WBCheckinView: View {
 
     /// 作为 tab 常驻时，只在自己被选中时刷新
     var active: Bool
+    /// 嵌入签到中心时，背景与导航栏由外层提供
+    var embedded: Bool
 
     @State private var showLogin = false
     @State private var detail: WBAccount?
     @State private var autoOn = WBDefaults.autoEnabled
 
-    init(active: Bool = true) {
+    init(active: Bool = true, embedded: Bool = false) {
         self.active = active
+        self.embedded = embedded
     }
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                BackgroundView()
-
-                ScrollView {
-                    VStack(spacing: 14) {
-                        heroCard
-
-                        if store.accounts.isEmpty {
-                            emptyCard
-                        } else {
-                            accountsCard
+        Group {
+            if embedded {
+                contentBody
+            } else {
+                NavigationStack {
+                    contentBody
+                        .navigationTitle("签到")
+                        .navigationBarTitleDisplayMode(.large)
+                        .toolbarBackground(theme.navBg, for: .navigationBar)
+                        .toolbarBackground(.visible, for: .navigationBar)
+                        .toolbar {
+                            ToolbarItem(placement: .navigationBarTrailing) {
+                                Button {
+                                    showLogin = true
+                                } label: {
+                                    Image(systemName: "plus")
+                                        .font(.system(size: 16, weight: .semibold))
+                                }
+                            }
                         }
-
-                        if !store.logs.isEmpty {
-                            logsCard
-                        }
-                    }
-                    .padding(.horizontal, 20)
-                    .padding(.top, 10)
-                    .padding(.bottom, 40)
-                }
-                .refreshable { await store.refreshAll() }
-            }
-            .navigationTitle("签到")
-            .navigationBarTitleDisplayMode(.large)
-            .toolbarBackground(theme.navBg, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button {
-                        showLogin = true
-                    } label: {
-                        Image(systemName: "plus")
-                            .font(.system(size: 16, weight: .semibold))
-                    }
                 }
             }
         }
@@ -97,6 +257,34 @@ struct WBCheckinView: View {
             }
         }
         .animation(.easeInOut(duration: 0.18), value: store.toast)
+    }
+
+    private var contentBody: some View {
+        ZStack {
+            if !embedded {
+                BackgroundView()
+            }
+
+            ScrollView {
+                VStack(spacing: 14) {
+                    heroCard
+
+                    if store.accounts.isEmpty {
+                        emptyCard
+                    } else {
+                        accountsCard
+                    }
+
+                    if !store.logs.isEmpty {
+                        logsCard
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 10)
+                .padding(.bottom, 40)
+            }
+            .refreshable { await store.refreshAll() }
+        }
     }
 
     // MARK: 顶部
@@ -475,7 +663,6 @@ struct WBAccountSheet: View {
                         VStack(spacing: 14) {
                             header(account)
                             infoCard(account)
-                            creditCard(account)
                             actionCard(account)
                         }
                         .padding(.horizontal, 20)
@@ -491,11 +678,6 @@ struct WBAccountSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("关闭") { dismiss() }
-                }
-            }
-            .task {
-                if store.credits[accountID] == nil {
-                    await store.loadCredits(accountID)
                 }
             }
         }
@@ -559,57 +741,6 @@ struct WBAccountSheet: View {
                 .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .padding(.vertical, 10)
-    }
-
-    private func creditCard(_ account: WBAccount) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("积分额度")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(theme.textSecondary)
-
-                Spacer()
-
-                Button {
-                    Task { await store.loadCredits(account.id) }
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(theme.accent)
-                }
-                .buttonStyle(.plain)
-            }
-
-            if let credit = store.credits[account.id] {
-                HStack(alignment: .firstTextBaseline, spacing: 5) {
-                    Text(credit.remainingText)
-                        .font(.system(size: 26, weight: .bold, design: .rounded))
-                        .foregroundStyle(theme.text)
-                    Text("/ " + credit.totalText)
-                        .font(.system(size: 12))
-                        .foregroundStyle(theme.textTertiary)
-                }
-
-                if let expire = credit.expireText {
-                    Text(expire + (credit.expiringSoonRemaining > 0
-                                   ? "，其中 \(WBJson.amount(credit.expiringSoonRemaining)) 积分 7 天内过期"
-                                   : ""))
-                        .font(.system(size: 11))
-                        .foregroundStyle(credit.expiringSoonRemaining > 0 ? Color.orange : theme.textSecondary)
-                }
-            } else {
-                Text(account.isInternational ? "国际版暂不支持积分查询" : "点右上角刷新试试")
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(theme.textTertiary)
-            }
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(theme.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(theme.cardStroke, lineWidth: 1)
-        )
     }
 
     private func actionCard(_ account: WBAccount) -> some View {

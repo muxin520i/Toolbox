@@ -8,45 +8,35 @@ struct WBTravelView: View {
 
     /// 作为 tab 常驻时，只在自己被选中时刷新
     var active: Bool
+    /// 嵌入签到中心时，背景与导航栏由外层提供
+    var embedded: Bool
 
-    init(active: Bool = true) {
+    init(active: Bool = true, embedded: Bool = false) {
         self.active = active
+        self.embedded = embedded
     }
 
     var body: some View {
-        ZStack {
-            BackgroundView()
-
-            ScrollView {
-                VStack(spacing: 14) {
-                    summaryCard
-
-                    if store.rows.isEmpty {
-                        emptyCard
-                    } else {
-                        listCard
-                        footerHint
+        Group {
+            if embedded {
+                contentBody
+            } else {
+                contentBody
+                    .navigationTitle("派猫猫旅行")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbarBackground(theme.navBg, for: .navigationBar)
+                    .toolbarBackground(.visible, for: .navigationBar)
+                    .toolbar {
+                        ToolbarItem(placement: .navigationBarTrailing) {
+                            Button {
+                                Task { await store.load() }
+                            } label: {
+                                Image(systemName: "arrow.clockwise")
+                                    .font(.system(size: 15, weight: .semibold))
+                            }
+                            .disabled(store.loading || store.running)
+                        }
                     }
-                }
-                .padding(.horizontal, 20)
-                .padding(.top, 10)
-                .padding(.bottom, 40)
-            }
-            .refreshable { await store.load() }
-        }
-        .navigationTitle("派猫猫旅行")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(theme.navBg, for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button {
-                    Task { await store.load() }
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 15, weight: .semibold))
-                }
-                .disabled(store.loading || store.running)
             }
         }
         .task(id: active) {
@@ -81,6 +71,31 @@ struct WBTravelView: View {
             }
         }
         .animation(.easeInOut(duration: 0.18), value: store.toast)
+    }
+
+    private var contentBody: some View {
+        ZStack {
+            if !embedded {
+                BackgroundView()
+            }
+
+            ScrollView {
+                VStack(spacing: 14) {
+                    summaryCard
+
+                    if store.rows.isEmpty {
+                        emptyCard
+                    } else {
+                        listCard
+                        footerHint
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 10)
+                .padding(.bottom, 40)
+            }
+            .refreshable { await store.load() }
+        }
     }
 
     // MARK: 顶部
