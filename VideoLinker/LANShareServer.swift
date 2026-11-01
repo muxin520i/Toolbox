@@ -35,6 +35,8 @@ final class LANShareServer: ObservableObject {
     private var connections: [ObjectIdentifier: Connection] = [:]
     private var entries: [Entry] = []
     private var index: [String: Entry] = [:]
+    /// 当前真正监听的端口，自检要用
+    private var activePort: UInt16 = 0
 
     private init() {}
 
@@ -149,6 +151,12 @@ final class LANShareServer: ObservableObject {
         LocalNetworkPermission.probe { [weak self] status in
             guard let self else { return }
             self.permission = status
+
+            // 刚拿到授权：如果服务已经在跑，重跑一次自检，不用让用户关掉再开
+            if status == .granted, self.running, self.selfCheck != .ok, self.activePort != 0 {
+                self.selfCheck = .running
+                self.runSelfCheck(ip: LANInbox.wifiAddress() ?? "127.0.0.1", port: self.activePort)
+            }
         }
     }
 
@@ -171,6 +179,7 @@ final class LANShareServer: ObservableObject {
                 self.fileCount = 0
                 self.errorText = ""
                 self.selfCheck = .idle
+                self.activePort = 0
             }
         }
     }
@@ -216,6 +225,7 @@ final class LANShareServer: ObservableObject {
                 guard let self else { return }
                 switch state {
                 case .ready:
+                    self.activePort = port
                     let ip = LANInbox.wifiAddress() ?? "127.0.0.1"
                     DispatchQueue.main.async {
                         self.address = "http://\(ip):\(port)"

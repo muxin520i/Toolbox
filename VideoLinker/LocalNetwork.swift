@@ -50,11 +50,17 @@ enum LocalNetworkPermission {
             taken = true
             return true
         }
+
+        var isTaken: Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return taken
+        }
     }
 
     /// 触发一次 Bonjour 浏览。
     /// 第一次调用会弹系统弹窗；已经授权 / 拒绝过的不会再弹，直接返回结果。
-    static func probe(timeout: TimeInterval = 20, completion: @escaping (Status) -> Void) {
+    static func probe(timeout: TimeInterval = 25, completion: @escaping (Status) -> Void) {
         let params = NWParameters.tcp
         params.includePeerToPeer = false
         let browser = NWBrowser(for: .bonjour(type: serviceType, domain: nil), using: params)
@@ -84,8 +90,18 @@ enum LocalNetworkPermission {
 
         browser.start(queue: DispatchQueue(label: "com.example.VideoLinker.localnetwork", qos: .userInitiated))
 
+        // 超时只提示一次，**不取消浏览器**：弹窗可能还挂在屏幕上，
+        // 这时候 cancel 会把弹窗一起收掉，用户根本没机会点「允许」
         DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
-            finish(.timeout)
+            guard !flag.isTaken else { return }
+            DispatchQueue.main.async { completion(.timeout) }
+        }
+
+        // 兜底清理，防止用户一直不理会、浏览器永远挂着
+        DispatchQueue.global().asyncAfter(deadline: .now() + timeout * 4) {
+            guard flag.take() else { return }
+            browser.stateUpdateHandler = nil
+            browser.cancel()
         }
     }
 
