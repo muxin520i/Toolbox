@@ -22,6 +22,10 @@ final class LANShareServer: ObservableObject {
     @Published private(set) var errorText = ""
     @Published private(set) var clientCount = 0
     @Published private(set) var fileCount = 0
+    /// 本地网络授权状态：iOS 只对 Bonjour / 主动连接局域网地址弹窗，纯监听端口不弹
+    @Published private(set) var permission: LocalNetworkPermission.Status = .unknown
+    /// 服务起来后 App 自己访问一次，验证「能真的读到页面」，同时触发一次出站授权
+    @Published private(set) var selfCheck: SelfCheck = .idle
 
     /// 端口和收件箱错开，两个服务可以同时开
     private let candidatePorts: [UInt16] = [8088, 8089, 8091, 8092, 8093]
@@ -46,6 +50,22 @@ final class LANShareServer: ObservableObject {
         var extText: String {
             let ext = url.pathExtension.uppercased()
             return ext.isEmpty ? "视频" : ext
+        }
+    }
+
+    enum SelfCheck: Equatable {
+        case idle
+        case running
+        case ok
+        case failed
+
+        var text: String {
+            switch self {
+            case .idle: return "未自检"
+            case .running: return "自检中…"
+            case .ok: return "自检通过"
+            case .failed: return "自检失败"
+            }
         }
     }
 
@@ -108,11 +128,27 @@ final class LANShareServer: ObservableObject {
         }
 
         fileCount = list.count
+
+        // 只监听端口系统不会弹授权窗，必须额外用 Bonjour 浏览问一次，
+        // 否则电脑那边永远是「已拒绝连接」，设置里也找不到开关
+        if permission != .granted {
+            probePermission()
+        }
+
         queue.async { [weak self] in
             guard let self else { return }
             self.entries = list
             self.index = Dictionary(list.map { ($0.token, $0) }, uniquingKeysWith: { first, _ in first })
             self.listen(at: 0)
+        }
+    }
+
+    /// 触发 / 重新检测本地网络授权。第一次调用会弹系统弹窗。
+    func probePermission() {
+        permission = .checking
+        LocalNetworkPermission.probe { [weak self] status in
+            guard let self else { return }
+            self.permission = status
         }
     }
 
@@ -134,6 +170,7 @@ final class LANShareServer: ObservableObject {
                 self.clientCount = 0
                 self.fileCount = 0
                 self.errorText = ""
+                self.selfCheck = .idle
             }
         }
     }
@@ -184,10 +221,20 @@ final class LANShareServer: ObservableObject {
                         self.address = "http://\(ip):\(port)"
                         self.running = true
                         self.errorText = ""
+                        self.selfCheck = .running
                     }
-                case .failed:
+                    self.runSelfCheck(ip: ip, port: port)
+                case .failed(let error):
                     listener.cancel()
                     self.listener = nil
+                    // 权限被拦时不是端口问题，别再往后换端口了
+                    if LocalNetworkPermission.isPolicyDenied(error) {
+                        DispatchQueue.main.async {
+                            self.running = false
+                            self.permission = .denied
+                        }
+                        return
+                    }
                     self.listen(at: position + 1)
                 default:
                     break
@@ -198,6 +245,28 @@ final class LANShareServer: ObservableObject {
         } catch {
             listen(at: position + 1)
         }
+    }
+
+    /// 服务起来后，App 自己去请求一次自己的局域网地址：
+    /// 一来验证端口真的通（不只是 listener ready），
+    /// 二来这是一次出站局域网访问，能把授权弹窗顶出来
+    private func runSelfCheck(ip: String, port: UInt16) {
+        guard let url = URL(string: "http://\(ip):\(port)/ping") else {
+            DispatchQueue.main.async { self.selfCheck = .failed }
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 4
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+
+        URLSession.shared.dataTask(with: request) { [weak self] _, response, _ in
+            guard let self else { return }
+            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            DispatchQueue.main.async {
+                self.selfCheck = code == 200 ? .ok : .failed
+            }
+        }.resume()
     }
 
     private func accept(_ connection: NWConnection) {
@@ -285,6 +354,11 @@ final class LANShareServer: ObservableObject {
 
         guard method == "GET" || method == "HEAD" else {
             respond(client, status: "405 Method Not Allowed", body: Data("only GET".utf8), type: "text/plain")
+            return
+        }
+
+        if target == "/ping" {
+            respond(client, status: "200 OK", body: Data("ok".utf8), type: "text/plain; charset=utf-8")
             return
         }
 

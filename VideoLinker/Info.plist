@@ -50,7 +50,11 @@
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>保存下载好的视频到系统相册时需要这个权限。</string>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>局域网收件箱需要访问本地网络，好让同一 Wi-Fi 下的电脑把视频传进来。</string>
+	<string>需要访问本地网络，才能在同一个 Wi-Fi 下把视频传到电脑浏览器播放，或接收电脑发来的视频。</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_videolinker._tcp</string>
+	</array>
 	<key>NSFaceIDUsageDescription</key>
 	<string>开启 App 锁后，用面容 ID 快速解锁 VideoLinker。</string>
 	<key>UIApplicationSceneManifest</key>

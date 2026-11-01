@@ -40,6 +40,8 @@ final class LANInbox: ObservableObject {
             return
         }
         portIndex = 0
+        // 收件箱同样要本地网络权限，而纯监听端口系统不会弹窗，这里顺手触发一次
+        LocalNetworkPermission.probe { _ in }
         queue.async { [weak self] in self?.listen(at: 0) }
     }
 

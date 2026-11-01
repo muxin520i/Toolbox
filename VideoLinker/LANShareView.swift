@@ -18,6 +18,7 @@ struct LANShareView: View {
                 ScrollView {
                     VStack(spacing: 16) {
                         statusCard
+                        permissionCard
                         if server.running {
                             addressCard
                         }
@@ -48,6 +49,12 @@ struct LANShareView: View {
                     .background(Capsule().fill(Color.black.opacity(0.82)))
                     .padding(.bottom, 28)
                     .transition(.opacity)
+            }
+        }
+        .onAppear {
+            // 进来就问一次权限，别等用户开了服务才发现电脑连不上
+            if server.permission == .unknown {
+                server.probePermission()
             }
         }
     }
@@ -108,6 +115,78 @@ struct LANShareView: View {
         )
     }
 
+    private var permissionCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Image(systemName: server.permission.isOK ? "checkmark.shield.fill" : "exclamationmark.shield.fill")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(server.permission.isOK ? Color.green : Color.orange)
+
+                Text("本地网络权限")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(theme.text)
+
+                Spacer(minLength: 8)
+
+                Text(server.permission.text)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(server.permission.isOK ? Color.green : theme.textSecondary)
+            }
+
+            if !server.permission.isOK {
+                Text(permissionHint)
+                    .font(.system(size: 12))
+                    .foregroundStyle(theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Button {
+                    server.probePermission()
+                } label: {
+                    actionLabel(
+                        server.permission == .checking ? "等待你点弹窗…" : "点这里申请权限",
+                        icon: "hand.raised",
+                        filled: false
+                    )
+                }
+                .buttonStyle(.plain)
+                .disabled(server.permission == .checking)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(theme.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(theme.cardStroke, lineWidth: 1)
+        )
+    }
+
+    private var permissionHint: String {
+        switch server.permission {
+        case .granted:
+            return ""
+        case .checking:
+            return "已经在请求系统权限，如果屏幕中间弹出「允许访问本地网络」，点「允许」。"
+        case .denied:
+            return "权限被拒绝了，电脑会连不上。去 设置 → 隐私与安全性 → 本地网络，把「视频链接播放器」打开（iOS 17 及更早在 设置 → 视频链接播放器 最下面）。打开后回来点一次下面的按钮重新检测。"
+        case .timeout, .unknown:
+            return "只开监听端口系统不会弹窗，必须主动问一次。点下面按钮会触发系统弹窗；如果一直没反应，说明之前被静默拒绝过，需要去 设置 → 隐私与安全性 → 本地网络 里手动打开。"
+        }
+    }
+
+    private var selfCheckText: String {
+        switch server.selfCheck {
+        case .idle:
+            return ""
+        case .running:
+            return "自检中：手机正在访问自己的地址…"
+        case .ok:
+            return "自检通过：手机自己请求了一次，页面正常返回"
+        case .failed:
+            return "自检失败：手机自己都读不到页面，先看上面的本地网络权限"
+        }
+    }
+
     private var addressCard: some View {
         VStack(spacing: 16) {
             VStack(spacing: 6) {
@@ -124,6 +203,23 @@ struct LANShareView: View {
                     .lineLimit(1)
             }
             .padding(.top, 18)
+
+            if server.selfCheck != .idle {
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(server.selfCheck == .ok
+                              ? Color.green
+                              : (server.selfCheck == .failed ? Color.orange : theme.textTertiary))
+                        .frame(width: 6, height: 6)
+
+                    Text(selfCheckText)
+                        .font(.system(size: 11))
+                        .foregroundStyle(theme.textTertiary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.top, -8)
+            }
 
             if let image = qrImage(server.address) {
                 Image(uiImage: image)
