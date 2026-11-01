@@ -155,6 +155,9 @@ struct PlayerScreen: View {
 
             controlsOverlay
 
+            // 中间的播放按钮单独一层：缓冲时即使控制条收起来，也要能看到转圈
+            centerPlayButton
+
             if boostActive {
                 boostBadge
                     .transition(.scale(scale: 0.9).combined(with: .opacity))
@@ -552,14 +555,6 @@ struct PlayerScreen: View {
 
             Spacer(minLength: 0)
 
-            HStack {
-                Spacer()
-                playPauseButton
-                Spacer()
-            }
-
-            Spacer(minLength: 0)
-
             bottomBar
         }
         .padding(.horizontal, isTheater ? 28 : 18)
@@ -645,22 +640,49 @@ struct PlayerScreen: View {
         .background(Color.black.opacity(0.001))
     }
 
+    /// 屏幕中间的按钮层。控制条显示时出现；缓冲时不管控制条在不在都显示
+    private var centerPlayButton: some View {
+        playPauseButton
+            .opacity(model.isLoading ? 0 : (showControls || model.isStalling ? 1 : 0))
+            .allowsHitTesting(!model.isLoading && (showControls || model.isStalling))
+            .animation(.easeInOut(duration: 0.2), value: showControls)
+            .animation(.easeInOut(duration: 0.2), value: model.isStalling)
+    }
+
     private var playPauseButton: some View {
         Button {
+            let wasBuffering = model.isStalling
             model.togglePlay()
+            // 缓冲时按钮本来就露着（控制条可能收起了），点完把控制条带出来，
+            // 不然一暂停按钮就消失，屏幕上什么都不剩
+            if wasBuffering && !showControls {
+                withAnimation(.easeInOut(duration: 0.2)) { showControls = true }
+            }
         } label: {
-            Image(systemName: model.didReachEnd
-                  ? "arrow.counterclockwise"
-                  : (model.isPlaying ? "pause.fill" : "play.fill"))
-                .font(.system(size: 28, weight: .bold))
-                .foregroundStyle(.white)
-                .frame(width: 72, height: 72)
-                .background(.ultraThinMaterial, in: Circle())
-                .overlay(Circle().strokeBorder(.white.opacity(0.18), lineWidth: 1))
-                .shadow(color: .black.opacity(0.35), radius: 12, y: 4)
+            ZStack {
+                Circle()
+                    .fill(.ultraThinMaterial)
+                    .frame(width: 72, height: 72)
+                    .overlay(Circle().strokeBorder(.white.opacity(0.18), lineWidth: 1))
+                    .shadow(color: .black.opacity(0.35), radius: 12, y: 4)
+
+                // 网络卡顿、等数据时换成转圈，别再显示暂停图标，看着像能点却没反应
+                if model.isStalling {
+                    ProgressView()
+                        .progressViewStyle(.circular)
+                        .tint(.white)
+                        .scaleEffect(1.25)
+                } else {
+                    Image(systemName: model.didReachEnd
+                          ? "arrow.counterclockwise"
+                          : (model.isPlaying ? "pause.fill" : "play.fill"))
+                        .font(.system(size: 28, weight: .bold))
+                        .foregroundStyle(.white)
+                }
+            }
+            .frame(width: 72, height: 72)
         }
         .buttonStyle(.plain)
-        .opacity(showControls ? 1 : 0)
     }
 
     private var bottomBar: some View {
@@ -1213,6 +1235,8 @@ final class PlayerModel: ObservableObject {
     @Published private(set) var isLoading = true
     @Published private(set) var errorMessage: String?
     @Published private(set) var isPlaying = false
+    /// 播放中卡住等数据（不是用户自己暂停），中间按钮换成转圈
+    @Published private(set) var isStalling = false
     @Published private(set) var currentTime: Double = 0
     @Published private(set) var duration: Double = 0
     /// 当前是不是在用 VLC 兜底
@@ -1276,6 +1300,8 @@ final class PlayerModel: ObservableObject {
         timeControlObserver = player.observe(\.timeControlStatus, options: [.new]) { [weak self] player, _ in
             DispatchQueue.main.async {
                 self?.isPlaying = player.timeControlStatus == .playing
+                // waitingToPlayAtSpecifiedRate = 想播但数据没跟上，就是缓冲
+                self?.isStalling = player.timeControlStatus == .waitingToPlayAtSpecifiedRate
             }
         }
     }
@@ -1321,6 +1347,7 @@ final class PlayerModel: ObservableObject {
 
         isLoading = true
         errorMessage = nil
+        isStalling = false
         currentTime = 0
         duration = 0
         lastSavedSecond = -100
@@ -1439,7 +1466,8 @@ final class PlayerModel: ObservableObject {
             vlcEngine?.togglePlay()
             return
         }
-        if isPlaying {
+        // 缓冲中也算「在播」，点一下是暂停，不能当成没播去调 play() 白点一下
+        if isPlaying || isStalling {
             player.pause()
         } else {
             if player.currentItem != nil {
@@ -1550,6 +1578,8 @@ final class PlayerModel: ObservableObject {
         engine.onState = { [weak self] playing, buffering in
             guard let self = self else { return }
             self.isPlaying = playing
+            // 首次加载由整页「正在加载…」负责，这里只管播起来之后的卡顿
+            self.isStalling = buffering && !self.isLoading
             if !buffering { self.isLoading = false }
         }
         engine.onEnded = { [weak self] in

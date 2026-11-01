@@ -64,7 +64,8 @@ final class VLCPlayback: NSObject, VLCMediaPlayerDelegate {
 
     func togglePlay() {
         guard let player = player else { return }
-        if player.isPlaying {
+        // 缓冲中 isPlaying 不一定为 true，但点下去应该是「暂停」，不能再调一次 play
+        if player.isPlaying || player.state == .buffering {
             player.pause()
         } else {
             player.play()
