@@ -1,6 +1,13 @@
 import SwiftUI
 import UIKit
 
+// MARK: - 通知
+
+extension Notification.Name {
+    /// 自定义底部导航切换，object 为 RootView.Tab.rawValue
+    static let appTabDidSelect = Notification.Name("video.appTabDidSelect")
+}
+
 // MARK: - 外部唤起（URL Scheme / 快捷指令）
 
 final class Router: ObservableObject {
@@ -30,14 +37,40 @@ final class Router: ObservableObject {
 // MARK: - 根视图
 
 struct RootView: View {
-    enum Tab: Int {
-        case play, lists, checkin, sniffer, settings
+    enum Tab: Int, CaseIterable {
+        case play, lists, checkin, points, travel, sniffer, settings
+
+        var title: String {
+            switch self {
+            case .play: return "播放"
+            case .lists: return "列表"
+            case .checkin: return "签到"
+            case .points: return "积分"
+            case .travel: return "旅行"
+            case .sniffer: return "嗅探"
+            case .settings: return "设置"
+            }
+        }
+
+        var icon: String {
+            switch self {
+            case .play: return "play.circle.fill"
+            case .lists: return "list.bullet.rectangle.portrait.fill"
+            case .checkin: return "checkmark.seal.fill"
+            case .points: return "creditcard.fill"
+            case .travel: return "pawprint.fill"
+            case .sniffer: return "safari.fill"
+            case .settings: return "gearshape.fill"
+            }
+        }
     }
 
     @Environment(\.colorScheme) private var systemScheme
     @AppStorage(SettingsKey.theme) private var themeRaw = AppTheme.system.rawValue
 
     @State private var tab: Tab = .play
+    /// 首次进入才创建页面，之后常驻，切 tab 不丢播放器和网页状态
+    @State private var loaded: Set<Tab> = [.play]
 
     private var appTheme: AppTheme {
         AppTheme(rawValue: themeRaw) ?? .system
@@ -52,74 +85,87 @@ struct RootView: View {
     }
 
     var body: some View {
-        TabView(selection: $tab) {
-            ContentView()
-                .tabItem {
-                    Label("播放", systemImage: "play.circle.fill")
-                }
-                .tag(Tab.play)
+        ZStack {
+            theme.bg.ignoresSafeArea()
 
-            PlaylistListView()
-                .tabItem {
-                    Label("列表", systemImage: "list.bullet.rectangle.portrait.fill")
-                }
-                .tag(Tab.lists)
-
-            WBCheckinView()
-                .tabItem {
-                    Label("签到", systemImage: "checkmark.seal.fill")
-                }
-                .tag(Tab.checkin)
-
-            SnifferView()
-                .tabItem {
-                    Label("嗅探", systemImage: "safari.fill")
-                }
-                .tag(Tab.sniffer)
-
-            SettingsView()
-                .tabItem {
-                    Label("设置", systemImage: "gearshape.fill")
-                }
-                .tag(Tab.settings)
+            ZStack {
+                page(.play) { ContentView() }
+                page(.lists) { PlaylistListView() }
+                page(.checkin) { WBCheckinView(active: tab == .checkin) }
+                page(.points) { WBPointsView(active: tab == .points) }
+                page(.travel) { NavigationStack { WBTravelView(active: tab == .travel) } }
+                page(.sniffer) { SnifferView() }
+                page(.settings) { SettingsView() }
+            }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                tabBar
+            }
         }
-        .tint(theme.accent)
         .environment(\.theme, theme)
         .preferredColorScheme(appTheme.colorScheme)
-        .onAppear { Self.configureTabBar(theme: theme) }
         .task {
             // 每天首次打开 App 就补签，不用先点进签到页
             await WBCheckinStore.shared.autoCheckinIfNeeded()
         }
-        .onChange(of: themeRaw) { _ in
-            Self.configureTabBar(theme: theme)
+        .onChange(of: tab) { value in
+            _ = loaded.insert(value)
         }
         .onOpenURL { url in
             Router.shared.handle(url)
-            tab = .play
+            switchTo(.play)
         }
     }
 
-    private static func configureTabBar(theme: Theme) {
-        let appearance = UITabBarAppearance()
-        appearance.configureWithOpaqueBackground()
-        appearance.backgroundColor = UIColor(theme.navBg)
-        appearance.shadowColor = theme.isDark
-            ? UIColor.white.withAlphaComponent(0.08)
-            : UIColor.black.withAlphaComponent(0.06)
+    // MARK: 页面容器
 
-        let item = UITabBarItemAppearance()
-        item.normal.iconColor = UIColor(theme.textTertiary)
-        item.normal.titleTextAttributes = [.foregroundColor: UIColor(theme.textTertiary)]
-        item.selected.iconColor = UIColor(theme.accent)
-        item.selected.titleTextAttributes = [.foregroundColor: UIColor(theme.accent)]
+    private func page<Content: View>(_ item: Tab, @ViewBuilder content: () -> Content) -> some View {
+        ZStack {
+            if loaded.contains(item) {
+                content()
+            }
+        }
+        .opacity(tab == item ? 1 : 0)
+        .allowsHitTesting(tab == item)
+        .accessibilityHidden(tab != item)
+    }
 
-        appearance.stackedLayoutAppearance = item
-        appearance.inlineLayoutAppearance = item
-        appearance.compactInlineLayoutAppearance = item
+    private func switchTo(_ item: Tab) {
+        _ = loaded.insert(item)
+        tab = item
+        NotificationCenter.default.post(name: .appTabDidSelect, object: item.rawValue)
+    }
 
-        UITabBar.appearance().standardAppearance = appearance
-        UITabBar.appearance().scrollEdgeAppearance = appearance
+    // MARK: 底部导航
+
+    private var tabBar: some View {
+        HStack(spacing: 0) {
+            ForEach(Tab.allCases, id: \.self) { item in
+                Button {
+                    switchTo(item)
+                } label: {
+                    VStack(spacing: 3) {
+                        Image(systemName: item.icon)
+                            .font(.system(size: 19, weight: .medium))
+                            .frame(height: 22)
+
+                        Text(item.title)
+                            .font(.system(size: 9.5, weight: .medium))
+                    }
+                    .foregroundStyle(tab == item ? theme.accent : theme.textTertiary)
+                    .frame(maxWidth: .infinity)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.top, 7)
+        .padding(.bottom, 2)
+        .background(theme.navBg.ignoresSafeArea(edges: .bottom))
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(theme.isDark ? Color.white.opacity(0.08) : Color.black.opacity(0.06))
+                .frame(height: 0.5)
+        }
     }
 }
 

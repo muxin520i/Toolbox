@@ -6,9 +6,16 @@ struct WBCheckinView: View {
     @Environment(\.theme) private var theme
     @ObservedObject private var store = WBCheckinStore.shared
 
+    /// 作为 tab 常驻时，只在自己被选中时刷新
+    var active: Bool
+
     @State private var showLogin = false
     @State private var detail: WBAccount?
     @State private var autoOn = WBDefaults.autoEnabled
+
+    init(active: Bool = true) {
+        self.active = active
+    }
 
     var body: some View {
         NavigationStack {
@@ -23,14 +30,11 @@ struct WBCheckinView: View {
                             emptyCard
                         } else {
                             accountsCard
-                            travelCard
                         }
 
                         if !store.logs.isEmpty {
                             logsCard
                         }
-
-                        footerHint
                     }
                     .padding(.horizontal, 20)
                     .padding(.top, 10)
@@ -53,7 +57,10 @@ struct WBCheckinView: View {
                 }
             }
         }
-        .task { await store.onAppear() }
+        .task(id: active) {
+            guard active else { return }
+            await store.onAppear()
+        }
         .sheet(isPresented: $showLogin) {
             WBLoginView { account in
                 store.add(account)
@@ -228,47 +235,6 @@ struct WBCheckinView: View {
         max(0, store.accounts.count - store.checkedCount)
     }
 
-    // MARK: 派猫猫旅行入口
-
-    private var travelCard: some View {
-        NavigationLink {
-            WBTravelView()
-        } label: {
-            HStack(spacing: 12) {
-                ZStack {
-                    Circle()
-                        .fill(Color.orange.opacity(0.14))
-                        .frame(width: 40, height: 40)
-                    Text("🐱")
-                        .font(.system(size: 20))
-                }
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("派猫猫旅行")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(theme.text)
-                    Text("派猫猫出门，回来领积分")
-                        .font(.system(size: 11))
-                        .foregroundStyle(theme.textSecondary)
-                        .lineLimit(1)
-                }
-
-                Spacer(minLength: 6)
-
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(theme.textTertiary)
-            }
-            .padding(14)
-            .background(theme.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .strokeBorder(theme.cardStroke, lineWidth: 1)
-            )
-        }
-        .buttonStyle(.plain)
-    }
-
     // MARK: 账号
 
     private var accountsCard: some View {
@@ -342,14 +308,6 @@ struct WBCheckinView: View {
                 Label("立即签到", systemImage: "checkmark.seal")
             }
 
-            Button {
-                Task { await store.loadCredits(account.id) }
-            } label: {
-                Label("刷新积分", systemImage: "arrow.clockwise")
-            }
-
-            Divider()
-
             Button(role: .destructive) {
                 store.delete(account.id)
             } label: {
@@ -361,11 +319,6 @@ struct WBCheckinView: View {
     private func rowSubtitle(_ account: WBAccount) -> String {
         if account.needsRelogin {
             return account.reloginReason ?? "登录已失效，请重新登录"
-        }
-        if let credit = store.credits[account.id] {
-            var text = account.subtitle + " · 剩余 " + credit.remainingText
-            if let expire = credit.expireText { text += "（" + expire + "）" }
-            return text
         }
         return account.subtitle
     }
@@ -495,17 +448,6 @@ struct WBCheckinView: View {
         }
     }
 
-    private var footerHint: some View {
-        VStack(spacing: 4) {
-            Text("签到协议来自社区实现，请求只发往 WorkBuddy 官方域名")
-                .font(.system(size: 10.5))
-            Text("账号凭证仅保存在本机，卸载即清除")
-                .font(.system(size: 10.5))
-        }
-        .foregroundStyle(theme.textTertiary)
-        .multilineTextAlignment(.center)
-        .padding(.top, 6)
-    }
 }
 
 // MARK: - 账号详情
@@ -679,23 +621,6 @@ struct WBAccountSheet: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.bottom, 2)
             }
-
-            Button {
-                Task { await store.checkin(account.id) }
-            } label: {
-                HStack(spacing: 7) {
-                    Image(systemName: "checkmark.seal.fill")
-                        .font(.system(size: 13, weight: .semibold))
-                    Text("立即签到")
-                        .font(.system(size: 14, weight: .semibold))
-                }
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity)
-                .frame(height: 44)
-                .background(theme.gradient, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            }
-            .buttonStyle(.plain)
-            .disabled(account.isInternational)
 
             Button(role: .destructive) {
                 confirmDelete = true

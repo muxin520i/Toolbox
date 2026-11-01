@@ -62,7 +62,6 @@ final class WBCheckinStore: ObservableObject {
 
         await refreshStates()
         await autoCheckinIfNeeded()
-        await loadAllCredits()
     }
 
     func refreshAll() async {
@@ -213,8 +212,6 @@ final class WBCheckinStore: ObservableObject {
             states[id] = .checked
             markCheckedToday(id)
             appendLog(current, result: result.already ? "already" : "success", message: nil)
-            // 签完积分会变，顺手刷一次
-            if !result.already { await loadCredits(current.id) }
             if !silent {
                 toast = result.already
                     ? "「\(current.displayName)」今天已经签过了"

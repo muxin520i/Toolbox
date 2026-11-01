@@ -258,6 +258,11 @@ struct PlaylistListView: View {
             playlists = PlaylistStore.load()
             downloadListID = PlaylistStore.existingDownloadListID()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .appTabDidSelect)) { note in
+            guard (note.object as? Int) == RootView.Tab.lists.rawValue else { return }
+            playlists = PlaylistStore.load()
+            downloadListID = PlaylistStore.existingDownloadListID()
+        }
         .onChange(of: editMode) { newValue in
             if newValue == .inactive { playlists = PlaylistStore.load() }
         }

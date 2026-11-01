@@ -6,6 +6,13 @@ struct WBTravelView: View {
     @Environment(\.theme) private var theme
     @ObservedObject private var store = WBTravelStore.shared
 
+    /// 作为 tab 常驻时，只在自己被选中时刷新
+    var active: Bool
+
+    init(active: Bool = true) {
+        self.active = active
+    }
+
     var body: some View {
         ZStack {
             BackgroundView()
@@ -42,7 +49,8 @@ struct WBTravelView: View {
                 .disabled(store.loading || store.running)
             }
         }
-        .task {
+        .task(id: active) {
+            guard active else { return }
             await store.load()
             // 停留期间自动刷新：猫猫到达时间各不相同，只查一次会和列表脱节
             while !Task.isCancelled {

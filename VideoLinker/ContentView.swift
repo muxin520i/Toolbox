@@ -45,6 +45,12 @@ struct ContentView: View {
             items = HistoryStore.load()
             favorites = ResumeStore.favorites()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .appTabDidSelect)) { note in
+            guard (note.object as? Int) == RootView.Tab.play.rawValue else { return }
+            items = HistoryStore.load()
+            favorites = ResumeStore.favorites()
+            playlists = PlaylistStore.load()
+        }
         .confirmationDialog("加入哪个列表", isPresented: $showPlaylistPicker, titleVisibility: .visible) {
             ForEach(playlists) { playlist in
                 Button(playlist.name) {
