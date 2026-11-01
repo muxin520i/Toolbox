@@ -111,9 +111,11 @@ struct WBCheckinView: View {
                             .foregroundStyle(theme.textTertiary)
                     }
 
-                    Text(allChecked ? "\(dateText) · 全部完成" : dateText)
+                    Text(allChecked ? "\(dateText) · 已完成" : dateText)
                         .font(.system(size: 11))
                         .foregroundStyle(allChecked ? .green : theme.textTertiary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                 }
 
                 Spacer(minLength: 12)
@@ -245,16 +247,13 @@ struct WBCheckinView: View {
                     Text("派猫猫旅行")
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(theme.text)
-                    Text("派猫猫出门，回来领积分奖励")
+                    Text("派猫猫出门，回来领积分")
                         .font(.system(size: 11))
                         .foregroundStyle(theme.textSecondary)
+                        .lineLimit(1)
                 }
 
                 Spacer(minLength: 6)
-
-                Text("去看看")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(theme.accent)
 
                 Image(systemName: "chevron.right")
                     .font(.system(size: 11, weight: .semibold))
