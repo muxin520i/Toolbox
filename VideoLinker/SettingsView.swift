@@ -8,6 +8,9 @@ struct SettingsView: View {
     @AppStorage(SettingsKey.rate) private var rate = 1.0
     @AppStorage(SettingsKey.downloadConcurrency) private var concurrency = 3
     @AppStorage(SettingsKey.subtitleSize) private var subtitleSize = 17.0
+
+    /// 签到接口配置的版本，刷新后手动更新
+    @State private var endpointText = WBRemoteConfig.shared.statusText
     @AppStorage(SettingsKey.autoResume) private var autoResume = true
     @AppStorage(SettingsKey.gestures) private var gestures = true
     @AppStorage(AppLock.enabledKey) private var lockEnabled = false
@@ -25,6 +28,7 @@ struct SettingsView: View {
     @State private var showStats = false
     @State private var showStorage = false
     @State private var showWebDAV = false
+    @State private var showEndpoint = false
     @State private var toast: String?
 
     private let rates: [Double] = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
@@ -82,6 +86,12 @@ struct SettingsView: View {
         }
         .sheet(isPresented: $showWebDAV) {
             WebDAVView()
+        }
+        .sheet(isPresented: $showEndpoint) {
+            WBEndpointSheet()
+        }
+        .onChange(of: showEndpoint) { opened in
+            if !opened { endpointText = WBRemoteConfig.shared.statusText }
         }
         .confirmationDialog("清除所有观看进度？", isPresented: $confirmClearResume, titleVisibility: .visible) {            Button("清除", role: .destructive) {
                 ResumeStore.clear()
@@ -473,6 +483,25 @@ struct SettingsView: View {
                         .font(.system(size: 13))
                         .foregroundStyle(theme.textSecondary)
                 }
+                Button {
+                    showEndpoint = true
+                } label: {
+                    HStack(spacing: 8) {
+                        Text("签到接口")
+                            .font(.system(size: 14))
+                            .foregroundStyle(theme.text)
+                        Spacer()
+                        Text(endpointText)
+                            .font(.system(size: 12))
+                            .foregroundStyle(theme.textSecondary)
+                            .lineLimit(1)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(theme.textTertiary)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
                 Text("支持 MP4 / MOV / M4V / HLS 等常见格式，另用 VLC 兜底 MKV、FLV、AVI、RMVB 等。网页链接不是直链，需要在「嗅探」里抓取真实地址。\n浏览器相关的 UA、广告拦截等在嗅探页的「菜单 → 设置」里；网页夜间效果跟随这里选的外观切换。")
                     .font(.system(size: 12))
                     .foregroundStyle(theme.textTertiary)
@@ -554,6 +583,239 @@ struct SettingsView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
             withAnimation(.easeIn(duration: 0.2)) { toast = nil }
         }
+    }
+}
+
+// MARK: - 签到接口配置
+
+struct WBEndpointSheet: View {
+    @Environment(\.theme) private var theme
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var urlText = WBRemoteConfig.shared.customURL
+    @State private var pasteText = ""
+    @State private var statusText = WBRemoteConfig.shared.statusText
+    @State private var isRemote = WBRemoteConfig.shared.isRemote
+    @State private var hint = ""
+    @State private var busy = false
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                BackgroundView()
+
+                ScrollView {
+                    VStack(spacing: 14) {
+                        statusCard
+                        urlCard
+                        importCard
+                        helpCard
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 12)
+                    .padding(.bottom, 40)
+                }
+            }
+            .navigationTitle("签到接口")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(theme.navBg, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("关闭") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private var statusCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("当前配置")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(theme.textSecondary)
+
+                Spacer()
+
+                Text(isRemote ? "远端" : "内置")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(isRemote ? Color.green : theme.textTertiary)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background((isRemote ? Color.green : theme.textTertiary).opacity(0.12), in: Capsule())
+            }
+
+            Text(statusText)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(theme.text)
+
+            Text("签到、积分、派猫猫旅行的路径都从这里来，拉取失败自动用内置路径。")
+                .font(.system(size: 11))
+                .foregroundStyle(theme.textTertiary)
+                .lineSpacing(2)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(theme.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(theme.cardStroke, lineWidth: 1)
+        )
+    }
+
+    private var urlCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("配置地址")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(theme.textSecondary)
+
+            TextField("https://…/wb-endpoints.json", text: $urlText)
+                .font(.system(size: 12.5))
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .keyboardType(.URL)
+                .padding(10)
+                .background(theme.field, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+            HStack(spacing: 10) {
+                Button {
+                    Task { await saveAndFetch() }
+                } label: {
+                    Text(busy ? "拉取中…" : "保存并拉取")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 38)
+                        .background(theme.gradient, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .opacity(busy ? 0.6 : 1)
+                }
+                .buttonStyle(.plain)
+                .disabled(busy)
+
+                if !urlText.isEmpty {
+                    Button {
+                        urlText = ""
+                        WBRemoteConfig.shared.customURL = ""
+                        hint = "已清空自定义地址"
+                    } label: {
+                        Text("清空")
+                            .font(.system(size: 13))
+                            .foregroundStyle(theme.textSecondary)
+                            .frame(width: 64, height: 38)
+                            .background(theme.field, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(theme.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(theme.cardStroke, lineWidth: 1)
+        )
+    }
+
+    private var importCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("直接粘贴配置")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(theme.textSecondary)
+
+            TextEditor(text: $pasteText)
+                .font(.system(size: 11.5))
+                .scrollContentBackground(.hidden)
+                .frame(height: 96)
+                .padding(8)
+                .background(theme.field, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+            HStack(spacing: 10) {
+                Button {
+                    pasteText = UIPasteboard.general.string ?? ""
+                } label: {
+                    Text("从剪贴板粘贴")
+                        .font(.system(size: 13))
+                        .foregroundStyle(theme.text)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 38)
+                        .background(theme.field, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    applyPaste()
+                } label: {
+                    Text("导入")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 38)
+                        .background(theme.gradient, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .opacity(pasteText.isEmpty ? 0.5 : 1)
+                }
+                .buttonStyle(.plain)
+                .disabled(pasteText.isEmpty)
+            }
+
+            if !hint.isEmpty {
+                Text(hint)
+                    .font(.system(size: 11))
+                    .foregroundStyle(theme.textSecondary)
+                    .lineSpacing(2)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(theme.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(theme.cardStroke, lineWidth: 1)
+        )
+    }
+
+    private var helpCard: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("怎么用")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(theme.textSecondary)
+
+            Text("官方改了接口路径时，把新的 wb-endpoints.json 放到任意能公开访问的地址，填在上面的「配置地址」里；也可以把 JSON 内容直接粘进来导入。改完重启 App 生效，不用换安装包。\n\n只能改路径和附加请求头。如果官方连返回结构都改了，还是得等 App 更新。")
+                .font(.system(size: 11))
+                .foregroundStyle(theme.textTertiary)
+                .lineSpacing(3)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(theme.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(theme.cardStroke, lineWidth: 1)
+        )
+    }
+
+    private func saveAndFetch() async {
+        busy = true
+        WBRemoteConfig.shared.customURL = urlText
+        await WBRemoteConfig.shared.refreshNow()
+        refreshStatus()
+        busy = false
+        hint = isRemote ? "已更新：" + statusText : "没拉到配置，继续使用内置路径"
+    }
+
+    private func applyPaste() {
+        if let error = WBRemoteConfig.shared.importJSON(pasteText) {
+            hint = error
+            return
+        }
+        refreshStatus()
+        hint = "已导入：" + statusText
+        pasteText = ""
+    }
+
+    private func refreshStatus() {
+        statusText = WBRemoteConfig.shared.statusText
+        isRemote = WBRemoteConfig.shared.isRemote
     }
 }
 
