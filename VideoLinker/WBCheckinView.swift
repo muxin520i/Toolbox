@@ -47,11 +47,6 @@ struct WBHubView: View {
                 BackgroundView()
 
                 VStack(spacing: 0) {
-                    segmentBar
-                        .padding(.horizontal, 20)
-                        .padding(.top, 4)
-                        .padding(.bottom, 8)
-
                     ZStack {
                         panel(.checkin) {
                             WBCheckinView(active: visible && page == .checkin, embedded: true)
@@ -63,6 +58,17 @@ struct WBHubView: View {
                             WBTravelView(active: visible && page == .travel, embedded: true)
                         }
                     }
+
+                    segmentBar
+                        .padding(.horizontal, 20)
+                        .padding(.top, 9)
+                        .padding(.bottom, 9)
+                        .background(theme.navBg)
+                        .overlay(alignment: .top) {
+                            Rectangle()
+                                .fill(theme.isDark ? Color.white.opacity(0.08) : Color.black.opacity(0.06))
+                                .frame(height: 0.5)
+                        }
                 }
             }
             .navigationTitle(page.navTitle)

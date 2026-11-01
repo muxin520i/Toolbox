@@ -1,5 +1,146 @@
 import Foundation
 
+// MARK: - 接口配置（可远程更新）
+
+/// 签到、积分、派猫猫旅行都走官方私有接口。官方改路径后，旧版 App 会直接失败。
+/// 这里把路径集中成一张表，App 启动时从仓库拉一份 JSON 覆盖内置默认值：
+/// 改接口只需更新 JSON，用户重启 App 即可生效，不必重新装包。
+final class WBRemoteConfig {
+    static let shared = WBRemoteConfig()
+
+    /// 镜像按顺序试，国内优先 jsDelivr
+    private let mirrors = [
+        "https://cdn.jsdelivr.net/gh/muxin520i/video-linker@main/wb-endpoints.json",
+        "https://raw.githubusercontent.com/muxin520i/video-linker/main/wb-endpoints.json"
+    ]
+
+    private let cacheKey = "video.wb.endpoints.cache.v1"
+    private let fetchedKey = "video.wb.endpoints.fetchedAt.v1"
+    private let minInterval: TimeInterval = 6 * 3600
+
+    private(set) var version = "内置"
+    private(set) var updatedAt: Date?
+    private(set) var extraHeaders: [String: String] = [:]
+    private var override: [String: [String]] = [:]
+
+    /// 内置默认值，同时充当远程配置的白名单（未知键直接忽略）
+    static let defaults: [String: [String]] = [
+        "auth.state": ["/v2/plugin/auth/state"],
+        "auth.token": ["/v2/plugin/auth/token"],
+        "auth.account": ["/v2/plugin/login/account"],
+        "auth.refresh": ["/v2/plugin/auth/token/refresh"],
+        "checkin.status": [
+            "/v2/billing/meter/checkin-activity-status",
+            "/v2/billing/meter/checkin-status"
+        ],
+        "checkin.submit": ["/v2/billing/meter/daily-checkin"],
+        "credits.summary": ["/billing/meter/get-user-resource-summary"],
+        "travel.status": ["/activity/growth/buddy/travel/status"],
+        "travel.config": ["/activity/growth/buddy/travel/config"],
+        "travel.depart": ["/activity/growth/buddy/travel/depart"],
+        "travel.claim": ["/activity/growth/buddy/travel/claim"]
+    ]
+
+    private init() {
+        loadCache()
+    }
+
+    var isRemote: Bool { !override.isEmpty }
+
+    var statusText: String {
+        guard let updatedAt else { return "内置路径" }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "M月d日 HH:mm"
+        return version + " · " + formatter.string(from: updatedAt)
+    }
+
+    func path(_ key: String) -> String {
+        paths(key).first ?? ""
+    }
+
+    func paths(_ key: String) -> [String] {
+        if let list = override[key], !list.isEmpty { return list }
+        return Self.defaults[key] ?? []
+    }
+
+    func refreshIfNeeded() async {
+        let last = UserDefaults.standard.double(forKey: fetchedKey)
+        let now = Date().timeIntervalSince1970
+        if last > 0, now - last < minInterval { return }
+        await fetch()
+    }
+
+    func refreshNow() async {
+        await fetch()
+    }
+
+    private func fetch() async {
+        for mirror in mirrors {
+            guard let url = URL(string: mirror) else { continue }
+            var req = URLRequest(url: url)
+            req.timeoutInterval = 8
+            req.cachePolicy = .reloadIgnoringLocalCacheData
+
+            guard let (data, response) = try? await URLSession.shared.data(for: req),
+                  let http = response as? HTTPURLResponse, http.statusCode == 200,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                continue
+            }
+
+            apply(json)
+            UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: fetchedKey)
+            return
+        }
+    }
+
+    private func apply(_ json: [String: Any], persistCache: Bool = true) {
+        guard let raw = json["paths"] as? [String: Any] else { return }
+
+        var map: [String: [String]] = [:]
+        for (key, value) in raw where Self.defaults[key] != nil {
+            if let one = value as? String {
+                let clean = normalize(one)
+                if !clean.isEmpty { map[key] = [clean] }
+            } else if let list = value as? [String] {
+                let cleaned = list.map(normalize).filter { !$0.isEmpty }
+                if !cleaned.isEmpty { map[key] = cleaned }
+            }
+        }
+        guard !map.isEmpty else { return }
+
+        override = map
+        version = (json["version"] as? String) ?? "远端配置"
+        updatedAt = Date()
+
+        if let headers = json["headers"] as? [String: String] {
+            extraHeaders = headers.filter { $0.key.lowercased() != "user-agent" }
+        }
+
+        if persistCache { persist() }
+    }
+
+    private func normalize(_ path: String) -> String {
+        let text = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return "" }
+        return text.hasPrefix("/") ? text : "/" + text
+    }
+
+    private func persist() {
+        let payload: [String: Any] = ["version": version, "paths": override, "headers": extraHeaders]
+        guard let data = try? JSONSerialization.data(withJSONObject: payload) else { return }
+        UserDefaults.standard.set(data, forKey: cacheKey)
+    }
+
+    private func loadCache() {
+        guard let data = UserDefaults.standard.data(forKey: cacheKey),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return
+        }
+        apply(json, persistCache: false)
+    }
+}
+
 // MARK: - WB 签到：协议层
 //
 // 对照 wb-checkin-android 的 Api.java / Checkin.java：
@@ -120,6 +261,11 @@ enum WBApi {
         request.timeoutInterval = 20
         request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        // 远端配置里的附加头先铺一层，调用方显式传入的优先
+        for (key, value) in WBRemoteConfig.shared.extraHeaders {
+            request.setValue(value, forHTTPHeaderField: key)
+        }
         for (key, value) in headers {
             request.setValue(value, forHTTPHeaderField: key)
         }
@@ -187,7 +333,7 @@ enum WBApi {
     /// 申请 state，返回授权页地址
     static func oauthStart(variant: String) async -> (state: String, authUrl: String)? {
         let platform = variant == "ai" ? "workbuddy-ai" : "workbuddy"
-        let url = endpoint(variant) + "/v2/plugin/auth/state?platform=" + platform
+        let url = endpoint(variant) + WBRemoteConfig.shared.path("auth.state") + "?platform=" + platform
         let resp = await request(url, method: "POST", body: [:])
         guard resp.ok, let data = resp.json["data"] as? [String: Any] else { return nil }
         let state = WBJson.string(data["state"])
@@ -201,7 +347,7 @@ enum WBApi {
 
     /// 轮询 token，未完成返回 nil
     static func oauthPollToken(variant: String, state: String) async -> [String: Any]? {
-        let url = endpoint(variant) + "/v2/plugin/auth/token?state=" + state
+        let url = endpoint(variant) + WBRemoteConfig.shared.path("auth.token") + "?state=" + state
         let resp = await request(url, method: "GET")
         guard resp.ok, let data = resp.json["data"] as? [String: Any] else { return nil }
         var token = WBJson.string(data["accessToken"])
@@ -211,7 +357,7 @@ enum WBApi {
     }
 
     static func fetchProfile(variant: String, state: String, token: String, domain: String) async -> [String: Any]? {
-        let url = endpoint(variant) + "/v2/plugin/login/account?state=" + state
+        let url = endpoint(variant) + WBRemoteConfig.shared.path("auth.account") + "?state=" + state
         var headers = ["Authorization": "Bearer " + token]
         if !domain.isEmpty { headers["X-Domain"] = domain }
         let resp = await request(url, method: "GET", headers: headers)
@@ -280,7 +426,7 @@ enum WBApi {
         headers["X-Refresh-Token"] = refreshToken
         headers["X-Auth-Refresh-Source"] = "plugin"
 
-        let url = endpoint(account.variant) + "/v2/plugin/auth/token/refresh"
+        let url = endpoint(account.variant) + WBRemoteConfig.shared.path("auth.refresh")
         let resp = await request(url, method: "POST", body: [:], headers: headers)
         guard resp.ok, let data = resp.json["data"] as? [String: Any] else { return nil }
 
@@ -309,8 +455,8 @@ enum WBApi {
         let base = apiBase(account)
         var lastMessage = ""
 
-        for suffix in ["/checkin-activity-status", "/checkin-status"] {
-            let url = base + "/v2/billing/meter" + suffix
+        for suffix in WBRemoteConfig.shared.paths("checkin.status") {
+            let url = base + suffix
             let resp = await request(url, method: "POST", body: [:], headers: authHeaders(account))
 
             if resp.unauthorized {
@@ -339,7 +485,7 @@ enum WBApi {
     }
 
     static func performCheckin(_ account: WBAccount) async -> WBCheckinResult {
-        let url = apiBase(account) + "/v2/billing/meter/daily-checkin"
+        let url = apiBase(account) + WBRemoteConfig.shared.path("checkin.submit")
         let resp = await request(url, method: "POST", body: [:], headers: authHeaders(account))
         if resp.ok { return WBCheckinResult(ok: true, already: false, message: "") }
 
@@ -360,8 +506,11 @@ enum WBApi {
         headers["Origin"] = base
         headers["Referer"] = base + "/profile/plans-usage"
 
-        let url = base + "/billing/meter/get-user-resource-summary"
-        let resp = await request(url, method: "POST", body: [:], headers: headers)
+        var resp = WBResponse()
+        for suffix in WBRemoteConfig.shared.paths("credits.summary") {
+            resp = await request(base + suffix, method: "POST", body: [:], headers: headers)
+            if resp.ok || !resp.routeMissing { break }
+        }
         guard resp.ok else { return nil }
         guard let rows = packages(in: resp.json) else { return nil }
 
@@ -434,8 +583,8 @@ enum WBApi {
 
     private static var travelOrigin: String { endpointCN }
 
-    private static func travelURL(_ suffix: String) -> String {
-        travelOrigin + "/activity/growth/buddy/travel" + suffix
+    private static func travelURL(_ key: String) -> String {
+        travelOrigin + WBRemoteConfig.shared.path(key)
     }
 
     private static func travelHeaders(_ account: WBAccount) -> [String: String] {
@@ -447,7 +596,7 @@ enum WBApi {
     }
 
     static func travelStatus(_ account: WBAccount) async -> WBTravelStatusResult {
-        let resp = await request(travelURL("/status"), method: "GET", headers: travelHeaders(account))
+        let resp = await request(travelURL("travel.status"), method: "GET", headers: travelHeaders(account))
         if resp.unauthorized {
             return WBTravelStatusResult.failure(resp.message, unauthorized: true)
         }
@@ -476,7 +625,7 @@ enum WBApi {
     }
 
     static func travelConfig(_ account: WBAccount) async -> WBTravelConfigResult {
-        let resp = await request(travelURL("/config"), method: "GET", headers: travelHeaders(account))
+        let resp = await request(travelURL("travel.config"), method: "GET", headers: travelHeaders(account))
         if resp.unauthorized {
             return WBTravelConfigResult(ok: false, unauthorized: true, enabled: false,
                                         locations: [], message: resp.message)
@@ -497,7 +646,7 @@ enum WBApi {
     }
 
     static func travelDepart(_ account: WBAccount, locationID: Any) async -> WBTravelRawResult {
-        let resp = await request(travelURL("/depart"), method: "POST",
+        let resp = await request(travelURL("travel.depart"), method: "POST",
                                  body: ["location_id": locationID],
                                  headers: travelHeaders(account))
         return rawResult(resp)
@@ -506,7 +655,7 @@ enum WBApi {
     static func travelClaim(_ account: WBAccount, recordID: Double) async -> WBTravelRawResult {
         var body: [String: Any] = [:]
         if recordID > 0 { body["record_id"] = recordID }
-        let resp = await request(travelURL("/claim"), method: "POST", body: body,
+        let resp = await request(travelURL("travel.claim"), method: "POST", body: body,
                                  headers: travelHeaders(account))
         return rawResult(resp)
     }

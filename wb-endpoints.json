@@ -1,0 +1,24 @@
+{
+  "version": "2026-11-01",
+  "note": "WorkBuddy 私有接口路径表。官方改路径时只改这里，App 重启后生效，不必重新装包。路径必须以 / 开头；数组按顺序尝试，前一个 404 才试下一个。headers 里的字段会附加到所有签到/积分/旅行请求上。",
+  "paths": {
+    "auth.state": ["/v2/plugin/auth/state"],
+    "auth.token": ["/v2/plugin/auth/token"],
+    "auth.account": ["/v2/plugin/login/account"],
+    "auth.refresh": ["/v2/plugin/auth/token/refresh"],
+    "checkin.status": [
+      "/v2/billing/meter/checkin-activity-status",
+      "/v2/billing/meter/checkin-status"
+    ],
+    "checkin.submit": ["/v2/billing/meter/daily-checkin"],
+    "credits.summary": [
+      "/billing/meter/get-user-resource-summary",
+      "/v2/billing/meter/get-user-resource-summary"
+    ],
+    "travel.status": ["/activity/growth/buddy/travel/status"],
+    "travel.config": ["/activity/growth/buddy/travel/config"],
+    "travel.depart": ["/activity/growth/buddy/travel/depart"],
+    "travel.claim": ["/activity/growth/buddy/travel/claim"]
+  },
+  "headers": {}
+}

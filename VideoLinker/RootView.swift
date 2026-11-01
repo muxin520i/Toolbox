@@ -98,7 +98,8 @@ struct RootView: View {
             Self.configureTabBar(theme: theme)
         }
         .task {
-            // 每天首次打开 App 就补签，不用先点进签到页
+            // 先刷新接口配置，再自动补签，保证这次用的就是最新路径
+            await WBRemoteConfig.shared.refreshIfNeeded()
             await WBCheckinStore.shared.autoCheckinIfNeeded()
         }
         .onChange(of: tab) { value in
