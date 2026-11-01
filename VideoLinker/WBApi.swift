@@ -425,6 +425,103 @@ enum WBApi {
         }
         return nil
     }
+
+    // MARK: - 派猫猫旅行
+    //
+    // 对照 Travel.java：只有国内版参与，前缀 /activity/growth/buddy/travel
+    //   status → arrived 领奖 / idle 派发 / traveling 跳过
+    // 请求头比签到多带 web 平台标识，服务端按这个认「成长中心」来源。
+
+    private static var travelOrigin: String { endpointCN }
+
+    private static func travelURL(_ suffix: String) -> String {
+        travelOrigin + "/activity/growth/buddy/travel" + suffix
+    }
+
+    private static func travelHeaders(_ account: WBAccount) -> [String: String] {
+        var headers = authHeaders(account)
+        headers["X-Client-Platform"] = "web"
+        headers["Origin"] = travelOrigin
+        headers["Referer"] = travelOrigin + "/profile/growth-center"
+        return headers
+    }
+
+    static func travelStatus(_ account: WBAccount) async -> WBTravelStatusResult {
+        let resp = await request(travelURL("/status"), method: "GET", headers: travelHeaders(account))
+        if resp.unauthorized {
+            return WBTravelStatusResult.failure(resp.message, unauthorized: true)
+        }
+        guard resp.ok else {
+            return WBTravelStatusResult.failure(resp.message.isEmpty ? "查询旅行状态失败" : resp.message)
+        }
+        guard let data = resp.json["data"] as? [String: Any] else {
+            return WBTravelStatusResult.failure("查询旅行状态失败")
+        }
+        let state = WBJson.string(data["state"]).lowercased()
+        guard ["idle", "traveling", "arrived"].contains(state) else {
+            return WBTravelStatusResult.failure(state.isEmpty ? "缺少旅行状态" : "未知旅行状态：\(state)")
+        }
+        let location = data["location"] as? [String: Any]
+        return WBTravelStatusResult(
+            ok: true,
+            unauthorized: false,
+            state: state,
+            dailyLimit: WBJson.bool(data["daily_limit_reached"] ?? data["dailyLimitReached"]),
+            recordID: WBJson.double(data["record_id"] ?? data["recordId"]) ?? 0,
+            arriveAt: WBJson.timestamp(data["arrive_at"] ?? data["arriveAt"]) ?? 0,
+            locationName: WBJson.string(location?["name"]),
+            rewardCredit: WBJson.double(data["reward_credit"] ?? data["rewardCredit"]),
+            message: ""
+        )
+    }
+
+    static func travelConfig(_ account: WBAccount) async -> WBTravelConfigResult {
+        let resp = await request(travelURL("/config"), method: "GET", headers: travelHeaders(account))
+        if resp.unauthorized {
+            return WBTravelConfigResult(ok: false, unauthorized: true, enabled: false,
+                                        locations: [], message: resp.message)
+        }
+        guard resp.ok, let data = resp.json["data"] as? [String: Any] else {
+            return WBTravelConfigResult(ok: false, unauthorized: false, enabled: false,
+                                        locations: [],
+                                        message: resp.message.isEmpty ? "读取旅行配置失败" : resp.message)
+        }
+        var locations: [WBTravelLocation] = []
+        for item in (data["locations"] as? [[String: Any]] ?? []) {
+            guard let id = item["id"], !(id is NSNull) else { continue }
+            locations.append(WBTravelLocation(id: id, name: WBJson.string(item["name"])))
+        }
+        let enabled = (data["enabled"] == nil ? true : WBJson.bool(data["enabled"])) && !locations.isEmpty
+        return WBTravelConfigResult(ok: true, unauthorized: false, enabled: enabled,
+                                    locations: locations, message: "")
+    }
+
+    static func travelDepart(_ account: WBAccount, locationID: Any) async -> WBTravelRawResult {
+        let resp = await request(travelURL("/depart"), method: "POST",
+                                 body: ["location_id": locationID],
+                                 headers: travelHeaders(account))
+        return rawResult(resp)
+    }
+
+    static func travelClaim(_ account: WBAccount, recordID: Double) async -> WBTravelRawResult {
+        var body: [String: Any] = [:]
+        if recordID > 0 { body["record_id"] = recordID }
+        let resp = await request(travelURL("/claim"), method: "POST", body: body,
+                                 headers: travelHeaders(account))
+        return rawResult(resp)
+    }
+
+    private static func rawResult(_ resp: WBResponse) -> WBTravelRawResult {
+        let data = resp.json["data"] as? [String: Any]
+        return WBTravelRawResult(
+            ok: resp.ok,
+            unauthorized: resp.unauthorized,
+            code: resp.code,
+            state: WBJson.string(data?["state"]).lowercased(),
+            message: resp.message,
+            rewardCredit: WBJson.double(data?["reward_credit"] ?? data?["rewardCredit"])
+        )
+    }
 }
 
 // MARK: - JSON 小工具

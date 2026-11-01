@@ -23,6 +23,7 @@ struct WBCheckinView: View {
                             emptyCard
                         } else {
                             accountsCard
+                            travelCard
                         }
 
                         if !store.logs.isEmpty {
@@ -35,6 +36,7 @@ struct WBCheckinView: View {
                     .padding(.top, 10)
                     .padding(.bottom, 40)
                 }
+                .refreshable { await store.refreshAll() }
             }
             .navigationTitle("签到")
             .navigationBarTitleDisplayMode(.large)
@@ -109,9 +111,9 @@ struct WBCheckinView: View {
                             .foregroundStyle(theme.textTertiary)
                     }
 
-                    Text(dateText)
+                    Text(allChecked ? "\(dateText) · 全部完成" : dateText)
                         .font(.system(size: 11))
-                        .foregroundStyle(theme.textTertiary)
+                        .foregroundStyle(allChecked ? .green : theme.textTertiary)
                 }
 
                 Spacer(minLength: 12)
@@ -128,20 +130,31 @@ struct WBCheckinView: View {
                             .tint(.white)
                             .scaleEffect(0.8)
                     } else {
-                        Image(systemName: "checkmark.seal.fill")
+                        Image(systemName: allChecked ? "checkmark.circle.fill" : "checkmark.seal.fill")
                             .font(.system(size: 14, weight: .semibold))
                     }
-                    Text(store.runningAll ? "正在签到…" : "一键签到")
+                    Text(store.runningAll ? "正在签到…" : (allChecked ? "今日已全部签到" : "一键签到"))
                         .font(.system(size: 15, weight: .semibold))
                 }
-                .foregroundStyle(.white)
+                .foregroundStyle(allChecked ? theme.textSecondary : .white)
                 .frame(maxWidth: .infinity)
                 .frame(height: 46)
-                .background(theme.gradient, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
-                .opacity(store.accounts.isEmpty ? 0.45 : 1)
+                .background {
+                    RoundedRectangle(cornerRadius: 13, style: .continuous)
+                        .fill(allChecked ? AnyShapeStyle(theme.field) : AnyShapeStyle(theme.gradient))
+                }
             }
             .buttonStyle(.plain)
-            .disabled(store.runningAll || store.accounts.isEmpty)
+            .disabled(store.runningAll || store.accounts.isEmpty || allChecked)
+
+            if !store.accounts.isEmpty {
+                Text(allChecked
+                     ? "今天都签完了，明天打开会自动继续"
+                     : "还有 \(pendingCount) 个账号没签到")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(allChecked ? theme.textTertiary : .orange)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
 
             Toggle(isOn: $autoOn) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -176,15 +189,25 @@ struct WBCheckinView: View {
                 .stroke(theme.field, lineWidth: 5)
                 .frame(width: 56, height: 56)
 
-            Circle()
-                .trim(from: 0, to: max(0.001, ratio))
-                .stroke(theme.gradient, style: StrokeStyle(lineWidth: 5, lineCap: .round))
-                .frame(width: 56, height: 56)
-                .rotationEffect(.degrees(-90))
+            if allChecked {
+                Circle()
+                    .stroke(Color.green, lineWidth: 5)
+                    .frame(width: 56, height: 56)
 
-            Text("\(Int(ratio * 100))%")
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
-                .foregroundStyle(theme.textSecondary)
+                Image(systemName: "checkmark")
+                    .font(.system(size: 17, weight: .bold))
+                    .foregroundStyle(.green)
+            } else {
+                Circle()
+                    .trim(from: 0, to: max(0.001, ratio))
+                    .stroke(theme.gradient, style: StrokeStyle(lineWidth: 5, lineCap: .round))
+                    .frame(width: 56, height: 56)
+                    .rotationEffect(.degrees(-90))
+
+                Text("\(Int(ratio * 100))%")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(theme.textSecondary)
+            }
         }
     }
 
@@ -193,6 +216,58 @@ struct WBCheckinView: View {
         formatter.locale = Locale(identifier: "zh_CN")
         formatter.dateFormat = "M月d日 EEEE"
         return formatter.string(from: Date())
+    }
+
+    private var allChecked: Bool {
+        !store.accounts.isEmpty && store.checkedCount == store.accounts.count
+    }
+
+    private var pendingCount: Int {
+        max(0, store.accounts.count - store.checkedCount)
+    }
+
+    // MARK: 派猫猫旅行入口
+
+    private var travelCard: some View {
+        NavigationLink {
+            WBTravelView()
+        } label: {
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle()
+                        .fill(Color.orange.opacity(0.14))
+                        .frame(width: 40, height: 40)
+                    Text("🐱")
+                        .font(.system(size: 20))
+                }
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("派猫猫旅行")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(theme.text)
+                    Text("派猫猫出门，回来领积分奖励")
+                        .font(.system(size: 11))
+                        .foregroundStyle(theme.textSecondary)
+                }
+
+                Spacer(minLength: 6)
+
+                Text("去看看")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(theme.accent)
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(theme.textTertiary)
+            }
+            .padding(14)
+            .background(theme.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(theme.cardStroke, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: 账号
