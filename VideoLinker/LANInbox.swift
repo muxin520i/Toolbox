@@ -240,7 +240,10 @@ final class LANInbox: ObservableObject {
 
         if let url = client.fileURL {
             DispatchQueue.main.async {
-                DownloadManager.shared.importFile(at: url)
+                DownloadManager.shared.importFile(
+                    at: url,
+                    source: "lan-inbox://\(url.lastPathComponent)"
+                )
                 self.receivedCount += 1
                 self.lastReceived = url.lastPathComponent
             }

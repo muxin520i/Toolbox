@@ -817,12 +817,17 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
 
     // MARK: 外部文件（局域网收件箱）
 
-    /// 把电脑传进来的文件直接登记成一条已完成的下载，列表里立刻能看到
-    func importFile(at url: URL) {
+    /// 把电脑传进来的文件登记成一条已完成的下载，列表里立刻能看到。
+    ///
+    /// 只给「从电脑传文件」用。文件导入（本机视频页）不走这里：导入的是用户自己的
+    /// 文件，混进下载管理后一删就会连源文件一起删掉。
+    /// - Parameter source: 来源标记，同时用来区分「下载」和「导入」。空字符串会被
+    ///   当成老版本的导入记录，启动时自动清掉。
+    func importFile(at url: URL, source: String) {
         let exists = items.contains { $0.localPath == url.path }
         guard !exists else { return }
 
-        let item = DownloadItem(fileName: url.lastPathComponent, source: "")
+        let item = DownloadItem(fileName: url.lastPathComponent, source: source)
         item.localPath = url.path
         item.destURL = url
         item.state = .finished
@@ -1280,7 +1285,8 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
         }
         _ = takeItem(item.taskID)
 
-        if let url = item.fileURL {
+        // 没有下载源的是导入记录：只删记录，不动文件
+        if let url = item.fileURL, !item.source.isEmpty {
             try? FileManager.default.removeItem(at: url)
         }
         items.removeAll { $0.id == item.id }
@@ -1291,7 +1297,9 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
     /// 清理：只清已经结束（完成 / 失败 / 暂停）的，正在下的不动
     func clearFinished() {
         for item in items where item.state != .running {
-            if let url = item.fileURL { try? FileManager.default.removeItem(at: url) }
+            if !item.source.isEmpty, let url = item.fileURL {
+                try? FileManager.default.removeItem(at: url)
+            }
             if item.isHLS { clearParts(item.id) }
         }
         items.removeAll { $0.state != .running }
@@ -1399,7 +1407,12 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
             records = legacy
         }
 
+        // 老版本把「本机视频」里导入的文件也写进了下载表（source 为空）。
+        // 这些不是下载：先摘出来，下面把记录清掉，文件本身留着
+        let importedCount = records.filter { $0.source.isEmpty }.count
+
         var restored: [DownloadItem] = records
+            .filter { !$0.source.isEmpty }
             .filter { FileManager.default.fileExists(atPath: $0.localPath) }
             .map { record in
                 let item = DownloadItem(fileName: record.fileName, source: record.source)
@@ -1429,6 +1442,13 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
 
         items = Array(restored.prefix(80))
         refreshRunning()
+
+        // 导入记录从库里抹掉，只删行不删文件；下一次启动也不会再出现
+        if importedCount > 0 {
+            _ = AppDB.write { db in
+                try db.execute(sql: "DELETE FROM download WHERE source = ''")
+            }
+        }
     }
 
     // MARK: HLS 分片缓存

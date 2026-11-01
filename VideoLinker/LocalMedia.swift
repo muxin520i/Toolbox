@@ -116,7 +116,8 @@ enum LocalMedia {
     }
 
     /// 从「文件」里选的视频复制进 App 的 Downloads 目录，
-    /// 顺手登记进「下载」列表和播放列表，之后在哪儿都能看到
+    /// 只登记进播放列表。下载管理只放网络下载的东西，
+    /// 导入的文件混进去的话，用户在下载管理一删就会连源文件一起删掉
     @MainActor
     static func importFiles(_ urls: [URL]) async -> ImportOutcome {
         var outcome = ImportOutcome()
@@ -151,7 +152,6 @@ enum LocalMedia {
                 continue
             }
 
-            DownloadManager.shared.importFile(at: dest)
             PlaylistStore.attachDownload(
                 path: dest.path,
                 title: (dest.lastPathComponent as NSString).deletingPathExtension

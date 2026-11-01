@@ -387,7 +387,6 @@ struct LocalMediaView: View {
     }
 
     private func add(_ file: LocalMediaFile) {
-        DownloadManager.shared.importFile(at: file.url)
         if let list = PlaylistStore.attachDownload(path: file.path, title: file.title) {
             showToast("已加入「\(list.name)」")
         } else {
@@ -401,7 +400,6 @@ struct LocalMediaView: View {
         guard !targets.isEmpty else { return }
         importing = true
         for file in targets {
-            DownloadManager.shared.importFile(at: file.url)
             PlaylistStore.attachDownload(path: file.path, title: file.title)
             known.insert(file.path)
         }
