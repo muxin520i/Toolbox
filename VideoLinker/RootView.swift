@@ -87,6 +87,10 @@ struct RootView: View {
         .environment(\.theme, theme)
         .preferredColorScheme(appTheme.colorScheme)
         .onAppear { Self.configureTabBar(theme: theme) }
+        .task {
+            // 每天首次打开 App 就补签，不用先点进签到页
+            await WBCheckinStore.shared.autoCheckinIfNeeded()
+        }
         .onChange(of: themeRaw) { _ in
             Self.configureTabBar(theme: theme)
         }

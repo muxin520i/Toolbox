@@ -477,6 +477,11 @@ struct WBAccountSheet: View {
                     Button("关闭") { dismiss() }
                 }
             }
+            .task {
+                if store.credits[accountID] == nil {
+                    await store.loadCredits(accountID)
+                }
+            }
         }
     }
 

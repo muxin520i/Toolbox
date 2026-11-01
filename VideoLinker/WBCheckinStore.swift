@@ -73,19 +73,21 @@ final class WBCheckinStore: ObservableObject {
     // MARK: 账号
 
     func add(_ account: WBAccount) {
+        var stored = account
         if let index = accounts.firstIndex(where: { $0.id == account.id }) {
-            accounts[index] = account
+            stored.id = accounts[index].id
+            accounts[index] = stored
         } else if let index = accounts.firstIndex(where: { same($0, account) }) {
             // 同一个 uid 重复登录：覆盖凭证，不新增一条
-            var merged = account
-            merged.id = accounts[index].id
-            accounts[index] = merged
+            stored.id = accounts[index].id
+            accounts[index] = stored
         } else {
-            accounts.append(account)
+            accounts.append(stored)
         }
         persist()
-        states[account.id] = .unknown
-        toast = "已添加「\(account.displayName)」"
+        states[stored.id] = .unknown
+        credits[stored.id] = nil
+        toast = "已添加「\(stored.displayName)」"
     }
 
     func delete(_ id: String) {
@@ -207,6 +209,8 @@ final class WBCheckinStore: ObservableObject {
         if result.ok {
             states[id] = .checked
             appendLog(current, result: result.already ? "already" : "success", message: nil)
+            // 签完积分会变，顺手刷一次
+            if !result.already { await loadCredits(current.id) }
             if !silent {
                 toast = result.already
                     ? "「\(current.displayName)」今天已经签过了"
