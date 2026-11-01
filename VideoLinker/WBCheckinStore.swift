@@ -94,6 +94,7 @@ final class WBCheckinStore: ObservableObject {
         accounts.removeAll { $0.id == id }
         states[id] = nil
         credits[id] = nil
+        clearCheckedToday(id)
         persist()
     }
 
@@ -152,7 +153,8 @@ final class WBCheckinStore: ObservableObject {
             states[id] = .failed(status.message)
             return
         }
-        states[id] = status.checked ? .checked : .unchecked
+        // 服务端状态可能比签到结果晚一步，本机今天签过的算已签到，避免刷新后回退
+        states[id] = (status.checked || isCheckedToday(id)) ? .checked : .unchecked
     }
 
     // MARK: 签到
@@ -194,6 +196,7 @@ final class WBCheckinStore: ObservableObject {
         }
         if status.ok, status.checked {
             states[id] = .checked
+            markCheckedToday(id)
             appendLog(current, result: "already", message: nil)
             if !silent { toast = "「\(current.displayName)」今天已经签过了" }
             return
@@ -208,6 +211,7 @@ final class WBCheckinStore: ObservableObject {
         let result = await WBApi.performCheckin(current)
         if result.ok {
             states[id] = .checked
+            markCheckedToday(id)
             appendLog(current, result: result.already ? "already" : "success", message: nil)
             // 签完积分会变，顺手刷一次
             if !result.already { await loadCredits(current.id) }
@@ -267,6 +271,28 @@ final class WBCheckinStore: ObservableObject {
     }
 
     // MARK: 私有
+
+    // MARK: 今日已签到（本地兜底）
+
+    private static let checkedDayKey = "video.wb.checkedDay.v1"
+
+    private func markCheckedToday(_ id: String) {
+        var map = UserDefaults.standard.dictionary(forKey: Self.checkedDayKey) as? [String: String] ?? [:]
+        map[id] = Self.dayKey()
+        UserDefaults.standard.set(map, forKey: Self.checkedDayKey)
+    }
+
+    private func isCheckedToday(_ id: String) -> Bool {
+        let map = UserDefaults.standard.dictionary(forKey: Self.checkedDayKey) as? [String: String] ?? [:]
+        return map[id] == Self.dayKey()
+    }
+
+    private func clearCheckedToday(_ id: String) {
+        var map = UserDefaults.standard.dictionary(forKey: Self.checkedDayKey) as? [String: String] ?? [:]
+        guard map[id] != nil else { return }
+        map[id] = nil
+        UserDefaults.standard.set(map, forKey: Self.checkedDayKey)
+    }
 
     private func markRelogin(_ account: WBAccount, reason: String) {
         var updated = account
