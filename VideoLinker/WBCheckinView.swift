@@ -103,19 +103,19 @@ struct WBHubView: View {
                     guard page != item else { return }
                     withAnimation(.easeInOut(duration: 0.16)) { page = item }
                 } label: {
-                    HStack(spacing: 5) {
+                    HStack(spacing: 6) {
                         Image(systemName: item.icon)
-                            .font(.system(size: 11, weight: .semibold))
+                            .font(.system(size: 12.5, weight: .semibold))
 
                         Text(item.title)
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(.system(size: 14, weight: .semibold))
                     }
                     .foregroundStyle(page == item ? Color.white : theme.textSecondary)
                     .frame(maxWidth: .infinity)
-                    .frame(height: 33)
+                    .frame(height: 44)
                     .background {
                         if page == item {
-                            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            RoundedRectangle(cornerRadius: 11, style: .continuous)
                                 .fill(theme.gradient)
                                 .shadow(color: theme.accent.opacity(0.22), radius: 5, y: 2)
                         }
@@ -126,9 +126,9 @@ struct WBHubView: View {
             }
         }
         .padding(3)
-        .background(theme.field, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(theme.field, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: 13, style: .continuous)
                 .strokeBorder(theme.cardStroke, lineWidth: 1)
         )
     }
