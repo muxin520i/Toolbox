@@ -16,6 +16,7 @@ final class WBRemoteConfig {
 
     private let cacheKey = "video.wb.endpoints.cache.v1"
     private let fetchedKey = "video.wb.endpoints.fetchedAt.v1"
+    private let customURLKey = "video.wb.endpoints.customURL.v1"
     private let minInterval: TimeInterval = 6 * 3600
 
     private(set) var version = "内置"
@@ -47,6 +48,42 @@ final class WBRemoteConfig {
 
     var isRemote: Bool { !override.isEmpty }
 
+    /// 用户自定义的配置地址，优先级高于内置镜像
+    var customURL: String {
+        get { UserDefaults.standard.string(forKey: customURLKey) ?? "" }
+        set {
+            let clean = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            let old = UserDefaults.standard.string(forKey: customURLKey) ?? ""
+            UserDefaults.standard.set(clean, forKey: customURLKey)
+
+            // 清空地址就回到内置路径，避免继续用着上一份远端配置
+            if clean.isEmpty, !old.isEmpty { reset() }
+        }
+    }
+
+    private var sources: [String] {
+        var list: [String] = []
+        if !customURL.isEmpty { list.append(customURL) }
+        list.append(contentsOf: mirrors)
+        return list
+    }
+
+    /// 直接导入一段 JSON，返回错误文案；成功返回 nil
+    func importJSON(_ text: String) -> String? {
+        guard let data = text.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return "这不是一段合法的 JSON"
+        }
+        guard json["paths"] as? [String: Any] != nil else {
+            return "JSON 里缺少 paths 字段"
+        }
+        apply(json)
+        guard !override.isEmpty else {
+            return "没有可识别的接口名，请检查 key 是否写错"
+        }
+        return nil
+    }
+
     var statusText: String {
         guard let updatedAt else { return "内置路径" }
         let formatter = DateFormatter()
@@ -68,15 +105,19 @@ final class WBRemoteConfig {
         let last = UserDefaults.standard.double(forKey: fetchedKey)
         let now = Date().timeIntervalSince1970
         if last > 0, now - last < minInterval { return }
-        await fetch()
+
+        let ok = await fetch()
+        // 失败后 24 小时内不再试，避免每次启动都白等超时
+        UserDefaults.standard.set(ok ? now : now + 18 * 3600, forKey: fetchedKey)
     }
 
     func refreshNow() async {
-        await fetch()
+        _ = await fetch()
     }
 
-    private func fetch() async {
-        for mirror in mirrors {
+    @discardableResult
+    private func fetch() async -> Bool {
+        for mirror in sources {
             guard let url = URL(string: mirror) else { continue }
             var req = URLRequest(url: url)
             req.timeoutInterval = 8
@@ -89,9 +130,18 @@ final class WBRemoteConfig {
             }
 
             apply(json)
-            UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: fetchedKey)
-            return
+            return !override.isEmpty
         }
+        return false
+    }
+
+    private func reset() {
+        override = [:]
+        extraHeaders = [:]
+        version = "内置"
+        updatedAt = nil
+        UserDefaults.standard.removeObject(forKey: cacheKey)
+        UserDefaults.standard.removeObject(forKey: fetchedKey)
     }
 
     private func apply(_ json: [String: Any], persistCache: Bool = true) {
