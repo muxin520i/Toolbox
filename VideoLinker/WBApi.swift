@@ -111,8 +111,10 @@ final class WBRemoteConfig {
         UserDefaults.standard.set(ok ? now : now + 18 * 3600, forKey: fetchedKey)
     }
 
-    func refreshNow() async {
-        _ = await fetch()
+    /// 手动拉取，返回是否真的更新成了远端配置
+    @discardableResult
+    func refreshNow() async -> Bool {
+        await fetch()
     }
 
     @discardableResult
@@ -130,6 +132,8 @@ final class WBRemoteConfig {
             }
 
             apply(json)
+            // 手动拉取成功也重置节流时间，避免下次启动又白拉一遍
+            UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: fetchedKey)
             return !override.isEmpty
         }
         return false

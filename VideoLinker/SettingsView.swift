@@ -797,10 +797,11 @@ struct WBEndpointSheet: View {
     private func saveAndFetch() async {
         busy = true
         WBRemoteConfig.shared.customURL = urlText
-        await WBRemoteConfig.shared.refreshNow()
+        // 返回 false 说明这次没拿到，可能还在用上一份，别误报成功
+        let ok = await WBRemoteConfig.shared.refreshNow()
         refreshStatus()
         busy = false
-        hint = isRemote ? "已更新：" + statusText : "没拉到配置，继续使用内置路径"
+        hint = ok ? "已更新：" + statusText : "没拉到配置，继续使用原有路径"
     }
 
     private func applyPaste() {
