@@ -445,8 +445,6 @@ enum PlaylistStore {
         return downloadListID()
     }
 
-    /// 下载完成后把本地文件登记进播放列表，返回落到了哪个列表
-    @discardableResult
     /// 重复文件合并：把指向被删文件的条目改到保留下来的文件上；
     /// 同一个列表里改完出现重复条目时只留第一条。返回改动的条目数。
     @discardableResult
@@ -483,6 +481,8 @@ enum PlaylistStore {
         return changed
     }
 
+    /// 下载完成后把本地文件登记进播放列表，返回落到了哪个列表
+    @discardableResult
     static func attachDownload(path: String, title: String) -> Playlist? {
         guard !path.isEmpty else { return nil }
         let item = PlaylistItem(
