@@ -86,6 +86,10 @@ struct PlayerScreen: View {
     @State private var boostStart: Date?
     @State private var boostWork: DispatchWorkItem?
     @State private var boostTimer: Timer?
+    /// 这一按已经被长按快进接管：之后的滑动都当手指抖动，不再调音量/进度
+    @State private var boostLocked = false
+    /// 这一按里出现过滑动，用来决定松手时由谁收尾
+    @State private var boostDragSeen = false
 
     /// 设置里的「默认播放速度」，只读不写：播放页调倍速不能反过来改默认值
     @AppStorage(SettingsKey.rate) private var defaultRate: Double = 1.0
@@ -355,10 +359,23 @@ struct PlayerScreen: View {
                 pressing: { pressing in
                     guard gesturesEnabled else { return }
                     if pressing {
+                        // 新的一次按下：上一按要是没收到松手，先把速度恢复
+                        if boostActive { endBoost() }
+                        // 清掉上一轮可能残留的锁
+                        boostLocked = false
+                        boostDragSeen = false
                         scheduleBoost()
                     } else {
                         cancelScheduledBoost()
-                        endBoost()
+                        if boostDragSeen {
+                            // 手指还在滑，系统可能把长按判成取消。
+                            // 这时候先别收，等这一按结束；万一拖动结束事件也没来，0.3 秒后兜底收掉
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                if boostDragSeen { endBoost() }
+                            }
+                        } else {
+                            endBoost()
+                        }
                     }
                 },
                 perform: {}
@@ -382,6 +399,8 @@ struct PlayerScreen: View {
         // 手指已经在划了（多半是在调音量），不要进 2 倍速
         guard !boostActive, dragMode == 0 else { return }
         boostActive = true
+        // 这一按归长按快进管，后面滑动不再响应音量/进度
+        boostLocked = true
         boostBase = model.rate
         boostStart = Date()
         model.forceRate(2.0)
@@ -486,6 +505,17 @@ struct PlayerScreen: View {
             .onChanged { value in
                 guard gesturesEnabled else { return }
 
+                // 长按 2 倍速已经接管这一按：上下左右怎么滑都不算数，
+                // 否则按住快进时音量、进度会跟着乱跳
+                if boostLocked {
+                    if boostActive {
+                        boostDragSeen = true
+                        return
+                    }
+                    // 长按其实已经结束（松手事件丢了），这次滑动按正常处理
+                    boostLocked = false
+                }
+
                 // 每次新的拖动都重新判方向。用起点区分：上一轮万一被系统打断、没收到 onEnded，
                 // dragMode 会留在旧值上，接着滑就会拿旧的模式去快进
                 if dragStartPoint != value.startLocation {
@@ -543,6 +573,10 @@ struct PlayerScreen: View {
                 }
                 dragMode = 0
                 dragStartPoint = nil
+                // 这一按结束：按住快进的 2 倍速在这里收，锁也一起放开
+                if boostActive, boostDragSeen { endBoost() }
+                boostDragSeen = false
+                boostLocked = false
                 hideHintSoon()
             }
     }
@@ -1269,9 +1303,12 @@ final class PlayerModel: ObservableObject {
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
     private var timeControlObserver: NSKeyValueObservation?
+    private var stallWatch: Timer?
     private var timeoutWorkItem: DispatchWorkItem?
     private var pendingSeek: Double?
     private var lastSavedSecond: Double = -100
+    /// 上一拍的时间点，用来判断画面是不是真的在往前走
+    private var lastTickSecond: Double = -1
 
     init() {
         player.actionAtItemEnd = .pause
@@ -1291,6 +1328,24 @@ final class PlayerModel: ObservableObject {
                 self.duration = itemDuration
             }
 
+            // 兜底校正状态：timeControlStatus 的 KVO 偶尔会漏掉「缓冲结束」这一下，
+            // 结果画面已经在播了，中间的转圈还挂着不消失。
+            // 时间确实在往前走，就说明已经恢复播放，顺手把转圈收掉。
+            if !self.usingVLC, seconds.isFinite {
+                let advancing = seconds > self.lastTickSecond + 0.02
+                self.lastTickSecond = seconds
+                if advancing {
+                    if self.isStalling { self.isStalling = false }
+                    if !self.isPlaying { self.isPlaying = true }
+                }
+                // 用户自己按了暂停（或播完停住）：转圈也不该留着
+                if self.player.timeControlStatus == .paused,
+                   self.isStalling || self.isPlaying {
+                    self.isStalling = false
+                    self.isPlaying = false
+                }
+            }
+
             if self.currentTime - self.lastSavedSecond >= 5 {
                 self.lastSavedSecond = self.currentTime
                 self.onProgress?(self.currentTime, self.duration)
@@ -1299,9 +1354,11 @@ final class PlayerModel: ObservableObject {
 
         timeControlObserver = player.observe(\.timeControlStatus, options: [.new]) { [weak self] player, _ in
             DispatchQueue.main.async {
-                self?.isPlaying = player.timeControlStatus == .playing
+                guard let self = self else { return }
+                self.isPlaying = player.timeControlStatus == .playing
                 // waitingToPlayAtSpecifiedRate = 想播但数据没跟上，就是缓冲
-                self?.isStalling = player.timeControlStatus == .waitingToPlayAtSpecifiedRate
+                self.isStalling = player.timeControlStatus == .waitingToPlayAtSpecifiedRate
+                self.syncStallWatch()
             }
         }
     }
@@ -1310,7 +1367,33 @@ final class PlayerModel: ObservableObject {
         if let observer = timeObserver {
             player.removeTimeObserver(observer)
         }
+        stallWatch?.invalidate()
         removeEndObserver()
+    }
+
+    /// 缓冲状态的看门狗：KVO 偶尔会漏掉「缓冲结束」，
+    /// 每 0.5 秒对着 player 的真实状态核一次，避免中间的转圈一直挂着
+    private func syncStallWatch() {
+        guard isStalling else {
+            stallWatch?.invalidate()
+            stallWatch = nil
+            return
+        }
+        guard stallWatch == nil else { return }
+        let timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            guard let self = self else { return }
+            guard !self.usingVLC else {
+                self.stallWatch?.invalidate()
+                self.stallWatch = nil
+                return
+            }
+            guard self.player.timeControlStatus != .waitingToPlayAtSpecifiedRate else { return }
+            self.isStalling = false
+            self.isPlaying = self.player.timeControlStatus == .playing
+            self.stallWatch?.invalidate()
+            self.stallWatch = nil
+        }
+        stallWatch = timer
     }
 
     func setRate(_ value: Double) {
@@ -1348,9 +1431,12 @@ final class PlayerModel: ObservableObject {
         isLoading = true
         errorMessage = nil
         isStalling = false
+        stallWatch?.invalidate()
+        stallWatch = nil
         currentTime = 0
         duration = 0
         lastSavedSecond = -100
+        lastTickSecond = -1
         pendingSeek = startAt
         didReachEnd = false
 
@@ -1453,6 +1539,11 @@ final class PlayerModel: ObservableObject {
             vlcEngine?.pause()
             return
         }
+        // 暂停是明确的用户动作，转圈立刻收掉，不等 KVO
+        isStalling = false
+        isPlaying = false
+        stallWatch?.invalidate()
+        stallWatch = nil
         player.pause()
     }
 
@@ -1468,7 +1559,7 @@ final class PlayerModel: ObservableObject {
         }
         // 缓冲中也算「在播」，点一下是暂停，不能当成没播去调 play() 白点一下
         if isPlaying || isStalling {
-            player.pause()
+            pause()
         } else {
             if player.currentItem != nil {
                 player.play()
@@ -1527,6 +1618,10 @@ final class PlayerModel: ObservableObject {
         statusObserver = nil
         removeEndObserver()
         teardownVLC()
+        isStalling = false
+        isPlaying = false
+        stallWatch?.invalidate()
+        stallWatch = nil
         player.pause()
         player.replaceCurrentItem(with: nil)
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
