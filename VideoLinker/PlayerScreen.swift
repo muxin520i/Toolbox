@@ -132,40 +132,53 @@ struct PlayerScreen: View {
         return name.isEmpty ? (u.host ?? "播放中") : name
     }
 
-    /// 画面转 90° / 270° 后长宽互换，要缩一点才装得进屏幕
+    /// 按视频真实比例算：转 90° 后长宽互换，再放大到刚好铺满另一边
+    private var videoAspect: CGFloat {
+        model.videoAspect
+    }
+
     private var fitScale: CGFloat {
         guard adjust.rotation % 180 != 0 else { return 1 }
-        let size = UIScreen.main.bounds.size
-        let long = max(size.width, size.height)
-        let short = min(size.width, size.height)
-        guard long > 0 else { return 1 }
-        return short / long
+
+        let screen = UIScreen.main.bounds.size
+        guard screen.width > 0, screen.height > 0 else { return 1 }
+
+        let shownWidth = min(screen.width, screen.height * videoAspect)
+        let shownHeight = shownWidth / videoAspect
+
+        // 转完之后的宽高正好互换
+        return min(screen.width / shownHeight, screen.height / shownWidth)
+    }
+
+    /// 画面层单独抽出来：先按视频比例排好，再做旋转 / 镜像 / 缩放，
+    /// 这样转动后的缩放是对着画面本身算的，不会把黑边也一起算进去
+    private var videoSurface: some View {
+        ZStack {
+            PlayerLayerView(player: model.player) { layer in
+                setupPictureInPicture(layer)
+            }
+            .aspectRatio(videoAspect, contentMode: .fit)
+
+            // VLC 兜底时用它的画面层盖住 AVPlayerLayer
+            if let engine = model.vlcEngine {
+                VLCVideoView(engine: engine)
+                    .aspectRatio(videoAspect, contentMode: .fit)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .ignoresSafeArea()
+        .rotationEffect(.degrees(Double(adjust.rotation)))
+        .scaleEffect(
+            x: (adjust.flipH ? -1 : 1) * fitScale * CGFloat(adjust.zoom),
+            y: (adjust.flipV ? -1 : 1) * fitScale * CGFloat(adjust.zoom)
+        )
     }
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            PlayerLayerView(player: model.player) { layer in
-                setupPictureInPicture(layer)
-            }
-            .ignoresSafeArea()
-            .rotationEffect(.degrees(Double(adjust.rotation)))
-            .scaleEffect(
-                x: (adjust.flipH ? -1 : 1) * fitScale * CGFloat(adjust.zoom),
-                y: (adjust.flipV ? -1 : 1) * fitScale * CGFloat(adjust.zoom)
-            )
-
-            // VLC 兜底时用它的画面层盖住 AVPlayerLayer
-            if let engine = model.vlcEngine {
-                VLCVideoView(engine: engine)
-                    .ignoresSafeArea()
-                    .rotationEffect(.degrees(Double(adjust.rotation)))
-                    .scaleEffect(
-                        x: (adjust.flipH ? -1 : 1) * fitScale * CGFloat(adjust.zoom),
-                        y: (adjust.flipV ? -1 : 1) * fitScale * CGFloat(adjust.zoom)
-                    )
-            }
+            videoSurface
 
             gestureLayer
 
@@ -1433,6 +1446,8 @@ final class PlayerModel: ObservableObject {
     @Published private(set) var isStalling = false
     @Published private(set) var currentTime: Double = 0
     @Published private(set) var duration: Double = 0
+    /// 视频宽高比，画面调节按它算缩放；拿不到时先按 16:9
+    @Published private(set) var videoAspect: CGFloat = 16.0 / 9.0
     /// 当前是不是在用 VLC 兜底
     @Published private(set) var usingVLC = false
     /// 这条已经播到结尾，中间按钮改成「重播」
@@ -1489,6 +1504,14 @@ final class PlayerModel: ObservableObject {
             let itemDuration = self.player.currentItem?.duration.seconds ?? 0
             if itemDuration.isFinite, itemDuration > 0 {
                 self.duration = itemDuration
+            }
+
+            let size = self.player.currentItem?.presentationSize ?? .zero
+            if size.width > 1, size.height > 1 {
+                let aspect = size.width / size.height
+                if abs(aspect - self.videoAspect) > 0.01 {
+                    self.videoAspect = aspect
+                }
             }
 
             // 兜底校正状态：timeControlStatus 的 KVO 偶尔会漏掉「缓冲结束」这一下，
