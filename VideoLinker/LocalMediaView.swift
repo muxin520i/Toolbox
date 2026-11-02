@@ -280,7 +280,7 @@ struct LocalMediaView: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 bullet("点右上角「导入」，从「文件」App 里挑视频，可以一次选多个")
-                bullet("打开「文件」App → 我的 iPhone → VideoLinker，把视频拖进这个文件夹")
+                bullet("打开「文件」App → 我的 iPhone → 工具箱，把视频拖进这个文件夹")
                 bullet("电脑上用 Finder 或 iTunes 的文件共享，也能直接拖进来")
             }
             .padding(.top, 2)
@@ -320,7 +320,7 @@ struct LocalMediaView: View {
             HStack(spacing: 8) {
                 Image(systemName: "info.circle")
                     .font(.system(size: 11))
-                Text("文件夹路径：「文件」App → 我的 iPhone → VideoLinker")
+                Text("文件夹路径：「文件」App → 我的 iPhone → 工具箱")
                     .font(.system(size: 11))
             }
             .foregroundStyle(theme.textTertiary)
@@ -345,7 +345,7 @@ struct LocalMediaView: View {
         guard let url = URL(string: "shareddocuments://") else { return }
         UIApplication.shared.open(url, options: [:]) { ok in
             if !ok {
-                showToast("手动打开「文件」App → 我的 iPhone → VideoLinker")
+                showToast("手动打开「文件」App → 我的 iPhone → 工具箱")
             }
         }
     }

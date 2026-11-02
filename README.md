@@ -1,6 +1,6 @@
-# VideoLinker
+# 工具箱
 
-一个 iOS 原生视频播放器。粘贴地址即播，带内置浏览器嗅探、后台下载、多播放列表、WebDAV、局域网互传与投屏，另带签到、积分和派猫猫旅行。
+一个 iOS 原生视频工具箱。粘贴地址即播，带内置浏览器嗅探、后台下载、多播放列表、WebDAV、局域网互传与投屏，另带签到、积分和派猫猫旅行。
 
 - 原生 SwiftUI，iOS 14 起
 - 数据全部存在本机，不上传任何服务器
@@ -8,7 +8,7 @@
 
 ## 安装
 
-准备一台 Windows 或 Mac、一根数据线、一个 Apple ID，加上 `VideoLinker-unsigned.ipa`。
+准备一台 Windows 或 Mac、一根数据线、一个 Apple ID，加上 `VideoLinker-unsigned.ipa`（安装包文件名沿用了旧名，装好后桌面显示「工具箱」）。
 
 用 Sideloadly 签名装进手机，全程免费。免费账号签的包 **7 天有效**，到期重签一次即可，数据不会丢。
 
@@ -90,7 +90,7 @@
 
 ### v2.7.0 起：SQLite
 
-App 用 GRDB 把数据统一存在一个 SQLite 库里：`Application Support/VideoLinker/videolinker.sqlite`。
+App 用 GRDB 把数据统一存在一个 SQLite 库里：`Application Support/VideoLinker/videolinker.sqlite`（目录与文件名沿用旧名，改显示名不影响已有数据）。
 
 - 表：`history`（播放历史）、`resume`（观看进度）、`favorite`（收藏）、`playlist` / `playlistItem`（播放列表）、`script` / `scriptValue`（用户脚本与 GM 存储值）、`download`（下载记录）、`webVisit`（网页历史）、`bookmark`、`shortcut`
 - 首次升级会把旧版 UserDefaults 里的 JSON 全量搬进库，搬之前先备份成 `legacy-backup-<时间>.json`
@@ -98,6 +98,13 @@ App 用 GRDB 把数据统一存在一个 SQLite 库里：`Application Support/Vi
 - 设置 → 关于 里能看到库体积；一致性校验页在 v2.7.3 移除（迁移验证完成后不再需要）
 
 ## 版本记录
+
+### v3.9.9 改名「工具箱」
+
+- 桌面图标名称、首页标题、设置里露出的名字统一改成「工具箱」
+- 局域网收件箱与投屏网页、App 锁、技术信息、Siri 快捷指令里的旧名称一并替换
+- **数据不受影响**：Bundle ID、数据目录、钥匙串都沿用原标识，覆盖安装即可，不用卸载重装
+- 签到接口的远程地址同步切到新仓库名，旧仓库地址留作兜底
 
 ### v3.9.8 长按快进的提示缩小、2 秒自动消失
 
@@ -123,10 +130,4 @@ App 用 GRDB 把数据统一存在一个 SQLite 库里：`Application Support/Vi
 - 在线播放遇到网络卡顿、等数据时，屏幕中间的暂停图标换成动态转圈，不再显示一个点了没反应的播放键
 - 缓冲时按钮一直露着，控制条收起也能看到；点一下是暂停，会顺手把控制条带出来
 - VLC 兜底播放同样按缓冲状态显示转圈
-
-### v3.9.4 修「删下载把本机视频一起删了」
-
-- **导入的视频不再进下载管理**：「本机视频」里的「导入」「加入列表」只登记播放列表，下载管理只放网络下载的文件
-- **删除更安全**：下载管理里删除、清理已结束，只删真正下载的文件；来源为空的导入记录只删行、不动文件
-- **老数据自动清**：之前混进下载表的导入记录（来源为空）启动时摘掉，文件保留；「从电脑传文件」继续进下载管理，来源记为 `lan-inbox://`
 

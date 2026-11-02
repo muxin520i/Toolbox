@@ -90,7 +90,7 @@ struct MediaSpec {
 
     /// 复制到剪贴板用的纯文本，方便贴给别人看
     var plainText: String {
-        var lines: [String] = ["VideoLinker 技术信息"]
+        var lines: [String] = ["工具箱 技术信息"]
         lines.append("文件：\(fileName)")
         lines.append("容器：\(container)")
         lines.append("引擎：\(engine)")

@@ -39,7 +39,7 @@ enum LocalMedia {
         "mp3", "m4a", "aac", "wav", "flac"
     ]
 
-    /// App 自己的文档目录，「文件」App 里显示为「我的 iPhone → VideoLinker」
+    /// App 自己的文档目录，「文件」App 里显示为「我的 iPhone → 工具箱」
     static func root() -> URL {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
     }

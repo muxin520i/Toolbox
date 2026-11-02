@@ -358,7 +358,7 @@ extension LANInbox {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>传到 VideoLinker</title>
+<title>传到工具箱</title>
 <style>
   :root { color-scheme: light; }
   * { box-sizing: border-box; }
@@ -389,7 +389,7 @@ extension LANInbox {
 </style>
 </head>
 <body>
-  <h1>传到 VideoLinker</h1>
+  <h1>传到工具箱</h1>
   <p class="sub">手机和电脑要连同一个 Wi-Fi，App 留在前台。<br>文件会直接进手机的「下载」列表。</p>
 
   <div id="drop">

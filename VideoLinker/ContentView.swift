@@ -111,7 +111,7 @@ struct ContentView: View {
                 .shadow(color: Color(red: 0.85, green: 0.25, blue: 0.45).opacity(theme.isDark ? 0.45 : 0.25),
                         radius: 18, x: 0, y: 10)
 
-            Text("视频链接播放器")
+            Text("工具箱")
                 .font(.system(size: 30, weight: .bold))
                 .foregroundStyle(theme.text)
 

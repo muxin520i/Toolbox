@@ -14,7 +14,7 @@ enum AppLock {
 
     static let lockNowNotification = Notification.Name("VideoLinker.lockNow")
 
-    static func authenticate(reason: String = "解锁 VideoLinker") async -> Bool {
+    static func authenticate(reason: String = "解锁工具箱") async -> Bool {
         let context = LAContext()
         context.localizedCancelTitle = "取消"
         context.localizedFallbackTitle = "使用密码"
@@ -105,7 +105,7 @@ struct PrivacyGate<Content: View>: View {
                     .foregroundStyle(.white.opacity(0.9))
                     .padding(.bottom, 2)
 
-                Text("VideoLinker 已锁定")
+                Text("工具箱 已锁定")
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(.white)
 

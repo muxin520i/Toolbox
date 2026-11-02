@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>zh-Hans</string>
 	<key>CFBundleDisplayName</key>
-	<string>视频链接播放器</string>
+	<string>工具箱</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -56,7 +56,7 @@
 		<string>_videolinker._tcp</string>
 	</array>
 	<key>NSFaceIDUsageDescription</key>
-	<string>开启 App 锁后，用面容 ID 快速解锁 VideoLinker。</string>
+	<string>开启 App 锁后，用面容 ID 快速解锁工具箱。</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

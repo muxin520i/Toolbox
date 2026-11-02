@@ -659,12 +659,12 @@ final class LANShareServer: ObservableObject {
         <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
-        <title>VideoLinker · 局域网播放</title>
+        <title>工具箱 · 局域网播放</title>
         <style>\(style)</style>
         </head>
         <body>
         <header>
-          <h1>VideoLinker</h1>
+          <h1>工具箱</h1>
           <p>共 \(entries.count) 个视频 · 手机请保持 App 在前台</p>
         </header>
         <main>\(body)</main>
@@ -681,7 +681,7 @@ final class LANShareServer: ObservableObject {
         <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
-        <title>\(escape(title)) · VideoLinker</title>
+        <title>\(escape(title)) · 工具箱</title>
         <style>\(style)</style>
         </head>
         <body>

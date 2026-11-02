@@ -848,7 +848,7 @@ struct BrowserSettingsView: View {
                         .frame(height: 50)
                     }
 
-                    Text("视频链接播放器 · 浏览器内核基于 WKWebView\n界面参考 Firefox for iOS 的信息结构")
+                    Text("工具箱 · 浏览器内核基于 WKWebView\n界面参考 Firefox for iOS 的信息结构")
                         .font(.system(size: 11.5))
                         .foregroundStyle(FirefoxStyle.sub(isDark).opacity(0.8))
                         .lineSpacing(3)

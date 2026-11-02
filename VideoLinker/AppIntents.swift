@@ -4,7 +4,7 @@ import AppIntents
 /// 用「快捷指令」或 Siri 直接把链接丢进来播放
 struct PlayLinkIntent: AppIntent {
     static var title: LocalizedStringResource = "播放视频链接"
-    static var description = IntentDescription("把视频直链交给 VideoLinker 立即播放。")
+    static var description = IntentDescription("把视频直链交给工具箱立即播放。")
     static var openAppWhenRun: Bool = true
 
     @Parameter(title: "视频链接", description: "http 或 https 开头的视频直链")
