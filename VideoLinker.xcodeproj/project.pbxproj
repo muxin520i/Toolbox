@@ -33,6 +33,9 @@
 		1A0000000000000000000340 /* MediaRemuxer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000240 /* MediaRemuxer.swift */; };
 		1A0000000000000000000350 /* VLCPlayback.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000250 /* VLCPlayback.swift */; };
 		1A0000000000000000000391 /* QRCodeKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000390 /* QRCodeKit.swift */; };
+		1A00000000000000000003B1 /* HTTPHeaderStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00000000000000000003B0 /* HTTPHeaderStore.swift */; };
+		1A00000000000000000003B3 /* RequestHeaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00000000000000000003B2 /* RequestHeaderView.swift */; };
+		1A00000000000000000003B5 /* HLSRelay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00000000000000000003B4 /* HLSRelay.swift */; };
 		1A00000000000000000003A3 /* DLNA.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00000000000000000003A2 /* DLNA.swift */; };
 		1A0000000000000000000395 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000392 /* ShareViewController.swift */; };
 		1A0000000000000000000396 /* ShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000394 /* ShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -127,6 +130,9 @@
 		1A0000000000000000000240 /* MediaRemuxer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaRemuxer.swift; sourceTree = "<group>"; };
 		1A0000000000000000000250 /* VLCPlayback.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VLCPlayback.swift; sourceTree = "<group>"; };
 		1A0000000000000000000390 /* QRCodeKit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRCodeKit.swift; sourceTree = "<group>"; };
+		1A00000000000000000003B0 /* HTTPHeaderStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTTPHeaderStore.swift; sourceTree = "<group>"; };
+		1A00000000000000000003B2 /* RequestHeaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequestHeaderView.swift; sourceTree = "<group>"; };
+		1A00000000000000000003B4 /* HLSRelay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HLSRelay.swift; sourceTree = "<group>"; };
 		1A00000000000000000003A2 /* DLNA.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DLNA.swift; sourceTree = "<group>"; };
 		1A0000000000000000000392 /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
 		1A0000000000000000000393 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -234,6 +240,9 @@
 				1A0000000000000000000240 /* MediaRemuxer.swift */,
 				1A0000000000000000000250 /* VLCPlayback.swift */,
 				1A0000000000000000000390 /* QRCodeKit.swift */,
+				1A00000000000000000003B0 /* HTTPHeaderStore.swift */,
+				1A00000000000000000003B2 /* RequestHeaderView.swift */,
+				1A00000000000000000003B4 /* HLSRelay.swift */,
 				1A00000000000000000003A2 /* DLNA.swift */,
 				1A0000000000000000000218 /* ShortcutStore.swift */,
 				1A0000000000000000000219 /* BrowserHistoryStore.swift */,
@@ -412,6 +421,9 @@
 				1A0000000000000000000340 /* MediaRemuxer.swift in Sources */,
 				1A0000000000000000000350 /* VLCPlayback.swift in Sources */,
 				1A0000000000000000000391 /* QRCodeKit.swift in Sources */,
+				1A00000000000000000003B1 /* HTTPHeaderStore.swift in Sources */,
+				1A00000000000000000003B3 /* RequestHeaderView.swift in Sources */,
+				1A00000000000000000003B5 /* HLSRelay.swift in Sources */,
 				1A00000000000000000003A3 /* DLNA.swift in Sources */,
 				1A0000000000000000000317 /* ShortcutStore.swift in Sources */,
 				1A0000000000000000000318 /* BrowserHistoryStore.swift in Sources */,
@@ -595,7 +607,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 58;
+				CURRENT_PROJECT_VERSION = 59;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = VideoLinker/Info.plist;
@@ -603,7 +615,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.10.1;
+				MARKETING_VERSION = 3.11.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.example.VideoLinker;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -618,7 +630,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 58;
+				CURRENT_PROJECT_VERSION = 59;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = VideoLinker/Info.plist;
@@ -626,7 +638,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.10.1;
+				MARKETING_VERSION = 3.11.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.example.VideoLinker;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -640,7 +652,7 @@
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 58;
+				CURRENT_PROJECT_VERSION = 59;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = ShareExtension/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
@@ -649,7 +661,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 3.10.1;
+				MARKETING_VERSION = 3.11.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.example.VideoLinker.ShareExtension;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -663,7 +675,7 @@
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 58;
+				CURRENT_PROJECT_VERSION = 59;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = ShareExtension/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
@@ -672,7 +684,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 3.10.1;
+				MARKETING_VERSION = 3.11.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.example.VideoLinker.ShareExtension;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;

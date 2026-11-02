@@ -177,6 +177,12 @@ enum AppDB {
             try db.execute(sql: "INSERT OR REPLACE INTO meta (key, value) VALUES ('schema.version', 'v2')")
         }
 
+        // v3：私密保险箱——列表加一个「隐藏」标记
+        migrator.registerMigration("v3") { db in
+            try db.execute(sql: "ALTER TABLE playlist ADD COLUMN isPrivate INTEGER NOT NULL DEFAULT 0")
+            try db.execute(sql: "INSERT OR REPLACE INTO meta (key, value) VALUES ('schema.version', 'v3')")
+        }
+
         return migrator
     }()
 

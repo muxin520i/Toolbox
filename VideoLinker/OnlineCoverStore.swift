@@ -100,7 +100,9 @@ final class OnlineCoverStore {
 
         guard let html = Self.loadHTML(page) else { return nil }
         guard let imageURL = Self.ogImageURL(in: html, base: page) else { return nil }
-        guard let data = Self.loadData(URLRequest(url: imageURL, timeoutInterval: 10)) else { return nil }
+        var imageRequest = URLRequest(url: imageURL, timeoutInterval: 10)
+        HTTPHeaderStore.apply(to: &imageRequest, url: imageURL)
+        guard let data = Self.loadData(imageRequest) else { return nil }
         return UIImage(data: data)
     }
 
@@ -113,6 +115,7 @@ final class OnlineCoverStore {
         )
         request.setValue("text/html,application/xhtml+xml", forHTTPHeaderField: "Accept")
         request.setValue("zh-CN,zh;q=0.9", forHTTPHeaderField: "Accept-Language")
+        HTTPHeaderStore.apply(to: &request, url: url)
 
         guard let data = loadData(request) else { return nil }
         let slice = data.prefix(600_000)

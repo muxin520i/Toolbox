@@ -12,16 +12,20 @@ struct HLSSegment {
     let url: URL
     /// EXT-X-BYTERANGE 的 (长度, 起点)
     var range: (length: Int, offset: Int)? = nil
+    /// EXTINF 时长，生成边下边播的清单时要用
+    var duration: Double? = nil
 
     func request(referer: String?, ua: String) -> URLRequest {
         var request = URLRequest(url: url)
         request.timeoutInterval = 30
-        request.setValue(ua, forHTTPHeaderField: "User-Agent")
         if let referer = referer { request.setValue(referer, forHTTPHeaderField: "Referer") }
+        if !ua.isEmpty { request.setValue(ua, forHTTPHeaderField: "User-Agent") }
         if let range = range {
             request.setValue("bytes=\(range.offset)-\(range.offset + range.length - 1)",
                              forHTTPHeaderField: "Range")
         }
+        // 用户配的站点规则优先级最高：防盗链站点就靠这里的 Referer / Cookie
+        HTTPHeaderStore.apply(to: &request, url: url)
         return request
     }
 }
@@ -31,25 +35,33 @@ struct HLSSegmentRecord: Codable {
     var url: String
     var length: Int?
     var offset: Int?
+    /// 旧版 meta.json 里没有这一项，留可选保证还能续传
+    var duration: Double?
 
     var segment: HLSSegment? {
         guard let url = URL(string: url) else { return nil }
+        var item: HLSSegment
         if let length = length, let offset = offset {
-            return HLSSegment(url: url, range: (length, offset))
+            item = HLSSegment(url: url, range: (length, offset))
+        } else {
+            item = HLSSegment(url: url, range: nil)
         }
-        return HLSSegment(url: url, range: nil)
+        item.duration = duration
+        return item
     }
 
-    init(url: String, length: Int? = nil, offset: Int? = nil) {
+    init(url: String, length: Int? = nil, offset: Int? = nil, duration: Double? = nil) {
         self.url = url
         self.length = length
         self.offset = offset
+        self.duration = duration
     }
 
     init(segment: HLSSegment) {
         self.url = segment.url.absoluteString
         self.length = segment.range?.length
         self.offset = segment.range?.offset
+        self.duration = segment.duration
     }
 }
 
@@ -61,6 +73,8 @@ struct HLSJob: Codable {
     var ivBase64: String?
     var mediaSequence: Int
     var fileExtension: String
+    /// 每个分片的时长；旧任务没有，按 6 秒估
+    var durations: [Double]?
 
     var total: Int { segments.count }
     var key: Data? { keyBase64.flatMap { Data(base64Encoded: $0) } }
@@ -75,6 +89,7 @@ struct HLSPlaylist {
     var explicitIV: Data?
     var mediaSequence: Int
     var fileExtension: String
+    var durations: [Double]
 }
 
 /// 纯 Swift 的 HLS 下载：解析清单 → 取密钥 → 并下载分片 → 解密 → 按顺序拼成一个文件
@@ -127,6 +142,7 @@ enum HLSDownloader {
         var explicitIV: Data?
         var mediaSequence = 0
         var pendingRange: (length: Int, offset: Int)?
+        var pendingDuration: Double = 0
         var nextOffset = 0
         var usesFMP4 = false
 
@@ -167,6 +183,13 @@ enum HLSDownloader {
                 continue
             }
 
+            if line.hasPrefix("#EXTINF:") {
+                let body = line.dropFirst("#EXTINF:".count)
+                let value = body.split(separator: ",").first.map(String.init) ?? ""
+                pendingDuration = Double(value.trimmingCharacters(in: .whitespaces)) ?? 0
+                continue
+            }
+
             if line.hasPrefix("#EXT-X-BYTERANGE:") {
                 let body = line.dropFirst("#EXT-X-BYTERANGE:".count)
                 let parts = body.split(separator: "@")
@@ -181,8 +204,11 @@ enum HLSDownloader {
             if line.hasPrefix("#") { continue }
 
             guard let url = resolve(line, base: current) else { continue }
-            segments.append(HLSSegment(url: url, range: pendingRange))
+            segments.append(HLSSegment(url: url,
+                                       range: pendingRange,
+                                       duration: pendingDuration > 0 ? pendingDuration : nil))
             pendingRange = nil
+            pendingDuration = 0
         }
 
         guard !segments.isEmpty else {
@@ -196,7 +222,8 @@ enum HLSDownloader {
             keyURI: keyURI,
             explicitIV: explicitIV,
             mediaSequence: mediaSequence,
-            fileExtension: ext
+            fileExtension: ext,
+            durations: segments.map { $0.duration ?? 6 }
         )
     }
 
@@ -311,7 +338,9 @@ enum HLSDownloader {
 
         // 先下初始化段（fMP4 需要）
         if let initSegment = playlist.initSegment {
-            let data = try await fetchData(initSegment.request(referer: referer, ua: userAgent), retry: 2)
+            var initRequest = initSegment.request(referer: referer, ua: userAgent)
+            initRequest.timeoutInterval = 30
+            let data = try await fetchData(initRequest, retry: 2)
             try? handle.write(contentsOf: data)
         }
 
@@ -322,6 +351,7 @@ enum HLSDownloader {
             request.timeoutInterval = 20
             request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
             if let referer = referer { request.setValue(referer, forHTTPHeaderField: "Referer") }
+            HTTPHeaderStore.apply(to: &request, url: keyURI)
             keyData = try await fetchData(request, retry: 2)
             guard keyData?.count == 16 else {
                 throw HLSFailure(message: "取解密密钥失败")
@@ -384,6 +414,7 @@ enum HLSDownloader {
         request.timeoutInterval = 20
         request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
         if let referer = referer { request.setValue(referer, forHTTPHeaderField: "Referer") }
+        HTTPHeaderStore.apply(to: &request, url: keyURI)
         let data = try await fetchData(request, retry: 2)
         guard data.count == 16 else { throw HLSFailure(message: "取解密密钥失败") }
         return data
@@ -396,7 +427,8 @@ enum HLSDownloader {
             keyBase64: key?.base64EncodedString(),
             ivBase64: playlist.explicitIV?.base64EncodedString(),
             mediaSequence: playlist.mediaSequence,
-            fileExtension: playlist.fileExtension
+            fileExtension: playlist.fileExtension,
+            durations: playlist.segments.map { $0.duration ?? 6 }
         )
     }
 
@@ -459,6 +491,7 @@ enum HLSDownloader {
         request.timeoutInterval = 20
         request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
         if let referer = referer { request.setValue(referer, forHTTPHeaderField: "Referer") }
+        HTTPHeaderStore.apply(to: &request, url: url)
         let data = try await fetchData(request, retry: 2)
         guard let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) else {
             throw HLSFailure(message: "清单读不出来")

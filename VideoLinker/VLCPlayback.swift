@@ -37,6 +37,19 @@ final class VLCPlayback: NSObject, VLCMediaPlayerDelegate {
         media.addOption("--no-drop-late-frames")
         media.addOption("--no-skip-frames")
 
+        // 防盗链：AVPlayer 那条路靠 AVURLAsset 的私有头字段，
+        // VLC 走自己的 HTTP 模块，得逐项转成它的 option
+        let headers = HTTPHeaderStore.headers(for: url)
+        if let referer = headers["Referer"], !referer.isEmpty {
+            media.addOption(":http-referrer=\(referer)")
+        }
+        if let ua = headers["User-Agent"], !ua.isEmpty {
+            media.addOption(":http-user-agent=\(ua)")
+        }
+        if let cookie = headers["Cookie"], !cookie.isEmpty {
+            media.addOption(":http-cookie=\(cookie)")
+        }
+
         // WebDAV 这类要认证的源：VLC 的 HTTP 模块认 http-user / http-pwd
         if let credential, let colon = credential.firstIndex(of: ":") {
             let user = String(credential[credential.startIndex..<colon])

@@ -119,8 +119,11 @@ struct NameEditorSheet: View {
 
 struct PlaylistListView: View {
     @Environment(\.theme) private var theme
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var playlists: [Playlist] = PlaylistStore.load()
+    /// 私密保险箱本次打开期间是否已验证过；切到后台立刻收回
+    @State private var unlockedPrivate = false
     @State private var downloadListID: UUID? = PlaylistStore.existingDownloadListID()
     @AppStorage(PlaylistStore.downloadTargetKey) private var downloadTarget = PlaylistStore.autoTarget
 
@@ -140,17 +143,19 @@ struct PlaylistListView: View {
                 BackgroundView()
 
                 List {
-                    if playlists.isEmpty {
+                    if visiblePlaylists.isEmpty {
                         emptyState
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
                             .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
                     } else {
-                        ForEach(playlists) { playlist in
+                        ForEach(visiblePlaylists) { playlist in
                             listRow(playlist)
                         }
                         .onMove { source, destination in
-                            playlists = PlaylistStore.move(fromOffsets: source, toOffset: destination)
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                playlists = moveVisible(from: source, to: destination)
+                            }
                         }
                     }
 
@@ -173,6 +178,17 @@ struct PlaylistListView: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Menu {
+                        Button {
+                            togglePrivateFolder()
+                        } label: {
+                            Label(unlockedPrivate
+                                  ? "收起私密列表"
+                                  : (privateCount > 0 ? "私密保险箱（\(privateCount)）" : "私密保险箱"),
+                                  systemImage: unlockedPrivate ? "lock.open" : "lock")
+                        }
+
+                        Divider()
+
                         if !playlists.isEmpty {
                             Menu {
                                 ForEach(PlaylistStore.ListSort.allCases) { order in
@@ -266,6 +282,10 @@ struct PlaylistListView: View {
         .onChange(of: editMode) { newValue in
             if newValue == .inactive { playlists = PlaylistStore.load() }
         }
+        .onChange(of: scenePhase) { phase in
+            // 真正切走才收回；验证面容 ID 时 App 只是 inactive，不能在这里清
+            if phase == .background { unlockedPrivate = false }
+        }
         .sheet(isPresented: $showLocalMedia) {
             LocalMediaView()
         }
@@ -307,10 +327,58 @@ struct PlaylistListView: View {
         }
     }
 
+    // MARK: 私密保险箱
+
+    private var privateCount: Int {
+        playlists.filter { $0.isPrivate }.count
+    }
+
+    private var visiblePlaylists: [Playlist] {
+        unlockedPrivate ? playlists : playlists.filter { !$0.isPrivate }
+    }
+
+    /// 拖动排序时只改「看得见的那几项」，私密列表保持原来的槽位，
+    /// 否则未解锁时拖一下，私密列表的位置会被顺手挪走
+    private func moveVisible(from source: IndexSet, to destination: Int) -> [Playlist] {
+        var visible = visiblePlaylists
+        visible.move(fromOffsets: source, toOffset: destination)
+
+        var result: [Playlist] = []
+        var cursor = 0
+        for list in playlists {
+            if list.isPrivate && !unlockedPrivate {
+                result.append(list)
+            } else if cursor < visible.count {
+                result.append(visible[cursor])
+                cursor += 1
+            }
+        }
+        PlaylistStore.save(result)
+        return result
+    }
+
+    private func togglePrivateFolder() {
+        if privateCount == 0 {
+            alertText = "还没有私密列表。长按任意列表，选「移入私密保险箱」，它就会从这里消失。"
+            return
+        }
+        if unlockedPrivate {
+            withAnimation(.easeOut(duration: 0.2)) { unlockedPrivate = false }
+            return
+        }
+        Task {
+            let ok = await AppLock.authenticate(reason: "查看私密列表")
+            guard ok else { return }
+            await MainActor.run {
+                withAnimation(.easeOut(duration: 0.2)) { unlockedPrivate = true }
+            }
+        }
+    }
+
     private var footerHint: some View {
         Text(editMode == .active
              ? "按住右侧「≡」拖动可以调整顺序，改完点右上角「完成」"
-             : "长按列表可重命名；点左上角 ⋯ 里可以排序，也能导出/导入备份")
+             : "长按列表可重命名、移入私密保险箱；点左上角 ⋯ 可以排序、导出备份")
             .font(.system(size: 11))
             .foregroundStyle(theme.textTertiary)
             .multilineTextAlignment(.center)
@@ -336,10 +404,12 @@ struct PlaylistListView: View {
             Image(systemName: "list.bullet.rectangle.portrait")
                 .font(.system(size: 40, weight: .light))
                 .foregroundStyle(theme.textTertiary)
-            Text("还没有播放列表")
+            Text(privateCount > 0 ? "列表在私密保险箱里" : "还没有播放列表")
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(theme.textSecondary)
-            Text("点右上角 + 新建一个，把常看的视频放进去")
+            Text(privateCount > 0
+                 ? "点左上角 ⋯ →「私密保险箱」验证后查看"
+                 : "点右上角 + 新建一个，把常看的视频放进去")
                 .font(.system(size: 12))
                 .foregroundStyle(theme.textTertiary)
                 .multilineTextAlignment(.center)
@@ -374,6 +444,12 @@ struct PlaylistListView: View {
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(theme.text)
                         .lineLimit(1)
+
+                    if playlist.isPrivate {
+                        Image(systemName: "lock.fill")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(theme.textTertiary)
+                    }
 
                     if playlist.id.uuidString == downloadTarget {
                         badgeTag("下载保存到")
@@ -421,6 +497,23 @@ struct PlaylistListView: View {
                         )
                     } label: {
                         Label("重命名", systemImage: "pencil")
+                    }
+
+                    Button {
+                        let moving = !playlist.isPrivate
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            playlists = PlaylistStore.setPrivate(playlist.id, moving)
+                        }
+                        // 藏起来的列表不能再当下载目标，否则新下完的视频直接进保险箱
+                        if moving, downloadTarget == playlist.id.uuidString {
+                            downloadTarget = PlaylistStore.autoTarget
+                        }
+                        if moving {
+                            alertText = "「\(playlist.name)」已移入私密保险箱，列表里不再显示。\n在左上角 ⋯ →「私密保险箱」验证\(AppLock.biometryName)后可查看。"
+                        }
+                    } label: {
+                        Label(playlist.isPrivate ? "移出私密保险箱" : "移入私密保险箱",
+                              systemImage: playlist.isPrivate ? "lock.open" : "lock")
                     }
 
                     if playlists.first?.id != playlist.id {

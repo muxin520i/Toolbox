@@ -300,6 +300,8 @@ struct DownloadsView: View {
                             DownloadRow(item: item) {
                                 if let url = item.fileURL {
                                     open(url)
+                                } else if item.isHLS {
+                                    playWhileDownloading(item)
                                 }
                             }
                             .contextMenu { menu(for: item) }
@@ -446,6 +448,14 @@ struct DownloadsView: View {
             }
         }
 
+        if item.isHLS, item.state != .finished {
+            Button {
+                playWhileDownloading(item)
+            } label: {
+                Label("边下边看", systemImage: "play.rectangle.on.rectangle")
+            }
+        }
+
         if item.state == .paused {
             Button {
                 manager.resume(item)
@@ -466,6 +476,19 @@ struct DownloadsView: View {
             manager.remove(item)
         } label: {
             Label("删除", systemImage: "trash")
+        }
+    }
+
+    /// 下载中的 HLS：起本地中转，把已下好的分片先播起来，后面由下载器继续补
+    private func playWhileDownloading(_ item: DownloadItem) {
+        HLSRelay.shared.prepare(item: item) { url in
+            DispatchQueue.main.async {
+                guard let url else {
+                    showToast("这个任务还没解析出分片清单，等下载开始后再试")
+                    return
+                }
+                onPlay(url)
+            }
         }
     }
 

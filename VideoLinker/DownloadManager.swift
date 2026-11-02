@@ -401,6 +401,8 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
             if let referer = Self.referer(for: url) {
                 request.setValue(referer, forHTTPHeaderField: "Referer")
             }
+            // 站点规则最后覆盖：Referer / Cookie / UA 都以用户配的为准
+            HTTPHeaderStore.apply(to: &request, url: url)
             task = backgroundSession.downloadTask(with: request)
         }
 
@@ -616,6 +618,7 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
         let referer = Self.referer(for: URL(string: item.source) ?? segment.url)
         var request = segment.request(referer: referer, ua: Self.mobileUA)
         request.timeoutInterval = 300
+        HTTPHeaderStore.apply(to: &request, url: segment.url)
 
         let task = backgroundSession.downloadTask(with: request)
         task.taskDescription = "seg:\(item.id.uuidString):\(index)"
@@ -1482,6 +1485,11 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
         let file = Self.partsDirectory(id).appendingPathComponent("meta.json")
         guard let data = try? Data(contentsOf: file) else { return nil }
         return try? JSONDecoder().decode(HLSJob.self, from: data)
+    }
+
+    /// 边下边播取清单：优先用内存里的，App 刚启动时读 meta.json
+    func hlsJob(for id: UUID) -> HLSJob? {
+        hlsJobs[id] ?? loadJob(for: id)
     }
 
     func clearParts(_ id: UUID) {

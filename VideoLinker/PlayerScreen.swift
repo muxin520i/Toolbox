@@ -1645,13 +1645,18 @@ final class PlayerModel: ObservableObject {
 
     /// 需要认证的源（WebDAV）走 AVURLAsset，把 Basic 头挂在 asset 上，
     /// AVPlayer 请求主文件和各分片时都会带上。
+    /// 防盗链站点同理：Referer / Cookie / UA 由 HTTPHeaderStore 统一给，
+    /// 这里只负责把它们塞进 AVURLAsset 的私有头字段。
     private static func makeAsset(url: URL, credential: String?) -> AVURLAsset {
-        guard let credential, !credential.isEmpty else { return AVURLAsset(url: url) }
-        let token = "Basic " + Data(credential.utf8).base64EncodedString()
-        let headers: [String: Any] = ["Authorization": token]
+        var extra: [String: String] = [:]
+        if let credential, !credential.isEmpty {
+            extra["Authorization"] = "Basic " + Data(credential.utf8).base64EncodedString()
+        }
+        let headers = HTTPHeaderStore.headers(for: url, extra: extra)
+        guard !headers.isEmpty else { return AVURLAsset(url: url) }
         return AVURLAsset(
             url: url,
-            options: ["AVURLAssetHTTPHeaderFieldsKey": headers]
+            options: ["AVURLAssetHTTPHeaderFieldsKey": headers as [String: Any]]
         )
     }
 

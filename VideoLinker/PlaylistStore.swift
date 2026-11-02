@@ -58,6 +58,35 @@ struct Playlist: Codable, Identifiable, Hashable {
     var name: String
     var items: [PlaylistItem] = []
     var createdAt: Date = Date()
+    /// 私密保险箱里的列表：列表页默认不显示，验证面容 ID 后才出来
+    var isPrivate: Bool = false
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, items, createdAt, isPrivate
+    }
+
+    init(id: UUID = UUID(),
+         name: String,
+         items: [PlaylistItem] = [],
+         createdAt: Date = Date(),
+         isPrivate: Bool = false) {
+        self.id = id
+        self.name = name
+        self.items = items
+        self.createdAt = createdAt
+        self.isPrivate = isPrivate
+    }
+
+    /// 旧备份 / 旧 UserDefaults 里没有 isPrivate，缺字段时按「公开」处理，
+    /// 不能让它解码失败把整份列表丢掉
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        items = try container.decodeIfPresent([PlaylistItem].self, forKey: .items) ?? []
+        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+        isPrivate = try container.decodeIfPresent(Bool.self, forKey: .isPrivate) ?? false
+    }
 }
 
 /// 播放列表有任何改动时广播，界面收到就重读。
@@ -86,6 +115,7 @@ enum PlaylistStore {
         var id: String
         var name: String
         var createdAt: Double
+        var isPrivate: Bool
     }
 
     private struct ItemRow: Codable, FetchableRecord {
@@ -102,7 +132,7 @@ enum PlaylistStore {
         let lists = AppDB.read { db -> [Playlist] in
             let listRows = try ListRow.fetchAll(
                 db,
-                sql: "SELECT id, name, createdAt FROM playlist ORDER BY position ASC"
+                sql: "SELECT id, name, createdAt, isPrivate FROM playlist ORDER BY position ASC"
             )
             let itemRows = try ItemRow.fetchAll(
                 db,
@@ -124,7 +154,8 @@ enum PlaylistStore {
                     id: listID,
                     name: row.name,
                     items: grouped[row.id] ?? [],
-                    createdAt: Date(timeIntervalSince1970: row.createdAt)
+                    createdAt: Date(timeIntervalSince1970: row.createdAt),
+                    isPrivate: row.isPrivate
                 )
             }
         }
@@ -149,8 +180,9 @@ enum PlaylistStore {
             try db.execute(sql: "DELETE FROM playlist")
             for (index, list) in limited.enumerated() {
                 try db.execute(
-                    sql: "INSERT INTO playlist (id, name, createdAt, position) VALUES (?, ?, ?, ?)",
-                    arguments: [list.id.uuidString, list.name, list.createdAt.timeIntervalSince1970, index]
+                    sql: "INSERT INTO playlist (id, name, createdAt, isPrivate, position) VALUES (?, ?, ?, ?, ?)",
+                    arguments: [list.id.uuidString, list.name, list.createdAt.timeIntervalSince1970,
+                                list.isPrivate ? 1 : 0, index]
                 )
                 for (order, item) in list.items.enumerated() {
                     try db.execute(
@@ -197,6 +229,16 @@ enum PlaylistStore {
         let before = Set(load().map { $0.id })
         _ = create(named: name)
         return load().first { !before.contains($0.id) }
+    }
+
+    /// 移入 / 移出私密保险箱
+    @discardableResult
+    static func setPrivate(_ id: UUID, _ value: Bool) -> [Playlist] {
+        var playlists = load()
+        guard let index = playlists.firstIndex(where: { $0.id == id }) else { return playlists }
+        playlists[index].isPrivate = value
+        save(playlists)
+        return load()
     }
 
     @discardableResult

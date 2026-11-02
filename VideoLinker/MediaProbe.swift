@@ -50,7 +50,10 @@ enum MediaProbe {
     // MARK: AVFoundation
 
     private static func probeAsset(_ url: URL) async -> MediaInfo? {
-        let asset = AVURLAsset(url: url)
+        let headers = HTTPHeaderStore.headers(for: url)
+        let asset = headers.isEmpty
+            ? AVURLAsset(url: url)
+            : AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": headers as [String: Any]])
         var info = MediaInfo()
 
         if let duration = try? await asset.load(.duration),

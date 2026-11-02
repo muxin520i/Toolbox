@@ -29,6 +29,8 @@ struct SettingsView: View {
     @State private var showStorage = false
     @State private var showWebDAV = false
     @State private var showEndpoint = false
+    @State private var showHeaders = false
+    @State private var showPrivateHelp = false
     @State private var toast: String?
 
     private let rates: [Double] = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
@@ -43,6 +45,7 @@ struct SettingsView: View {
                         themeCard
                         playbackCard
                         downloadCard
+                        networkCard
                         storageCard
                         privacyCard
                         dataCard
@@ -86,6 +89,14 @@ struct SettingsView: View {
         }
         .sheet(isPresented: $showWebDAV) {
             WebDAVView()
+        }
+        .sheet(isPresented: $showHeaders) {
+            RequestHeaderView()
+        }
+        .alert("私密保险箱", isPresented: $showPrivateHelp) {
+            Button("知道了", role: .cancel) {}
+        } message: {
+            Text("在「列表」页长按任意列表 →「移入私密保险箱」，该列表会从列表页消失。\n\n查看：列表页左上角 ⋯ →「私密保险箱」，验证\(AppLock.biometryName)后出现；切到后台会自动收回。")
         }
         .sheet(isPresented: $showEndpoint) {
             WBEndpointSheet()
@@ -322,6 +333,29 @@ struct SettingsView: View {
     // MARK: 数据
     // MARK: 网络存储
 
+    // MARK: 网络
+
+    private var networkCard: some View {
+        card(title: "网络与请求", icon: "network") {
+            VStack(spacing: 0) {
+                Button {
+                    showHeaders = true
+                } label: {
+                    actionRow("请求头（Referer / Cookie / UA）", symbol: "chevron.right")
+                }
+                .buttonStyle(.plain)
+
+                Divider().overlay(theme.cardStroke)
+
+                Text("有些站点直接播只给 403，加一条对应域名的规则就能放；下载和嗅探也会用同一套规则。")
+                    .font(.system(size: 11))
+                    .foregroundStyle(theme.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 10)
+            }
+        }
+    }
+
     private var storageCard: some View {
         card(title: "网络存储", icon: "externaldrive.connected.to.line.below") {
             VStack(spacing: 0) {
@@ -405,6 +439,15 @@ struct SettingsView: View {
                     }
                     .buttonStyle(.plain)
                 }
+
+                Divider().overlay(theme.cardStroke)
+
+                Button {
+                    showPrivateHelp = true
+                } label: {
+                    actionRow("私密保险箱", symbol: "chevron.right")
+                }
+                .buttonStyle(.plain)
             }
         }
     }
