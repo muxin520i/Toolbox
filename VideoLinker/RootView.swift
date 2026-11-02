@@ -106,6 +106,17 @@ struct RootView: View {
             NotificationCenter.default.post(name: .appTabDidSelect, object: value.rawValue)
         }
         .onOpenURL { url in
+            let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems
+            let action = items?.first(where: { $0.name == "action" })?.value
+
+            // 分享扩展点「下载」：直接进下载队列，切到列表页能看见进度
+            if action == "download",
+               let raw = items?.first(where: { $0.name == "url" })?.value {
+                _ = DownloadManager.shared.start(from: raw)
+                tab = .lists
+                return
+            }
+
             Router.shared.handle(url)
             tab = .play
         }
