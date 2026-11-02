@@ -12,7 +12,7 @@ struct ContentView: View {
     @State private var onlyFavorites = false
     @FocusState private var inputFocused: Bool
 
-    @State private var playlists: [Playlist] = PlaylistStore.load()
+    @State private var playlists: [Playlist] = PlaylistStore.visible()
     @State private var pendingHistoryItem: HistoryItem?
     @State private var showPlaylistPicker = false
     @State private var showNoPlaylistAlert = false
@@ -49,7 +49,7 @@ struct ContentView: View {
             guard (note.object as? Int) == RootView.Tab.play.rawValue else { return }
             items = HistoryStore.load()
             favorites = ResumeStore.favorites()
-            playlists = PlaylistStore.load()
+            playlists = PlaylistStore.visible()
         }
         .confirmationDialog("加入哪个列表", isPresented: $showPlaylistPicker, titleVisibility: .visible) {
             ForEach(playlists) { playlist in
@@ -482,7 +482,7 @@ struct ContentView: View {
 
             Button {
                 pendingHistoryItem = item
-                playlists = PlaylistStore.load()
+                playlists = PlaylistStore.visible()
                 if playlists.isEmpty {
                     showNoPlaylistAlert = true
                 } else {

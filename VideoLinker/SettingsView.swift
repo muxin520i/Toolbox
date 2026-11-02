@@ -125,7 +125,7 @@ struct SettingsView: View {
                 let name = newListName
                 newListName = ""
                 if let list = PlaylistStore.createList(named: name) {
-                    playlists = PlaylistStore.load()
+                    playlists = PlaylistStore.visible()
                     downloadTarget = list.id.uuidString
                     showToast("已新建「\(list.name)」，之后下载都放这里")
                 }
@@ -138,7 +138,7 @@ struct SettingsView: View {
     private func reloadDownloadTargets() {
         // 保证内置「下载」列表存在，同时把已删除的目标回落到默认
         _ = PlaylistStore.downloadListID()
-        playlists = PlaylistStore.load()
+        playlists = PlaylistStore.visible()
         builtinDownloadID = PlaylistStore.existingDownloadListID()
         if downloadTarget != PlaylistStore.autoTarget,
            !playlists.contains(where: { $0.id.uuidString == downloadTarget }) {

@@ -86,7 +86,7 @@ final class LANShareServer: ObservableObject {
             result.append(Entry(token: token(), url: url, title: title, size: size))
         }
 
-        for list in PlaylistStore.load() {
+        for list in PlaylistStore.visible() {
             for item in list.items where item.isLocal && item.localFileExists {
                 let path = item.localPath ?? (URL(string: item.url)?.path ?? "")
                 guard !path.isEmpty else { continue }

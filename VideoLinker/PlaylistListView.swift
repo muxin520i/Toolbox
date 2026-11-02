@@ -276,6 +276,7 @@ struct PlaylistListView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .appTabDidSelect)) { note in
             guard (note.object as? Int) == RootView.Tab.lists.rawValue else { return }
+            unlockedPrivate = PlaylistStore.privateUnlocked
             playlists = PlaylistStore.load()
             downloadListID = PlaylistStore.existingDownloadListID()
         }
@@ -284,7 +285,12 @@ struct PlaylistListView: View {
         }
         .onChange(of: scenePhase) { phase in
             // 真正切走才收回；验证面容 ID 时 App 只是 inactive，不能在这里清
-            if phase == .background { unlockedPrivate = false }
+            if phase == .background {
+                PlaylistStore.privateUnlocked = false
+                unlockedPrivate = false
+            } else if phase == .active {
+                unlockedPrivate = PlaylistStore.privateUnlocked
+            }
         }
         .sheet(isPresented: $showLocalMedia) {
             LocalMediaView()
@@ -363,6 +369,7 @@ struct PlaylistListView: View {
             return
         }
         if unlockedPrivate {
+            PlaylistStore.privateUnlocked = false
             withAnimation(.easeOut(duration: 0.2)) { unlockedPrivate = false }
             return
         }
@@ -370,6 +377,7 @@ struct PlaylistListView: View {
             let ok = await AppLock.authenticate(reason: "查看私密列表")
             guard ok else { return }
             await MainActor.run {
+                PlaylistStore.privateUnlocked = true
                 withAnimation(.easeOut(duration: 0.2)) { unlockedPrivate = true }
             }
         }

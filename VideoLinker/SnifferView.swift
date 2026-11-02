@@ -850,7 +850,7 @@ struct BrowserView: View {
     }
 
     private func addToPlaylist(_ video: SniffedVideo) {
-        playlists = PlaylistStore.load()
+        playlists = PlaylistStore.visible()
         pendingVideo = video
         if playlists.isEmpty {
             showNoPlaylist = true

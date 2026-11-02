@@ -186,6 +186,8 @@ struct PrivacyGate<Content: View>: View {
             if enabled { masked = true }
             wentBackground = true
             if backgroundAt == nil { backgroundAt = Date() }
+            // 私密列表的解锁只在本次前台有效，切走就收回
+            PlaylistStore.privateUnlocked = false
 
         @unknown default:
             break

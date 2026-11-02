@@ -111,6 +111,16 @@ enum PlaylistStore {
     /// 列表页、播放页都会频繁读，整份缓存在内存；写入统一走 save()，写完即刷新
     private static var cache: [Playlist]?
 
+    /// 私密保险箱本次是否已解锁。解锁状态放在这里，
+    /// 「加入列表」「局域网页面」这些不在列表页的地方也能统一隐藏
+    static var privateUnlocked = false
+
+    /// 给人看的列表：未解锁时自动去掉私密列表
+    static func visible() -> [Playlist] {
+        let all = load()
+        return privateUnlocked ? all : all.filter { !$0.isPrivate }
+    }
+
     private struct ListRow: Codable, FetchableRecord {
         var id: String
         var name: String
