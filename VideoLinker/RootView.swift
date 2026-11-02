@@ -215,8 +215,11 @@ struct RootView: View {
     }
 
     private func useClipboardLink(download: Bool) {
-        let raw = UIPasteboard.general.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        handledClipboardCount = UIPasteboard.general.changeCount
+        let board = UIPasteboard.general
+        var raw = board.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        // 有些 App 只写 URL 表示，不写纯文本
+        if raw.isEmpty, let url = board.url { raw = url.absoluteString }
+        handledClipboardCount = board.changeCount
         withAnimation(.easeOut(duration: 0.16)) { clipboardHasLink = false }
         guard let link = Self.firstLink(in: raw) else { return }
         if download {
