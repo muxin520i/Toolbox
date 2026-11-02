@@ -13,6 +13,7 @@ final class ShareViewController: UIViewController {
     private let statusLabel = UILabel()
     private let playButton = UIButton(type: .system)
     private let downloadButton = UIButton(type: .system)
+    private let cancelButton = UIButton(type: .system)
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -45,7 +46,7 @@ final class ShareViewController: UIViewController {
         statusLabel.text = ""
         statusLabel.font = .systemFont(ofSize: 11)
         statusLabel.textColor = .secondaryLabel
-        statusLabel.numberOfLines = 2
+        statusLabel.numberOfLines = 3
         statusLabel.translatesAutoresizingMaskIntoConstraints = false
 
         style(playButton, title: "播放", filled: true)
@@ -60,13 +61,12 @@ final class ShareViewController: UIViewController {
         buttons.distribution = .fillEqually
         buttons.translatesAutoresizingMaskIntoConstraints = false
 
-        let cancel = UIButton(type: .system)
-        cancel.setTitle("取消", for: .normal)
-        cancel.titleLabel?.font = .systemFont(ofSize: 14)
-        cancel.addTarget(self, action: #selector(cancelTapped), for: .touchUpInside)
-        cancel.translatesAutoresizingMaskIntoConstraints = false
+        cancelButton.setTitle("取消", for: .normal)
+        cancelButton.titleLabel?.font = .systemFont(ofSize: 14)
+        cancelButton.addTarget(self, action: #selector(cancelTapped), for: .touchUpInside)
+        cancelButton.translatesAutoresizingMaskIntoConstraints = false
 
-        for item in [titleLabel, previewLabel, statusLabel, buttons, cancel] {
+        for item in [titleLabel, previewLabel, statusLabel, buttons, cancelButton] {
             card.addSubview(item)
         }
 
@@ -92,13 +92,13 @@ final class ShareViewController: UIViewController {
             buttons.trailingAnchor.constraint(equalTo: titleLabel.trailingAnchor),
             buttons.heightAnchor.constraint(equalToConstant: 44),
 
-            cancel.topAnchor.constraint(equalTo: buttons.bottomAnchor, constant: 10),
-            cancel.centerXAnchor.constraint(equalTo: card.centerXAnchor),
-            cancel.heightAnchor.constraint(equalToConstant: 30),
-            cancel.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -10)
+            cancelButton.topAnchor.constraint(equalTo: buttons.bottomAnchor, constant: 10),
+            cancelButton.centerXAnchor.constraint(equalTo: card.centerXAnchor),
+            cancelButton.heightAnchor.constraint(equalToConstant: 30),
+            cancelButton.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -10)
         ])
 
-        preferredContentSize = CGSize(width: 0, height: 300)
+        preferredContentSize = CGSize(width: 0, height: 340)
     }
 
     private func style(_ button: UIButton, title: String, filled: Bool) {
@@ -200,28 +200,74 @@ final class ShareViewController: UIViewController {
     private func send(action: String) {
         guard let link, !link.isEmpty else { return }
 
+        // 先把链接放进剪贴板：从 iOS 18 起，分享扩展已经拉不起主 App 了，
+        // 这条路才是真正能走通的兜底，主 App 回到前台会自动提示。
+        // 同时写成文本和 URL 两种表示：主 App 用 hasURLs 判断有没有链接（不会弹粘贴授权），
+        // 别的 App 直接粘贴也能拿到文本。
+        if let url = URL(string: link) {
+            UIPasteboard.general.items = [[
+                "public.utf8-plain-text": link,
+                "public.url": url
+            ]]
+        } else {
+            UIPasteboard.general.string = link
+        }
+
+        guard let deepLink = Self.deepLink(action: action, url: link) else { return }
+
+        // 1) iOS 17 及更早还能顺着响应链找到能执行 openURL: 的对象，先试这条（能成就直接跳）
+        if openViaResponderChain(deepLink) {
+            extensionContext?.completeRequest(returningItems: nil)
+            return
+        }
+
+        // 2) 官方入口，只有少数扩展点放行，分享扩展基本都会被拒
+        extensionContext?.open(deepLink) { [weak self] success in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if success {
+                    self.extensionContext?.completeRequest(returningItems: nil)
+                } else {
+                    self.showHandoffHint()
+                }
+            }
+        }
+    }
+
+    private static func deepLink(action: String, url: String) -> URL? {
         var comps = URLComponents()
         comps.scheme = "videolinker"
         comps.host = "open"
         comps.queryItems = [
             URLQueryItem(name: "action", value: action),
-            URLQueryItem(name: "url", value: link)
+            URLQueryItem(name: "url", value: url)
         ]
+        return comps.url
+    }
 
-        guard let url = comps.url else { return }
-
-        // 分享扩展里 open 不一定被系统放行，失败就把链接放剪贴板，别让用户白点
-        extensionContext?.open(url) { [weak self] success in
-            guard let self else { return }
-            if success {
-                self.extensionContext?.completeRequest(returningItems: nil)
-            } else {
-                UIPasteboard.general.string = link
-                DispatchQueue.main.async {
-                    self.statusLabel.text = "系统没让直接跳转，链接已复制，打开工具箱粘贴即可"
-                }
+    /// 扩展里没有 UIApplication.shared，只能顺着响应链找宿主 App 的 UIApplication。
+    /// iOS 17 及以前有效；iOS 18 起系统把这条路也堵了，返回 false 就走剪贴板。
+    private func openViaResponderChain(_ url: URL) -> Bool {
+        let selector = NSSelectorFromString("openURL:")
+        var responder: UIResponder? = self
+        while let current = responder {
+            if let app = current as? UIApplication, app.responds(to: selector) {
+                app.perform(selector, with: url)
+                return true
             }
+            responder = current.next
         }
+        return false
+    }
+
+    /// 跳不过去时的收尾：说清楚下一步该干什么，别让用户以为没反应
+    private func showHandoffHint() {
+        statusLabel.text = "iOS 不允许分享面板直接打开 App。链接已复制，回到桌面打开「工具箱」，首页会弹出提示，点一下就能播。"
+        playButton.isEnabled = false
+        downloadButton.isEnabled = false
+        playButton.alpha = 0.5
+        downloadButton.alpha = 0.5
+        cancelButton.setTitle("完成", for: .normal)
     }
 
     @objc private func cancelTapped() {

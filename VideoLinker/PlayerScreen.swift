@@ -54,10 +54,7 @@ struct PlayerScreen: View {
     @State private var scrubbing = false
     @State private var scrubValue: Double = 0
     /// 拖动进度条时显示的画面预览
-    @State private var scrubPreview: UIImage?
-    @State private var previewCache: [Int: UIImage] = [:]
-    @State private var previewRequestID = UUID()
-    @State private var previewSecond = -1
+    @StateObject private var scrubThumbs = ScrubThumbnailer()
     @State private var hint: String?
     @State private var hintTask: DispatchWorkItem?
     @State private var pipController: AVPictureInPictureController?
@@ -773,14 +770,20 @@ struct PlayerScreen: View {
     /// 拖动进度条时冒出来的画面预览，松手就收
     private var scrubPreviewCard: some View {
         ZStack {
-            if let image = scrubPreview {
+            Color.black.opacity(0.5)
+            if let image = scrubThumbs.image {
                 Image(uiImage: image)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
             } else {
-                Color.black.opacity(0.4)
-                ProgressView()
-                    .tint(.white)
+                // 取帧期间不要转圈：在线流有时要等好几秒，转圈看着就像卡死了
+                VStack(spacing: 4) {
+                    Image(systemName: "film")
+                        .font(.system(size: 17, weight: .medium))
+                    Text("取画面")
+                        .font(.system(size: 9))
+                }
+                .foregroundStyle(.white.opacity(0.65))
             }
         }
         .frame(width: 160, height: 90)
@@ -802,55 +805,9 @@ struct PlayerScreen: View {
         .allowsHitTesting(false)
     }
 
-    /// 用当前视频的 asset 取指定时间点的画面，按秒缓存，拖动时不至于一卡一卡
-    private func requestScrubPreview(at seconds: Double) {
-        guard model.duration > 0, !model.usingVLC,
-              let asset = model.player.currentItem?.asset else {
-            scrubPreview = nil
-            return
-        }
-
-        let key = Int(seconds.rounded())
-        if let cached = previewCache[key] {
-            scrubPreview = cached
-            return
-        }
-
-        let token = UUID()
-        previewRequestID = token
-        let clamped = max(0, min(seconds, model.duration))
-        let time = CMTime(seconds: clamped, preferredTimescale: 600)
-
-        DispatchQueue.global(qos: .userInitiated).async {
-            let generator = AVAssetImageGenerator(asset: asset)
-            generator.appliesPreferredTrackTransform = true
-            generator.maximumSize = CGSize(width: 320, height: 180)
-            generator.requestedTimeToleranceBefore = CMTime(seconds: 0.5, preferredTimescale: 600)
-            generator.requestedTimeToleranceAfter = CMTime(seconds: 0.5, preferredTimescale: 600)
-
-            guard let cg = try? generator.copyCGImage(at: time, actualTime: nil) else {
-                DispatchQueue.main.async {
-                    // 只清掉这次请求对应的那张，别把用户已经拖到的下一张也清了
-                    if previewRequestID == token, previewSecond == key {
-                        scrubPreview = nil
-                    }
-                }
-                return
-            }
-
-            let image = UIImage(cgImage: cg)
-            DispatchQueue.main.async {
-                guard previewRequestID == token else { return }
-                if previewCache.count > 80 { previewCache.removeAll() }
-                previewCache[key] = image
-                scrubPreview = image
-            }
-        }
-    }
-
     private var bottomBar: some View {
         VStack(spacing: 10) {
-            if scrubbing {
+            if scrubbing && scrubThumbs.canPreview {
                 scrubPreviewCard
                     .transition(.opacity.combined(with: .scale(scale: 0.94)))
             }
@@ -866,11 +823,11 @@ struct PlayerScreen: View {
                         get: { scrubbing ? scrubValue : model.currentTime },
                         set: { value in
                             scrubValue = value
-                            let second = Int(value.rounded())
-                            if second != previewSecond {
-                                previewSecond = second
-                                requestScrubPreview(at: value)
-                            }
+                            scrubThumbs.request(
+                                second: value,
+                                asset: model.player.currentItem?.asset,
+                                unavailable: model.usingVLC
+                            )
                         }
                     ),
                     in: 0...max(1, model.duration),
@@ -878,14 +835,16 @@ struct PlayerScreen: View {
                         if editing {
                             scrubbing = true
                             scrubValue = model.currentTime
-                            previewSecond = Int(model.currentTime.rounded())
-                            requestScrubPreview(at: model.currentTime)
+                            scrubThumbs.begin(
+                                second: model.currentTime,
+                                asset: model.player.currentItem?.asset,
+                                unavailable: model.usingVLC
+                            )
                             showControls = true
                         } else {
                             scrubbing = false
-                            previewSecond = -1
                             model.seek(to: scrubValue)
-                            withAnimation(.easeOut(duration: 0.15)) { scrubPreview = nil }
+                            scrubThumbs.end()
                         }
                     }
                 )
@@ -1913,5 +1872,176 @@ final class PlayerModel: ObservableObject {
         default:
             return "视频格式不受支持，或链接不是可直接播放的媒体地址。\n（\(error.localizedDescription)）"
         }
+    }
+}
+
+// MARK: - 拖动进度条的画面预览
+
+/// 拖动进度条时的画面预览。
+///
+/// 旧写法每取一帧都新建一个 AVAssetImageGenerator 再同步取图：在线视频取一帧要等
+/// 网络请求，拖一下能叠出十几个请求，最新那一帧迟迟不回来，界面就一直转圈。
+/// 这里改成：
+/// 1. 同一个 asset 只建一个 generator 反复复用，省掉重复建解码器、重复建连接；
+/// 2. 同一时间只取一帧，拖动过程中只保留最新的一秒，前一张直接取消；
+/// 3. 取不到画面就显示占位，不再转圈；连续三次失败就认定这个源没有预览，
+///    直接把预览框收掉（VLC 兜底、直播流都属于这一类）。
+final class ScrubThumbnailer: ObservableObject {
+    @Published private(set) var image: UIImage?
+    /// false = 当前这个源取不到画面，界面不要再显示预览框
+    @Published private(set) var canPreview = true
+
+    private var generator: AVAssetImageGenerator?
+    private var assetKey: String?
+    private var cache: [Int: UIImage] = [:]
+    private var order: [Int] = []
+    /// 用户手指现在停在那一秒，取回来的画面只有和它对得上才显示
+    private var visibleSecond = -1
+    /// 排队等着取的那一秒，-1 表示没有
+    private var pendingSecond = -1
+    private var working = false
+    private var workingSince = Date.distantPast
+    private var failures = 0
+
+    // MARK: 对外
+
+    /// 手指按上进度条：清掉上一条视频的残影，重新数失败次数
+    func begin(second: Double, asset: AVAsset?, unavailable: Bool) {
+        image = nil
+        failures = 0
+        canPreview = true
+        pendingSecond = -1
+        let sec = Int(max(0, second).rounded())
+        visibleSecond = sec
+        guard !unavailable, let asset else {
+            canPreview = false
+            working = false
+            generator?.cancelAllCGImageGeneration()
+            return
+        }
+        load(sec, asset: asset)
+    }
+
+    /// 拖动过程中换了一秒
+    func request(second: Double, asset: AVAsset?, unavailable: Bool) {
+        guard !unavailable, canPreview, let asset else { return }
+        let sec = Int(max(0, second).rounded())
+        guard sec != visibleSecond else { return }
+        visibleSecond = sec
+        load(sec, asset: asset)
+    }
+
+    /// 松手：把预览收掉。正在取的那一帧不去掐它——掐了万一回调不回来，
+    /// working 会一直卡在 true，下一次拖动就再也不取帧了。
+    func end() {
+        visibleSecond = -1
+        pendingSecond = -1
+        image = nil
+    }
+
+    // MARK: 取帧
+
+    private func load(_ sec: Int, asset: AVAsset) {
+        let gen = prepare(asset)
+
+        if let hit = cache[sec] {
+            image = hit
+            return
+        }
+
+        pendingSecond = sec
+        // 上一次取帧卡死超过 5 秒就当它废了，重新来过，别让预览从此不出图
+        if working, Date().timeIntervalSince(workingSince) > 5 {
+            working = false
+            gen.cancelAllCGImageGeneration()
+        }
+        // 有一帧正在路上就只记下最新的秒数，等它回来再接着取。
+        // 拖动时每秒都取消重来的话，帧永远取不完，预览反而一直是空的。
+        guard !working else { return }
+        working = true
+        pump(gen)
+    }
+
+    /// 同一时间只允许一个取帧任务；取完接着看队列里有没有更新的
+    private func pump(_ gen: AVAssetImageGenerator) {
+        guard working, gen === generator else { return }
+
+        let sec = pendingSecond
+        pendingSecond = -1
+        guard sec >= 0 else {
+            working = false
+            return
+        }
+
+        if let hit = cache[sec] {
+            image = hit
+            pump(gen)
+            return
+        }
+
+        workingSince = Date()
+        let time = CMTime(seconds: Double(sec), preferredTimescale: 600)
+        gen.generateCGImagesAsynchronously(forTimes: [NSValue(time: time)]) { [weak self] _, cg, _, result, _ in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                switch result {
+                case .succeeded:
+                    if let cg {
+                        self.store(UIImage(cgImage: cg), at: sec)
+                    } else {
+                        self.noteFailure(sec)
+                    }
+                case .cancelled:
+                    break
+                default:
+                    self.noteFailure(sec)
+                }
+                self.pump(gen)
+            }
+        }
+    }
+
+    private func store(_ img: UIImage, at sec: Int) {
+        // 用户已经拖到别处了，这张就别往回贴
+        guard visibleSecond == sec else { return }
+        cache[sec] = img
+        order.append(sec)
+        while order.count > 80 {
+            cache.removeValue(forKey: order.removeFirst())
+        }
+        image = img
+        failures = 0
+    }
+
+    private func noteFailure(_ sec: Int) {
+        guard visibleSecond == sec else { return }
+        failures += 1
+        // 连着三次都取不到：这个源（VLC 兜底 / 直播 / 服务器不支持分段）就别再试了
+        if failures >= 3 {
+            canPreview = false
+        }
+    }
+
+    private func prepare(_ asset: AVAsset) -> AVAssetImageGenerator {
+        let key = (asset as? AVURLAsset)?.url.absoluteString ?? "\(ObjectIdentifier(asset))"
+        if key == assetKey, let generator { return generator }
+
+        generator?.cancelAllCGImageGeneration()
+        assetKey = key
+        cache.removeAll()
+        order.removeAll()
+        failures = 0
+        canPreview = true
+        working = false
+        pendingSecond = -1
+
+        let g = AVAssetImageGenerator(asset: asset)
+        g.appliesPreferredTrackTransform = true
+        g.maximumSize = CGSize(width: 320, height: 180)
+        // 在线流不一定能精确定位，允许就近取关键帧：差个一秒也比空白强
+        g.requestedTimeToleranceBefore = CMTime(seconds: 1, preferredTimescale: 600)
+        g.requestedTimeToleranceAfter = CMTime(seconds: 1, preferredTimescale: 600)
+        generator = g
+        return g
     }
 }
