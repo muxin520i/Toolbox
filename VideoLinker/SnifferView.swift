@@ -175,7 +175,7 @@ struct BrowserView: View {
                     }
 
                     if !tab.isHome {
-                        FloatingSniffButton(count: tab.found.count) {
+                        FloatingSniffButton(count: tab.found.count + tab.images.count) {
                             // 点了就开嗅探结果页，挑哪条自己定，不再替用户盲下一条
                             addressFocused = false
                             editing = false
@@ -600,7 +600,7 @@ struct BrowserView: View {
                 store: store,
                 library: library,
                 isBookmarked: currentBookmarked,
-                foundCount: tab?.found.count ?? 0,
+                foundCount: (tab?.found.count ?? 0) + (tab?.images.count ?? 0),
                 onAction: { action in handle(action) }
             )
         case .sniff:

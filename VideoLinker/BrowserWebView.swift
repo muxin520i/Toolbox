@@ -28,9 +28,74 @@ enum BrowserInject {
             send(el.currentSrc || el.src || el.getAttribute('data-src') || '');
           }
         } catch (e) {}
+        scanImages();
+      }
+
+      function sendImage(u, w, h) {
+        try {
+          if (!u || typeof u !== 'string') { return; }
+          if (!/^https?:/i.test(u)) { return; }
+          if (u.length > 2000) { return; }
+          window.webkit.messageHandlers.imageSniffer.postMessage({ url: u, width: w || 0, height: h || 0 });
+        } catch (e) {}
+      }
+
+      // srcset 里挑最大的那张，图集站常常 1x / 2x 各一份
+      function bestFromSrcset(el) {
+        try {
+          var ss = el.getAttribute('srcset');
+          if (!ss) { return ''; }
+          var best = '';
+          var bestW = -1;
+          var parts = ss.split(',');
+          for (var i = 0; i < parts.length; i++) {
+            var seg = parts[i].trim();
+            if (!seg) { continue; }
+            var bits = seg.split(/\\s+/);
+            var u = bits[0];
+            var w = 0;
+            if (bits.length > 1) {
+              var d = bits[1];
+              if (/^\\d+w$/.test(d)) { w = parseInt(d, 10); }
+              else if (/^\\d+(\\.\\d+)?x$/.test(d)) { w = parseFloat(d) * 1000; }
+            }
+            if (w > bestW) { bestW = w; best = u; }
+          }
+          return best;
+        } catch (e) { return ''; }
+      }
+
+      function scanImages() {
+        try {
+          var imgs = document.querySelectorAll('img');
+          for (var i = 0; i < imgs.length; i++) {
+            var el = imgs[i];
+            var w = el.naturalWidth || 0;
+            var h = el.naturalHeight || 0;
+            // 已知尺寸的小图多半是图标 / 表情
+            if (w && h && (w < 220 || h < 220)) { continue; }
+            var u = bestFromSrcset(el) || el.currentSrc || el.src
+              || el.getAttribute('data-src') || el.getAttribute('data-original') || '';
+            sendImage(u, w, h);
+          }
+
+          // 图集站常常是 <a href="xxx.jpg"><img ...></a>，链接也算一张
+          var links = document.querySelectorAll('a[href]');
+          for (var j = 0; j < links.length; j++) {
+            var href = links[j].getAttribute('href') || '';
+            if (!/\\.(jpe?g|png|webp|gif|bmp|avif)(\\?|#|$)/i.test(href)) { continue; }
+            sendImage(links[j].href || href, 0, 0);
+          }
+
+          var metas = document.querySelectorAll('meta[property="og:image"], meta[name="og:image"]');
+          for (var k = 0; k < metas.length; k++) {
+            sendImage(metas[k].getAttribute('content') || '', 0, 0);
+          }
+        } catch (e) {}
       }
 
       window.__vlScan = scan;
+      window.__vlScanImages = scanImages;
       scan();
       setInterval(scan, 2000);
 

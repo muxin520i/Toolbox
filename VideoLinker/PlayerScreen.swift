@@ -51,6 +51,9 @@ struct PlayerScreen: View {
     @State private var showMediaInfo = false
     @State private var showDLNA = false
     @State private var showSleep = false
+    @State private var showAdjust = false
+    /// 画面旋转 / 镜像 / 缩放，按视频地址记住
+    @State private var adjust = VideoAdjust()
     @State private var scrubbing = false
     @State private var scrubValue: Double = 0
     /// 拖动进度条时显示的画面预览
@@ -129,6 +132,16 @@ struct PlayerScreen: View {
         return name.isEmpty ? (u.host ?? "播放中") : name
     }
 
+    /// 画面转 90° / 270° 后长宽互换，要缩一点才装得进屏幕
+    private var fitScale: CGFloat {
+        guard adjust.rotation % 180 != 0 else { return 1 }
+        let size = UIScreen.main.bounds.size
+        let long = max(size.width, size.height)
+        let short = min(size.width, size.height)
+        guard long > 0 else { return 1 }
+        return short / long
+    }
+
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
@@ -137,11 +150,21 @@ struct PlayerScreen: View {
                 setupPictureInPicture(layer)
             }
             .ignoresSafeArea()
+            .rotationEffect(.degrees(Double(adjust.rotation)))
+            .scaleEffect(
+                x: (adjust.flipH ? -1 : 1) * fitScale * CGFloat(adjust.zoom),
+                y: (adjust.flipV ? -1 : 1) * fitScale * CGFloat(adjust.zoom)
+            )
 
             // VLC 兜底时用它的画面层盖住 AVPlayerLayer
             if let engine = model.vlcEngine {
                 VLCVideoView(engine: engine)
                     .ignoresSafeArea()
+                    .rotationEffect(.degrees(Double(adjust.rotation)))
+                    .scaleEffect(
+                        x: (adjust.flipH ? -1 : 1) * fitScale * CGFloat(adjust.zoom),
+                        y: (adjust.flipV ? -1 : 1) * fitScale * CGFloat(adjust.zoom)
+                    )
             }
 
             gestureLayer
@@ -241,6 +264,7 @@ struct PlayerScreen: View {
                 Button("下一个") { step(by: 1) }.disabled(index >= request.items.count - 1)
             }
             Button("重新加载") { loadCurrent() }
+            Button("画面调节") { showAdjust = true }
             Button("复制链接") { copyCurrentLink() }
             Button("投屏到电视") { showDLNA = true }
             Button("用 Safari 打开") { openInSafari() }
@@ -260,6 +284,9 @@ struct PlayerScreen: View {
                     isLocal: url.isFileURL
                 )
             }
+        }
+        .sheet(isPresented: $showAdjust, onDismiss: saveAdjust) {
+            VideoAdjustSheet(adjust: $adjust)
         }
         .fileImporter(
             isPresented: $showSubtitlePicker,
@@ -1070,6 +1097,8 @@ struct PlayerScreen: View {
     private func loadCurrent() {
         guard let url = currentURL else { return }
 
+        adjust = VideoAdjustStore.value(for: url.absoluteString)
+
         model.onFinished = { advance() }
         model.onProgress = { time, duration in
             ResumeStore.save(url: url.absoluteString, position: time, duration: duration)
@@ -1105,6 +1134,11 @@ struct PlayerScreen: View {
             position: model.currentTime,
             duration: model.duration
         )
+    }
+
+    private func saveAdjust() {
+        guard let url = currentURL else { return }
+        VideoAdjustStore.save(adjust, for: url.absoluteString)
     }
 
     /// 把本次播放的时长记进统计表，切集或退出时调用
@@ -2048,5 +2082,136 @@ final class ScrubThumbnailer: ObservableObject {
         g.requestedTimeToleranceAfter = CMTime(seconds: 1, preferredTimescale: 600)
         generator = g
         return g
+    }
+}
+
+// MARK: - 画面调节
+//
+// 竖拍的视频在播放器里是躺着的，监控 / 前置摄像头素材还经常镜像。
+// 这里只改显示层，不碰解码，转多少度都不掉画质。
+// 配置按视频地址存，同一部片子下次打开还是上次的角度。
+
+struct VideoAdjust: Codable, Equatable {
+    var rotation: Int = 0
+    var flipH: Bool = false
+    var flipV: Bool = false
+    var zoom: Double = 1
+
+    var isDefault: Bool {
+        rotation % 360 == 0 && !flipH && !flipV && abs(zoom - 1) < 0.001
+    }
+}
+
+enum VideoAdjustStore {
+    private static let key = "player.adjust.v1"
+
+    static func value(for url: String) -> VideoAdjust {
+        guard let data = UserDefaults.standard.data(forKey: key),
+              let map = try? JSONDecoder().decode([String: VideoAdjust].self, from: data),
+              let item = map[url] else { return VideoAdjust() }
+        return item
+    }
+
+    static func save(_ value: VideoAdjust, for url: String) {
+        var map: [String: VideoAdjust] = [:]
+        if let data = UserDefaults.standard.data(forKey: key),
+           let decoded = try? JSONDecoder().decode([String: VideoAdjust].self, from: data) {
+            map = decoded
+        }
+
+        if value.isDefault {
+            map.removeValue(forKey: url)
+        } else {
+            map[url] = value
+        }
+
+        // 存太多没意义，留最近改动的一批
+        if map.count > 200 {
+            map = Dictionary(uniqueKeysWithValues: Array(map).suffix(200))
+        }
+
+        if let data = try? JSONEncoder().encode(map) {
+            UserDefaults.standard.set(data, forKey: key)
+        }
+    }
+}
+
+struct VideoAdjustSheet: View {
+    @Binding var adjust: VideoAdjust
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    HStack(spacing: 12) {
+                        action("左转 90°", symbol: "rotate.left") {
+                            adjust.rotation = (adjust.rotation - 90 + 360) % 360
+                        }
+                        action("右转 90°", symbol: "rotate.right") {
+                            adjust.rotation = (adjust.rotation + 90) % 360
+                        }
+                    }
+                    .padding(.vertical, 2)
+                } header: {
+                    Text("旋转")
+                } footer: {
+                    Text("竖着拍却躺着播的视频，转两次就正了。转到竖向会自动缩放到屏幕内。")
+                }
+
+                Section("翻转") {
+                    Toggle("水平镜像", isOn: $adjust.flipH)
+                    Toggle("垂直镜像", isOn: $adjust.flipV)
+                }
+
+                Section {
+                    HStack(spacing: 12) {
+                        Image(systemName: "minus.magnifyingglass")
+                            .foregroundStyle(.secondary)
+                        Slider(value: $adjust.zoom, in: 1...3, step: 0.05)
+                        Image(systemName: "plus.magnifyingglass")
+                            .foregroundStyle(.secondary)
+                        Text(String(format: "%.0f%%", adjust.zoom * 100))
+                            .font(.system(size: 12, weight: .medium, design: .monospaced))
+                            .frame(width: 46, alignment: .trailing)
+                    }
+                } header: {
+                    Text("缩放")
+                } footer: {
+                    Text("最高 300%，以画面中心放大，用来裁掉黑边或看清细节。")
+                }
+
+                Section {
+                    Button("恢复默认") {
+                        adjust = VideoAdjust()
+                    }
+                    .disabled(adjust.isDefault)
+                }
+            }
+            .navigationTitle("画面调节")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") { dismiss() }
+                        .fontWeight(.semibold)
+                }
+            }
+            .presentationDetents([.medium, .large])
+        }
+    }
+
+    private func action(_ title: String, symbol: String, run: @escaping () -> Void) -> some View {
+        Button(action: run) {
+            VStack(spacing: 6) {
+                Image(systemName: symbol)
+                    .font(.system(size: 20, weight: .medium))
+                Text(title)
+                    .font(.system(size: 12))
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+        .buttonStyle(.plain)
     }
 }

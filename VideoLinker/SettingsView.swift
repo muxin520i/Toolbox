@@ -30,6 +30,7 @@ struct SettingsView: View {
     @State private var showWebDAV = false
     @State private var showEndpoint = false
     @State private var showHeaders = false
+    @State private var showReceiver = false
     @State private var showPrivateHelp = false
     @State private var toast: String?
 
@@ -92,6 +93,9 @@ struct SettingsView: View {
         }
         .sheet(isPresented: $showHeaders) {
             RequestHeaderView()
+        }
+        .sheet(isPresented: $showReceiver) {
+            DLNAReceiverView()
         }
         .alert("私密保险箱", isPresented: $showPrivateHelp) {
             Button("知道了", role: .cancel) {}
@@ -352,6 +356,15 @@ struct SettingsView: View {
                     .foregroundStyle(theme.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 10)
+
+                Divider().overlay(theme.cardStroke)
+
+                Button {
+                    showReceiver = true
+                } label: {
+                    actionRow("接收投屏（手机当电视）", symbol: "tv.badge.wifi")
+                }
+                .buttonStyle(.plain)
             }
         }
     }

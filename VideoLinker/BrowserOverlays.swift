@@ -1,5 +1,7 @@
 import SwiftUI
 import UIKit
+import Photos
+import Combine
 
 // MARK: - 标签页切换
 
@@ -416,6 +418,12 @@ struct SniffResultsPanel: View {
     @State private var filter = "全部"
     @State private var selecting = false
     @State private var selected: Set<String> = []
+    /// 视频还是图片；页面只有图片时自动切到图片
+    @State private var mode: Mode = .video
+
+    private enum Mode: Hashable {
+        case video, image
+    }
 
     private let filters = ["全部", "HLS", "MP4", "其他"]
 
@@ -435,17 +443,26 @@ struct SniffResultsPanel: View {
     var body: some View {
         NavigationStack {
             Group {
-                if tab.found.isEmpty {
+                if tab.found.isEmpty && tab.images.isEmpty {
                     emptyView
                 } else {
-                    content
+                    VStack(spacing: 0) {
+                        if !tab.images.isEmpty {
+                            modeBar
+                        }
+                        if mode == .image {
+                            imageContent
+                        } else {
+                            content
+                        }
+                    }
                 }
             }
             .navigationTitle("嗅探结果")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    if selecting {
+                    if selecting && mode == .video {
                         Button("取消") {
                             selecting = false
                             selected.removeAll()
@@ -455,7 +472,16 @@ struct SniffResultsPanel: View {
                     }
                 }
                 ToolbarItem(placement: .primaryAction) {
-                    if selecting {
+                    if mode == .image {
+                        Button(selected.count == tab.images.count && !tab.images.isEmpty ? "取消全选" : "全选") {
+                            if selected.count == tab.images.count && !tab.images.isEmpty {
+                                selected.removeAll()
+                            } else {
+                                selected = Set(tab.images.map { $0.url })
+                            }
+                        }
+                        .disabled(tab.images.isEmpty)
+                    } else if selecting {
                         Button(selected.count == filtered.count && !filtered.isEmpty ? "取消全选" : "全选") {
                             if selected.count == filtered.count && !filtered.isEmpty {
                                 selected.removeAll()
@@ -473,6 +499,7 @@ struct SniffResultsPanel: View {
 
                             Button(role: .destructive) {
                                 tab.found.removeAll()
+                                tab.images.removeAll()
                                 selected.removeAll()
                             } label: {
                                 Label("清空", systemImage: "trash")
@@ -480,13 +507,33 @@ struct SniffResultsPanel: View {
                         } label: {
                             Text("操作")
                         }
-                        .disabled(tab.found.isEmpty)
+                        .disabled(tab.found.isEmpty && tab.images.isEmpty)
                     }
                 }
             }
             .safeAreaInset(edge: .bottom) {
-                if selecting {
+                if mode == .image {
+                    imageBatchBar
+                } else if selecting {
                     batchBar
+                }
+            }
+            .onAppear {
+                if tab.found.isEmpty && !tab.images.isEmpty {
+                    mode = .image
+                }
+            }
+            .onChange(of: tab.images.count) { _ in
+                // 图片是边扫边来的，晚到也要自动切过去
+                if tab.found.isEmpty && !tab.images.isEmpty {
+                    mode = .image
+                }
+            }
+            .onChange(of: mode) { _ in
+                selected.removeAll()
+                selecting = false
+                if mode == .image {
+                    filter = "全部"
                 }
             }
         }
@@ -513,7 +560,7 @@ struct SniffResultsPanel: View {
             Image(systemName: "dot.radiowaves.left.and.right")
                 .font(.system(size: 34, weight: .light))
                 .foregroundStyle(.secondary)
-            Text("还没有抓到视频")
+            Text("还没有抓到视频或图片")
                 .font(.system(size: 15, weight: .semibold))
             Text("播放一下页面里的视频，地址就会被捕获。\n很多站点把源藏在混淆脚本里，可以试试切到桌面版 UA。")
                 .font(.system(size: 12))
@@ -566,6 +613,149 @@ struct SniffResultsPanel: View {
             }
             .listStyle(.plain)
         }
+    }
+
+    // MARK: 图片
+
+    private var modeBar: some View {
+        Picker("", selection: $mode) {
+            Text("视频 \(tab.found.count)").tag(Mode.video)
+            Text("图片 \(tab.images.count)").tag(Mode.image)
+        }
+        .pickerStyle(.segmented)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+    }
+
+    private var imageContent: some View {
+        ScrollView {
+            LazyVGrid(
+                columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 3),
+                spacing: 4
+            ) {
+                ForEach(tab.images) { image in
+                    Button {
+                        if selected.contains(image.url) {
+                            selected.remove(image.url)
+                        } else {
+                            selected.insert(image.url)
+                        }
+                    } label: {
+                        ZStack(alignment: .topTrailing) {
+                            RemoteImage(url: image.url)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 118)
+                                .clipped()
+
+                            Image(systemName: selected.contains(image.url)
+                                  ? "checkmark.circle.fill" : "circle")
+                                .font(.system(size: 18))
+                                .foregroundStyle(selected.contains(image.url)
+                                                 ? Color(red: 1.0, green: 0.45, blue: 0.35)
+                                                 : .white.opacity(0.85))
+                                .background(Circle().fill(.black.opacity(0.25)).padding(1))
+                                .padding(6)
+                        }
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .overlay(alignment: .bottomLeading) {
+                            if !image.sizeText.isEmpty {
+                                Text(image.sizeText)
+                                    .font(.system(size: 9, weight: .medium))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 5)
+                                    .padding(.vertical, 2)
+                                    .background(Capsule().fill(.black.opacity(0.45)))
+                                    .padding(5)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.bottom, 12)
+        }
+        .overlay(alignment: .top) {
+            if tab.images.isEmpty {
+                VStack(spacing: 6) {
+                    Text("这一页还没有抓到图片")
+                        .font(.system(size: 13, weight: .medium))
+                    Text("往下滑一滑让图片加载出来，再回来看")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.top, 40)
+            }
+        }
+    }
+
+    private var imageBatchBar: some View {
+        HStack(spacing: 10) {
+            Button {
+                saveSelectedImages()
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "square.and.arrow.down")
+                        .font(.system(size: 13, weight: .semibold))
+                    Text(selected.isEmpty ? "全部保存到相册" : "保存 \(selected.count) 张")
+                        .font(.system(size: 13, weight: .semibold))
+                }
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+                .frame(height: 36)
+                .background(Capsule().fill(Color(red: 1.0, green: 0.42, blue: 0.31)))
+            }
+            .buttonStyle(.plain)
+            .disabled(tab.images.isEmpty)
+
+            Button {
+                copySelectedImages()
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "doc.on.doc")
+                        .font(.system(size: 13, weight: .semibold))
+                    Text("复制链接")
+                        .font(.system(size: 13, weight: .semibold))
+                }
+                .foregroundStyle(selected.isEmpty ? Color.secondary : Color.primary)
+                .frame(maxWidth: .infinity)
+                .frame(height: 36)
+                .background(Capsule().fill(Color(.tertiarySystemFill)))
+            }
+            .buttonStyle(.plain)
+            .disabled(selected.isEmpty)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.bar)
+        .overlay(alignment: .top) { Divider() }
+    }
+
+    private func targetImages() -> [SniffedImage] {
+        selected.isEmpty ? tab.images : tab.images.filter { selected.contains($0.url) }
+    }
+
+    private func saveSelectedImages() {
+        let list = targetImages()
+        guard !list.isEmpty else { return }
+        let urls = list.map { $0.url }
+        showHint("正在保存 \(urls.count) 张…")
+
+        SniffImageSaver.save(urls) { ok, failed in
+            if ok > 0 {
+                showHint(failed > 0 ? "已保存 \(ok) 张，\(failed) 张失败" : "已保存 \(ok) 张到相册")
+                selected.removeAll()
+            } else {
+                showHint("没能保存，可能是图片有防盗链或已过期")
+            }
+        }
+    }
+
+    private func copySelectedImages() {
+        let list = targetImages()
+        guard !list.isEmpty else { return }
+        UIPasteboard.general.string = list.map { $0.url }.joined(separator: "\n")
+        showHint("已复制 \(list.count) 条图片链接")
     }
 
     private var chipBar: some View {
@@ -919,4 +1109,141 @@ struct ActivityView: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
+}
+
+// MARK: - 图片缩略图 / 保存
+//
+// 图集站的图片大多有防盗链，直接用 AsyncImage 会一片空白，
+// 这里走 URLSession 并套上请求头规则，和播放 / 下载用同一套 Referer。
+
+final class HeaderImageLoader: ObservableObject {
+    @Published var image: UIImage?
+
+    private static let cache = NSCache<NSString, UIImage>()
+    private var loading = false
+
+    func load(_ urlString: String) {
+        guard image == nil, !loading else { return }
+        if let hit = Self.cache.object(forKey: urlString as NSString) {
+            image = hit
+            return
+        }
+        guard let url = URL(string: urlString) else { return }
+        loading = true
+
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 15
+        HTTPHeaderStore.apply(to: &request, url: url)
+
+        URLSession.shared.dataTask(with: request) { [weak self] data, _, _ in
+            defer { self?.loading = false }
+            guard let data, let image = UIImage(data: data) else { return }
+            Self.cache.setObject(image, forKey: urlString as NSString)
+            DispatchQueue.main.async { self?.image = image }
+        }.resume()
+    }
+}
+
+struct RemoteImage: View {
+    let url: String
+
+    @StateObject private var loader = HeaderImageLoader()
+
+    var body: some View {
+        Group {
+            if let image = loader.image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                Rectangle()
+                    .fill(Color(.tertiarySystemFill))
+                    .overlay(
+                        Image(systemName: "photo")
+                            .font(.system(size: 18))
+                            .foregroundStyle(.secondary)
+                    )
+            }
+        }
+        .task(id: url) { loader.load(url) }
+    }
+}
+
+enum SniffImageSaver {
+    /// 返回（成功数, 失败数）
+    static func save(_ urls: [String], completion: @escaping (Int, Int) -> Void) {
+        guard !urls.isEmpty else {
+            completion(0, 0)
+            return
+        }
+
+        PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
+            guard status == .authorized || status == .limited else {
+                DispatchQueue.main.async { completion(0, urls.count) }
+                return
+            }
+
+            let group = DispatchGroup()
+            let lock = NSLock()
+            let limit = DispatchSemaphore(value: 3)
+            var ok = 0
+            var failed = 0
+
+            for url in urls {
+                group.enter()
+                DispatchQueue.global(qos: .userInitiated).async {
+                    limit.wait()
+                    defer {
+                        limit.signal()
+                        group.leave()
+                    }
+
+                    guard let data = fetch(url), let image = UIImage(data: data) else {
+                        lock.lock(); failed += 1; lock.unlock()
+                        return
+                    }
+                    if saveOne(image) {
+                        lock.lock(); ok += 1; lock.unlock()
+                    } else {
+                        lock.lock(); failed += 1; lock.unlock()
+                    }
+                }
+            }
+
+            group.notify(queue: .main) { completion(ok, failed) }
+        }
+    }
+
+    private static func fetch(_ urlString: String) -> Data? {
+        guard let url = URL(string: urlString) else { return nil }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 20
+        HTTPHeaderStore.apply(to: &request, url: url)
+
+        let semaphore = DispatchSemaphore(value: 0)
+        var result: Data?
+        URLSession.shared.dataTask(with: request) { data, _, _ in
+            result = data
+            semaphore.signal()
+        }.resume()
+        _ = semaphore.wait(timeout: .now() + 25)
+        return result
+    }
+
+    private static func saveOne(_ image: UIImage) -> Bool {
+        guard let data = image.jpegData(compressionQuality: 0.95) ?? image.pngData() else {
+            return false
+        }
+        let semaphore = DispatchSemaphore(value: 0)
+        var success = false
+        PHPhotoLibrary.shared().performChanges({
+            let request = PHAssetCreationRequest.forAsset()
+            request.addResource(with: .photo, data: data, options: nil)
+        }) { done, _ in
+            success = done
+            semaphore.signal()
+        }
+        _ = semaphore.wait(timeout: .now() + 20)
+        return success
+    }
 }

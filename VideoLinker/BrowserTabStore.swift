@@ -26,6 +26,20 @@ struct BrowserOptions {
 
 // MARK: - 单个标签页
 
+/// 页面里抓到的图片。图集站往往一个页面几十张，尺寸只有部分能拿到
+struct SniffedImage: Identifiable, Hashable {
+    var id: String { url }
+    let url: String
+    let host: String
+    let width: Int
+    let height: Int
+
+    var sizeText: String {
+        guard width > 0, height > 0 else { return "" }
+        return "\(width)×\(height)"
+    }
+}
+
 final class BrowserTab: ObservableObject, Identifiable {
     let id = UUID()
     let isPrivate: Bool
@@ -39,6 +53,7 @@ final class BrowserTab: ObservableObject, Identifiable {
     @Published var isLoading = false
     @Published var progress: Double = 0
     @Published var found: [SniffedVideo] = []
+    @Published var images: [SniffedImage] = []
     @Published var errorText: String?
 
     private var bag = Set<AnyCancellable>()
@@ -117,6 +132,16 @@ final class BrowserTab: ObservableObject, Identifiable {
         found.append(SniffedVideo(url: clean, host: host, kind: SniffedVideo.kind(of: clean)))
     }
 
+    func addImage(_ url: String, width: Int, height: Int) {
+        let clean = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard clean.count > 8, clean.count < 2000 else { return }
+        guard clean.lowercased().hasPrefix("http") else { return }
+        guard images.count < 80 else { return }
+        guard !images.contains(where: { $0.url == clean }) else { return }
+        let host = URL(string: clean)?.host ?? ""
+        images.append(SniffedImage(url: clean, host: host, width: width, height: height))
+    }
+
     func reload() { webView.reload() }
     func stop() { webView.stopLoading() }
     func goBack() { webView.goBack() }
@@ -125,6 +150,7 @@ final class BrowserTab: ObservableObject, Identifiable {
     func showHome() {
         webView.stopLoading()
         found.removeAll()
+        images.removeAll()
         errorText = nil
         urlString = ""
         title = ""
@@ -196,6 +222,7 @@ final class BrowserStore: ObservableObject {
         web.uiDelegate = coordinator
 
         controller.add(coordinator, name: "videoSniffer")
+        controller.add(coordinator, name: "imageSniffer")
         controller.add(coordinator, name: "vlGM")
         controller.add(coordinator, name: "vlScript")
         BrowserInject.install(into: controller, adBlock: options.adBlock, userscripts: options.userscripts)
@@ -216,6 +243,7 @@ final class BrowserStore: ObservableObject {
         // 消息代理是强引用，不解绑会一直活着
         let controller = tab.webView.configuration.userContentController
         controller.removeScriptMessageHandler(forName: "videoSniffer")
+        controller.removeScriptMessageHandler(forName: "imageSniffer")
         controller.removeScriptMessageHandler(forName: "vlGM")
         controller.removeScriptMessageHandler(forName: "vlScript")
         controller.removeAllUserScripts()
@@ -357,6 +385,16 @@ final class TabCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScri
         if message.name == "vlScript" {
             guard let url = message.body as? String else { return }
             installScript(from: url, in: message.webView)
+            return
+        }
+        if message.name == "imageSniffer" {
+            guard let body = message.body as? [String: Any],
+                  let url = body["url"] as? String else { return }
+            let width = (body["width"] as? NSNumber)?.intValue ?? 0
+            let height = (body["height"] as? NSNumber)?.intValue ?? 0
+            DispatchQueue.main.async {
+                self.tab.addImage(url, width: width, height: height)
+            }
             return
         }
         guard message.name == "videoSniffer", let url = message.body as? String else { return }
