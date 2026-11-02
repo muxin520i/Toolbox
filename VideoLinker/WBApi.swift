@@ -8,13 +8,13 @@ import Foundation
 final class WBRemoteConfig {
     static let shared = WBRemoteConfig()
 
-    /// 镜像按顺序试。仓库已改名为「工具箱」，新地址在前；
+    /// 镜像按顺序试。仓库已改名为 Toolbox，新地址在前、jsDelivr 优先；
     /// 旧仓库名 GitHub 会自动 301，留一份兜底，万一重名被占用也还能拉到。
     private let mirrors = [
-        "https://raw.githubusercontent.com/muxin520i/%E5%B7%A5%E5%85%B7%E7%AE%B1/main/wb-endpoints.json",
-        "https://cdn.jsdelivr.net/gh/muxin520i/%E5%B7%A5%E5%85%B7%E7%AE%B1@main/wb-endpoints.json",
-        "https://raw.githubusercontent.com/muxin520i/video-linker/main/wb-endpoints.json",
-        "https://cdn.jsdelivr.net/gh/muxin520i/video-linker@main/wb-endpoints.json"
+        "https://cdn.jsdelivr.net/gh/muxin520i/Toolbox@main/wb-endpoints.json",
+        "https://raw.githubusercontent.com/muxin520i/Toolbox/main/wb-endpoints.json",
+        "https://cdn.jsdelivr.net/gh/muxin520i/video-linker@main/wb-endpoints.json",
+        "https://raw.githubusercontent.com/muxin520i/video-linker/main/wb-endpoints.json"
     ]
 
     private let cacheKey = "video.wb.endpoints.cache.v1"
