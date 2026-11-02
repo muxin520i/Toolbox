@@ -33,6 +33,7 @@
 		1A0000000000000000000340 /* MediaRemuxer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000240 /* MediaRemuxer.swift */; };
 		1A0000000000000000000350 /* VLCPlayback.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000250 /* VLCPlayback.swift */; };
 		1A0000000000000000000391 /* QRCodeKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000390 /* QRCodeKit.swift */; };
+		1A00000000000000000003A3 /* DLNA.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00000000000000000003A2 /* DLNA.swift */; };
 		1A0000000000000000000395 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000392 /* ShareViewController.swift */; };
 		1A0000000000000000000396 /* ShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000394 /* ShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		1A0000000000000000000317 /* ShortcutStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000218 /* ShortcutStore.swift */; };
@@ -126,6 +127,7 @@
 		1A0000000000000000000240 /* MediaRemuxer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaRemuxer.swift; sourceTree = "<group>"; };
 		1A0000000000000000000250 /* VLCPlayback.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VLCPlayback.swift; sourceTree = "<group>"; };
 		1A0000000000000000000390 /* QRCodeKit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRCodeKit.swift; sourceTree = "<group>"; };
+		1A00000000000000000003A2 /* DLNA.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DLNA.swift; sourceTree = "<group>"; };
 		1A0000000000000000000392 /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
 		1A0000000000000000000393 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		1A0000000000000000000394 /* ShareExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -232,6 +234,7 @@
 				1A0000000000000000000240 /* MediaRemuxer.swift */,
 				1A0000000000000000000250 /* VLCPlayback.swift */,
 				1A0000000000000000000390 /* QRCodeKit.swift */,
+				1A00000000000000000003A2 /* DLNA.swift */,
 				1A0000000000000000000218 /* ShortcutStore.swift */,
 				1A0000000000000000000219 /* BrowserHistoryStore.swift */,
 				1A000000000000000000021A /* BrowserHomeView.swift */,
@@ -409,6 +412,7 @@
 				1A0000000000000000000340 /* MediaRemuxer.swift in Sources */,
 				1A0000000000000000000350 /* VLCPlayback.swift in Sources */,
 				1A0000000000000000000391 /* QRCodeKit.swift in Sources */,
+				1A00000000000000000003A3 /* DLNA.swift in Sources */,
 				1A0000000000000000000317 /* ShortcutStore.swift in Sources */,
 				1A0000000000000000000318 /* BrowserHistoryStore.swift in Sources */,
 				1A0000000000000000000319 /* BrowserHomeView.swift in Sources */,
@@ -591,7 +595,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 56;
+				CURRENT_PROJECT_VERSION = 57;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = VideoLinker/Info.plist;
@@ -614,7 +618,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 56;
+				CURRENT_PROJECT_VERSION = 57;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = VideoLinker/Info.plist;
@@ -636,7 +640,7 @@
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 56;
+				CURRENT_PROJECT_VERSION = 57;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = ShareExtension/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
@@ -659,7 +663,7 @@
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 56;
+				CURRENT_PROJECT_VERSION = 57;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = ShareExtension/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;

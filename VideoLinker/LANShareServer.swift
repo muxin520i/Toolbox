@@ -110,6 +110,13 @@ final class LANShareServer: ObservableObject {
         String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(10)).lowercased()
     }
 
+    /// DLNA 投屏：把本地文件换成局域网 HTTP 地址，电视直接来拉流
+    func httpURL(forFile path: String) -> URL? {
+        guard running, !address.isEmpty else { return nil }
+        guard let entry = index.values.first(where: { $0.url.path == path }) else { return nil }
+        return URL(string: address + "/file/" + entry.token)
+    }
+
     // MARK: 开关
 
     func start() {
