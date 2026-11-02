@@ -13,6 +13,8 @@ struct RequestHeaderView: View {
 
     @State private var editing: HeaderRule?
     @State private var isNew = false
+    @State private var showingImport = false
+    @State private var banner: String?
 
     var body: some View {
         NavigationStack {
@@ -52,7 +54,49 @@ struct RequestHeaderView: View {
                 Text("部分站点会按 UA 决定给不给视频，遇到「能打开网页但播放失败」时可以改这里。")
             }
 
+            if let banner {
+                Section {
+                    HStack(spacing: 8) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 13))
+                            .foregroundStyle(theme.accent)
+                        Text(banner)
+                            .font(.system(size: 12))
+                            .foregroundStyle(theme.textSecondary)
+                    }
+                    .padding(.vertical, 1)
+                }
+            }
+
             Section {
+                Button {
+                    showingImport = true
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "square.and.arrow.down.on.square")
+                            .font(.system(size: 14))
+                            .foregroundStyle(theme.accent)
+                            .frame(width: 20)
+
+                        Text("粘贴导入")
+                            .font(.system(size: 14))
+                            .foregroundStyle(theme.text)
+
+                        Spacer(minLength: 6)
+
+                        Text("一次加一批")
+                            .font(.system(size: 11))
+                            .foregroundStyle(theme.textTertiary)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .sheet(isPresented: $showingImport) {
+                    HeaderRuleImportView { summary in
+                        banner = summary.message
+                    }
+                }
+
                 if store.rules.isEmpty {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("还没有站点规则")
@@ -145,6 +189,11 @@ struct RequestHeaderView: View {
                 }
             }
         }
+        .task(id: banner) {
+            guard banner != nil else { return }
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            withAnimation(.easeOut(duration: 0.2)) { banner = nil }
+        }
     }
 }
 
@@ -232,5 +281,128 @@ private struct HeaderRuleEditor: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - 批量导入
+//
+// 目标是把「加十几条规则」压成两次点击：贴进来，导入。
+// 输入框右上角是系统的 PasteButton，点一下直接读剪贴板，不会弹「允许粘贴」。
+
+private struct HeaderRuleImportView: View {
+
+    @Environment(\.theme) private var theme
+    @Environment(\.dismiss) private var dismiss
+
+    let onImport: (HeaderRuleImporter.Summary) -> Void
+
+    @State private var text = ""
+
+    private var parsed: (rules: [HeaderRule], skipped: Int) {
+        HeaderRuleImporter.parse(text)
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text("域名 | Referer | Cookie | UA")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(theme.textTertiary)
+
+                    Spacer(minLength: 4)
+
+                    Text("\(parsed.rules.count) 条")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(parsed.rules.isEmpty ? theme.textTertiary : theme.accent)
+                }
+
+                editor
+
+                HStack(spacing: 16) {
+                    Button {
+                        text = HeaderRuleImporter.presetText
+                    } label: {
+                        Label("填入推荐规则", systemImage: "wand.and.stars")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(theme.accent)
+                    }
+                    .buttonStyle(.plain)
+
+                    if !text.isEmpty {
+                        Button {
+                            text = ""
+                        } label: {
+                            Label("清空", systemImage: "trash")
+                                .font(.system(size: 12))
+                                .foregroundStyle(theme.textTertiary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    Spacer(minLength: 0)
+                }
+
+                Text("后三列可以留空；# 开头是注释行。同一域名会更新已有规则，不会重复添加。")
+                    .font(.system(size: 11))
+                    .foregroundStyle(theme.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Button {
+                    let summary = HTTPHeaderStore.shared.importRules(text)
+                    onImport(summary)
+                    dismiss()
+                } label: {
+                    Text(parsed.rules.isEmpty ? "没有可导入的规则" : "导入 \(parsed.rules.count) 条")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 46)
+                        .background(theme.gradient, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+                        .opacity(parsed.rules.isEmpty ? 0.35 : 1)
+                }
+                .buttonStyle(.plain)
+                .disabled(parsed.rules.isEmpty)
+                .padding(.bottom, 4)
+            }
+            .padding(.horizontal, 20)
+            .background(theme.bg.ignoresSafeArea())
+            .navigationTitle("粘贴导入")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("关闭") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private var editor: some View {
+        ZStack(alignment: .topLeading) {
+            TextEditor(text: $text)
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundStyle(theme.text)
+                .scrollContentBackground(.hidden)
+                .padding(8)
+
+            if text.isEmpty {
+                Text("每行一条，例如：\nbilivideo.com | https://www.bilibili.com/")
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(theme.textTertiary)
+                    .padding(.horizontal, 13)
+                    .padding(.vertical, 16)
+                    .allowsHitTesting(false)
+            }
+
+            PasteButton(payloadType: String.self) { strings in
+                if let value = strings.first { text = value }
+            }
+            .labelStyle(.iconOnly)
+            .buttonBorderShape(.capsule)
+            .padding(8)
+            .frame(maxWidth: .infinity, alignment: .topTrailing)
+        }
+        .frame(maxHeight: .infinity)
+        .background(theme.field, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
     }
 }

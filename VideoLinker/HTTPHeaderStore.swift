@@ -179,4 +179,150 @@ final class HTTPHeaderStore: ObservableObject {
         copy.move(fromOffsets: source, toOffset: destination)
         rules = copy
     }
+
+    // MARK: 批量导入
+
+    /// 把一整段文本并进规则表：同域名视为同一条，只覆盖文本里给出的非空字段，
+    /// 这样重复导入同一段不会堆出十几条重复规则，也不会把已有的 Cookie 冲掉。
+    @discardableResult
+    func importRules(_ text: String) -> HeaderRuleImporter.Summary {
+        let parsed = HeaderRuleImporter.parse(text)
+        var summary = HeaderRuleImporter.Summary()
+        summary.skipped = parsed.skipped
+
+        for rule in parsed.rules {
+            let key = Self.normalize(rule.host)
+            if let index = rules.firstIndex(where: { Self.normalize($0.host) == key }) {
+                var merged = rules[index]
+                if !rule.referer.isEmpty { merged.referer = rule.referer }
+                if !rule.cookie.isEmpty { merged.cookie = rule.cookie }
+                if !rule.userAgent.isEmpty { merged.userAgent = rule.userAgent }
+                rules[index] = merged
+                summary.updated += 1
+            } else {
+                rules.append(rule)
+                summary.added += 1
+            }
+        }
+        return summary
+    }
+}
+
+// MARK: - 规则文本解析
+//
+// 手机上一条条敲四个字段太痛苦，这里让用户从别处贴一段文本进来。
+// 一行一条，字段顺序固定：域名 | Referer | Cookie | User-Agent，
+// 后三个可以省略，用 | 占位或直接不写。也认 Tab 分隔、行首的 - / 1. 序号，
+// 以及从聊天记录里带出来的反引号和引号。
+
+enum HeaderRuleImporter {
+
+    struct Summary {
+        var added = 0
+        var updated = 0
+        var skipped = 0
+
+        var total: Int { added + updated }
+
+        var message: String {
+            if total == 0 {
+                return skipped > 0 ? "没有识别到可用规则，\(skipped) 行被跳过" : "没有识别到规则"
+            }
+            var parts = ["已导入 \(total) 条"]
+            if updated > 0 { parts.append("其中覆盖 \(updated) 条") }
+            if skipped > 0 { parts.append("跳过 \(skipped) 行") }
+            return parts.joined(separator: "，")
+        }
+    }
+
+    static func parse(_ text: String) -> (rules: [HeaderRule], skipped: Int) {
+        var rules: [HeaderRule] = []
+        var index: [String: Int] = [:]
+        var skipped = 0
+
+        for rawLine in text.components(separatedBy: .newlines) {
+            var line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !line.isEmpty else { continue }
+            // 注释行：方便在文本里写站点名
+            if line.hasPrefix("#") || line.hasPrefix("//") { continue }
+
+            line = stripBullet(line)
+            let fields = split(line)
+            guard fields.count >= 2 else { skipped += 1; continue }
+
+            var rule = HeaderRule()
+            rule.host = fields[0]
+            rule.referer = fields.count > 1 ? fields[1] : ""
+            rule.cookie = fields.count > 2 ? fields[2] : ""
+            rule.userAgent = fields.count > 3 ? fields[3] : ""
+
+            // 只有域名、没有任何要带的头，加进去也是条空规则
+            if rule.referer.isEmpty && rule.cookie.isEmpty && rule.userAgent.isEmpty {
+                skipped += 1
+                continue
+            }
+
+            let key = rule.host.lowercased()
+            if let existing = index[key] {
+                // 同一段文本里同域名出现两次：后面的非空字段补上
+                if !rule.referer.isEmpty { rules[existing].referer = rule.referer }
+                if !rule.cookie.isEmpty { rules[existing].cookie = rule.cookie }
+                if !rule.userAgent.isEmpty { rules[existing].userAgent = rule.userAgent }
+            } else {
+                index[key] = rules.count
+                rules.append(rule)
+            }
+        }
+
+        return (rules, skipped)
+    }
+
+    private static func split(_ line: String) -> [String] {
+        // 竖线优先，其次 Tab；都没有就当成「只有域名」的一行
+        if line.contains("|") {
+            return line.split(separator: "|", omittingEmptySubsequences: false).map { clean(String($0)) }
+        }
+        if line.contains("\t") {
+            return line.split(separator: "\t", omittingEmptySubsequences: false).map { clean(String($0)) }
+        }
+        return [clean(line)]
+    }
+
+    private static func clean(_ raw: String) -> String {
+        var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        // 从聊天、表格里复制时常带的反引号/引号
+        while let first = text.first, "`\"'".contains(first) { text.removeFirst() }
+        while let last = text.last, "`\"'".contains(last) { text.removeLast() }
+        return text.trimmingCharacters(in: .whitespaces)
+    }
+
+    private static func stripBullet(_ line: String) -> String {
+        var text = line
+        for prefix in ["- ", "* ", "• ", "· "] where text.hasPrefix(prefix) {
+            text.removeFirst(prefix.count)
+            break
+        }
+        if let match = text.range(of: #"^\d{1,2}[.、)）]\s*"#, options: .regularExpression) {
+            text.removeSubrange(match)
+        }
+        return text.trimmingCharacters(in: .whitespaces)
+    }
+
+    /// 「填入推荐规则」用的内置清单：只放最常见的防盗链站点，不包括需要 Cookie 的
+    static let presetText = """
+    # 视频站（国内）
+    bilivideo.com | https://www.bilibili.com/
+    bilivideo.cn | https://www.bilibili.com/
+    douyinvod.com | https://www.douyin.com/
+    byteicdn.com | https://www.douyin.com/
+    kwaicdn.com | https://www.kuaishou.com/
+    xhscdn.com | https://www.xiaohongshu.com/
+    weibocdn.com | https://weibo.com/
+    tc.qq.com | https://v.qq.com/
+    iqiyi.com | https://www.iqiyi.com/
+    youku.com | https://www.youku.com/
+    mgtv.com | https://www.mgtv.com/
+    126.net | https://music.163.com/
+    alipan.com | https://www.alipan.com/
+    """
 }
