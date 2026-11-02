@@ -447,6 +447,42 @@ enum PlaylistStore {
 
     /// 下载完成后把本地文件登记进播放列表，返回落到了哪个列表
     @discardableResult
+    /// 重复文件合并：把指向被删文件的条目改到保留下来的文件上；
+    /// 同一个列表里改完出现重复条目时只留第一条。返回改动的条目数。
+    @discardableResult
+    static func mergeDuplicatePaths(_ replacements: [String: String]) -> Int {
+        guard !replacements.isEmpty else { return 0 }
+
+        var lists = load()
+        var changed = 0
+
+        for index in lists.indices {
+            var seen = Set<String>()
+            var kept: [PlaylistItem] = []
+
+            for var item in lists[index].items {
+                if let old = item.localPath, let new = replacements[old] {
+                    item.localPath = new
+                    item.url = URL(fileURLWithPath: new).absoluteString
+                    changed += 1
+                }
+
+                let key = item.localPath ?? item.url
+                if seen.contains(key) {
+                    changed += 1
+                    continue
+                }
+                seen.insert(key)
+                kept.append(item)
+            }
+
+            lists[index].items = kept
+        }
+
+        if changed > 0 { save(lists) }
+        return changed
+    }
+
     static func attachDownload(path: String, title: String) -> Playlist? {
         guard !path.isEmpty else { return nil }
         let item = PlaylistItem(

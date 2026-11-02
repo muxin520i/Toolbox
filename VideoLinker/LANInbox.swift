@@ -490,6 +490,8 @@ struct LANInboxView: View {
     @ObservedObject private var inbox = LANInbox.shared
     @Environment(\.dismiss) private var dismiss
     @State private var copied = false
+    @State private var showScanner = false
+    @State private var scannedCode: String?
 
     var body: some View {
         NavigationStack {
@@ -511,10 +513,31 @@ struct LANInboxView: View {
             .navigationTitle("局域网收件箱")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button {
+                        showScanner = true
+                    } label: {
+                        Image(systemName: "qrcode.viewfinder")
+                    }
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("完成") { dismiss() }
                 }
             }
+        }
+        .sheet(isPresented: $showScanner) {
+            QRScannerSheet { code in
+                UIPasteboard.general.string = code
+                scannedCode = code
+            }
+        }
+        .alert("已复制到剪贴板", isPresented: Binding(
+            get: { scannedCode != nil },
+            set: { if !$0 { scannedCode = nil } }
+        )) {
+            Button("好") { scannedCode = nil }
+        } message: {
+            Text(scannedCode ?? "")
         }
     }
 
@@ -562,6 +585,20 @@ struct LANInboxView: View {
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .fill(Color.accentColor.opacity(0.10))
                 )
+
+                VStack(spacing: 8) {
+                    QRCodeView(text: inbox.address, size: 156)
+                        .padding(10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(Color.white)
+                        )
+                    Text("电脑扫码直接打开，不用手输地址")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.top, 2)
             }
         }
         .padding(16)

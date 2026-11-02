@@ -49,6 +49,8 @@
 	</dict>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>保存下载好的视频到系统相册时需要这个权限。</string>
+	<key>NSCameraUsageDescription</key>
+	<string>扫描二维码，快速打开局域网收件箱或投屏地址。</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>需要访问本地网络，才能在同一个 Wi-Fi 下把视频传到电脑浏览器播放，或接收电脑发来的视频。</string>
 	<key>NSBonjourServices</key>

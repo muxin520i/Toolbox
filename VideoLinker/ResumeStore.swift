@@ -88,6 +88,18 @@ enum ResumeStore {
         persist(table)
     }
 
+    /// 重复文件合并：把旧路径的观看进度挪到保留下来的文件上，
+    /// 保留文件本身已经有更靠后的进度就不动它。
+    static func migrate(from oldURL: String, to newURL: String) {
+        guard oldURL != newURL, let entry = all()[oldURL] else { return }
+        if let existing = all()[newURL], existing.position >= entry.position {
+            remove(url: oldURL)
+            return
+        }
+        save(url: newURL, position: entry.position, duration: entry.duration)
+        remove(url: oldURL)
+    }
+
     static func clear() {
         cache = [:]
         AppDB.write { db in

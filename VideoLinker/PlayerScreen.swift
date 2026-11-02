@@ -52,6 +52,11 @@ struct PlayerScreen: View {
     @State private var showSleep = false
     @State private var scrubbing = false
     @State private var scrubValue: Double = 0
+    /// 拖动进度条时显示的画面预览
+    @State private var scrubPreview: UIImage?
+    @State private var previewCache: [Int: UIImage] = [:]
+    @State private var previewRequestID = UUID()
+    @State private var previewSecond = -1
     @State private var hint: String?
     @State private var hintTask: DispatchWorkItem?
     @State private var pipController: AVPictureInPictureController?
@@ -65,6 +70,8 @@ struct PlayerScreen: View {
     @State private var subtitleText = ""
     @State private var subtitleTicker: Timer?
     @State private var showSubtitlePicker = false
+    /// 字幕时间轴偏移：正数表示字幕整体往后延，负数表示提前
+    @State private var subtitleOffset: Double = 0
     @AppStorage(SettingsKey.subtitleSize) private var subtitleSize = 17.0
 
     // 观看时长（统计页用）：本次播放累计看了多少秒
@@ -261,6 +268,7 @@ struct PlayerScreen: View {
                     subtitleCues = cues
                     subtitleName = url.lastPathComponent
                     subtitleText = ""
+                    subtitleOffset = 0
                     toast("已加载字幕：\(url.lastPathComponent)")
                 } catch {
                     toast(error.localizedDescription)
@@ -312,6 +320,20 @@ struct PlayerScreen: View {
         .allowsHitTesting(false)
     }
 
+    private var subtitleOffsetLabel: String {
+        if subtitleOffset == 0 { return "无偏移" }
+        let value = String(format: "%.1f 秒", abs(subtitleOffset))
+        return subtitleOffset > 0 ? "延后 \(value)" : "提前 \(value)"
+    }
+
+    /// 字幕音画不同步时手动校准，每次 0.5 秒，上限 30 秒
+    private func nudgeSubtitle(_ delta: Double) {
+        subtitleOffset = max(-30, min(30, subtitleOffset + delta))
+        subtitleText = ""
+        showControls = true
+        toast("字幕偏移：\(subtitleOffsetLabel)")
+    }
+
     private func startSubtitleTicker() {
         subtitleTicker?.invalidate()
         let timer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { _ in
@@ -319,7 +341,7 @@ struct PlayerScreen: View {
                 if !subtitleText.isEmpty { subtitleText = "" }
                 return
             }
-            if let cue = SubtitleLoader.cue(at: model.currentTime, in: subtitleCues) {
+            if let cue = SubtitleLoader.cue(at: model.currentTime - subtitleOffset, in: subtitleCues) {
                 if cue.text != subtitleText { subtitleText = cue.text }
             } else if !subtitleText.isEmpty {
                 subtitleText = ""
@@ -329,6 +351,7 @@ struct PlayerScreen: View {
     }
 
     private func autoLoadSubtitle(for url: URL) {
+        subtitleOffset = 0
         guard url.isFileURL, let sidecar = SubtitleLoader.findSidecar(for: url) else {
             subtitleCues = []
             subtitleName = ""
@@ -346,6 +369,7 @@ struct PlayerScreen: View {
         subtitleCues = []
         subtitleName = ""
         subtitleText = ""
+        subtitleOffset = 0
         toast("已关闭字幕")
     }
 
@@ -735,8 +759,91 @@ struct PlayerScreen: View {
         .buttonStyle(.plain)
     }
 
+    /// 拖动进度条时冒出来的画面预览，松手就收
+    private var scrubPreviewCard: some View {
+        ZStack {
+            if let image = scrubPreview {
+                Image(uiImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+            } else {
+                Color.black.opacity(0.4)
+                ProgressView()
+                    .tint(.white)
+            }
+        }
+        .frame(width: 160, height: 90)
+        .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .strokeBorder(.white.opacity(0.25), lineWidth: 0.8)
+        )
+        .overlay(alignment: .bottomTrailing) {
+            Text(Fmt.time(scrubValue))
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                .padding(6)
+        }
+        .shadow(color: .black.opacity(0.35), radius: 10, y: 3)
+        .allowsHitTesting(false)
+    }
+
+    /// 用当前视频的 asset 取指定时间点的画面，按秒缓存，拖动时不至于一卡一卡
+    private func requestScrubPreview(at seconds: Double) {
+        guard model.duration > 0, !model.usingVLC,
+              let asset = model.player.currentItem?.asset else {
+            scrubPreview = nil
+            return
+        }
+
+        let key = Int(seconds.rounded())
+        if let cached = previewCache[key] {
+            scrubPreview = cached
+            return
+        }
+
+        let token = UUID()
+        previewRequestID = token
+        let clamped = max(0, min(seconds, model.duration))
+        let time = CMTime(seconds: clamped, preferredTimescale: 600)
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let generator = AVAssetImageGenerator(asset: asset)
+            generator.appliesPreferredTrackTransform = true
+            generator.maximumSize = CGSize(width: 320, height: 180)
+            generator.requestedTimeToleranceBefore = CMTime(seconds: 0.5, preferredTimescale: 600)
+            generator.requestedTimeToleranceAfter = CMTime(seconds: 0.5, preferredTimescale: 600)
+
+            guard let cg = try? generator.copyCGImage(at: time, actualTime: nil) else {
+                DispatchQueue.main.async {
+                    // 只清掉这次请求对应的那张，别把用户已经拖到的下一张也清了
+                    if previewRequestID == token, previewSecond == key {
+                        scrubPreview = nil
+                    }
+                }
+                return
+            }
+
+            let image = UIImage(cgImage: cg)
+            DispatchQueue.main.async {
+                guard previewRequestID == token else { return }
+                if previewCache.count > 80 { previewCache.removeAll() }
+                previewCache[key] = image
+                scrubPreview = image
+            }
+        }
+    }
+
     private var bottomBar: some View {
         VStack(spacing: 10) {
+            if scrubbing {
+                scrubPreviewCard
+                    .transition(.opacity.combined(with: .scale(scale: 0.94)))
+            }
+
             HStack(spacing: 10) {
                 Text(Fmt.time(scrubbing ? scrubValue : model.currentTime))
                     .font(.system(size: 11, weight: .medium, design: .monospaced))
@@ -746,17 +853,28 @@ struct PlayerScreen: View {
                 Slider(
                     value: Binding(
                         get: { scrubbing ? scrubValue : model.currentTime },
-                        set: { scrubValue = $0 }
+                        set: { value in
+                            scrubValue = value
+                            let second = Int(value.rounded())
+                            if second != previewSecond {
+                                previewSecond = second
+                                requestScrubPreview(at: value)
+                            }
+                        }
                     ),
                     in: 0...max(1, model.duration),
                     onEditingChanged: { editing in
                         if editing {
                             scrubbing = true
                             scrubValue = model.currentTime
+                            previewSecond = Int(model.currentTime.rounded())
+                            requestScrubPreview(at: model.currentTime)
                             showControls = true
                         } else {
                             scrubbing = false
+                            previewSecond = -1
                             model.seek(to: scrubValue)
+                            withAnimation(.easeOut(duration: 0.15)) { scrubPreview = nil }
                         }
                     }
                 )
@@ -779,6 +897,28 @@ struct PlayerScreen: View {
                     }
 
                     if !subtitleCues.isEmpty {
+                        Divider()
+                        Button {
+                            nudgeSubtitle(-0.5)
+                        } label: {
+                            Label("字幕提前 0.5 秒", systemImage: "gobackward")
+                        }
+                        Button {
+                            nudgeSubtitle(0.5)
+                        } label: {
+                            Label("字幕延后 0.5 秒", systemImage: "goforward")
+                        }
+                        if subtitleOffset != 0 {
+                            Button {
+                                subtitleOffset = 0
+                                subtitleText = ""
+                                toast("字幕偏移已重置")
+                            } label: {
+                                Label("重置偏移（\(subtitleOffsetLabel)）", systemImage: "arrow.counterclockwise")
+                            }
+                        }
+
+                        Divider()
                         Button(role: .destructive) {
                             clearSubtitle()
                         } label: {

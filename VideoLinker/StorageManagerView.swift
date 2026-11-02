@@ -127,16 +127,16 @@ struct StorageManagerView: View {
             }
             .onAppear(perform: reload)
             .confirmationDialog(
-                "删除 \(duplicateGroupCount) 组重复文件（每组保留最早的一个）？",
+                "合并 \(duplicateGroupCount) 组重复视频（每组保留最早的一个）？",
                 isPresented: $confirmDuplicates,
                 titleVisibility: .visible
             ) {
-                Button("删除，腾出 \(Fmt.bytes(duplicateWaste))", role: .destructive) {
+                Button("合并，腾出 \(Fmt.bytes(duplicateWaste))", role: .destructive) {
                     cleanDuplicates()
                 }
                 Button("取消", role: .cancel) {}
             } message: {
-                Text("只按文件大小判断，删之前建议先看一眼文件名")
+                Text("播放列表里的条目和观看进度会迁到保留下来的文件上。只按文件大小判断重复，合并前建议先看一眼文件名")
             }
             .confirmationDialog(
                 "删除 \(watchedFiles.count) 个已看完的视频？",
@@ -255,7 +255,7 @@ struct StorageManagerView: View {
                     confirmDuplicates = true
                 } label: {
                     actionRow(
-                        title: "清理重复文件",
+                        title: "合并重复视频",
                         detail: "\(duplicateGroupCount) 组 · 可腾 \(Fmt.bytes(duplicateWaste))",
                         symbol: "doc.on.doc"
                     )
@@ -451,23 +451,37 @@ struct StorageManagerView: View {
     }
 
     private func cleanDuplicates() {
-        var seen = Set<Int64>()
+        var keep: [Int64: StorageFile] = [:]
+        var replacements: [String: String] = [:]
         var targets: [String] = []
         var freed: Int64 = 0
 
         for file in files.sorted(by: { $0.modified < $1.modified }) {
             guard let key = file.duplicateSize else { continue }
-            if seen.contains(key) {
+            if let original = keep[key] {
+                replacements[file.path] = original.path
                 targets.append(file.path)
                 freed += file.size
             } else {
-                seen.insert(key)
+                keep[key] = file
             }
         }
 
         guard !targets.isEmpty else { return }
+
+        // 先把播放列表条目挪到保留的文件上，再删物理文件，
+        // 不然列表里会留下一堆指向已删文件的死条目
+        let moved = PlaylistStore.mergeDuplicatePaths(replacements)
+        for (oldPath, newPath) in replacements {
+            ResumeStore.migrate(
+                from: URL(fileURLWithPath: oldPath).absoluteString,
+                to: URL(fileURLWithPath: newPath).absoluteString
+            )
+        }
+
         deleteFiles(targets)
-        showToast("已清理 \(targets.count) 个重复文件，腾出 \(Fmt.bytes(freed))")
+        let merged = Set(replacements.values).count
+        showToast("已合并 \(merged) 组，腾出 \(Fmt.bytes(freed))，迁移 \(moved) 条列表记录")
         reload()
     }
 
