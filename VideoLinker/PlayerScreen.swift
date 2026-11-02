@@ -1299,6 +1299,9 @@ final class PlayerModel: ObservableObject {
 
     private(set) var vlcEngine: VLCPlayback?
 
+    /// 播的是本机文件：磁盘读取没有网络缓冲那回事，不要显示缓冲转圈
+    private(set) var isLocalFile = false
+
     private var statusObserver: NSKeyValueObservation?
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
@@ -1338,6 +1341,12 @@ final class PlayerModel: ObservableObject {
                     if self.isStalling { self.isStalling = false }
                     if !self.isPlaying { self.isPlaying = true }
                 }
+                // 本机文件永远不显示缓冲转圈
+                if self.isLocalFile, self.isStalling { self.isStalling = false }
+                // 片子已经准备好了，还挂着整页「正在加载」就是状态回调漏了，直接收掉
+                if self.player.currentItem?.status == .readyToPlay, self.isLoading {
+                    self.isLoading = false
+                }
                 // 用户自己按了暂停（或播完停住）：转圈也不该留着
                 if self.player.timeControlStatus == .paused,
                    self.isStalling || self.isPlaying {
@@ -1357,7 +1366,9 @@ final class PlayerModel: ObservableObject {
                 guard let self = self else { return }
                 self.isPlaying = player.timeControlStatus == .playing
                 // waitingToPlayAtSpecifiedRate = 想播但数据没跟上，就是缓冲
-                self.isStalling = player.timeControlStatus == .waitingToPlayAtSpecifiedRate
+                // 本机文件不显示缓冲转圈，打开瞬间那一下等待不算卡顿
+                self.isStalling = !self.isLocalFile
+                    && player.timeControlStatus == .waitingToPlayAtSpecifiedRate
                 self.syncStallWatch()
             }
         }
@@ -1374,7 +1385,7 @@ final class PlayerModel: ObservableObject {
     /// 缓冲状态的看门狗：KVO 偶尔会漏掉「缓冲结束」，
     /// 每 0.5 秒对着 player 的真实状态核一次，避免中间的转圈一直挂着
     private func syncStallWatch() {
-        guard isStalling else {
+        guard isStalling, !isLocalFile else {
             stallWatch?.invalidate()
             stallWatch = nil
             return
@@ -1431,6 +1442,7 @@ final class PlayerModel: ObservableObject {
         isLoading = true
         errorMessage = nil
         isStalling = false
+        isLocalFile = url.isFileURL
         stallWatch?.invalidate()
         stallWatch = nil
         currentTime = 0
@@ -1450,7 +1462,7 @@ final class PlayerModel: ObservableObject {
         let item = AVPlayerItem(asset: Self.makeAsset(url: url, credential: credential))
         item.preferredForwardBufferDuration = 4
 
-        statusObserver = item.observe(\.status, options: [.new]) { [weak self] observedItem, _ in
+        statusObserver = item.observe(\.status, options: [.new, .initial]) { [weak self] observedItem, _ in
             let status = observedItem.status
             let failureReason = observedItem.error
             DispatchQueue.main.async {
@@ -1487,6 +1499,12 @@ final class PlayerModel: ObservableObject {
         }
 
         player.replaceCurrentItem(with: item)
+        // 本机文件可能已经准备好了（状态回调不一定赶得上），补一刀，别让「正在加载…」一直转
+        if item.status == .readyToPlay {
+            isLoading = false
+            timeoutWorkItem?.cancel()
+            applyPendingSeek()
+        }
         player.play()
         player.rate = Float(rate)
 
@@ -1673,8 +1691,9 @@ final class PlayerModel: ObservableObject {
         engine.onState = { [weak self] playing, buffering in
             guard let self = self else { return }
             self.isPlaying = playing
-            // 首次加载由整页「正在加载…」负责，这里只管播起来之后的卡顿
-            self.isStalling = buffering && !self.isLoading
+            // 首次加载由整页「正在加载…」负责，这里只管播起来之后的卡顿；
+            // 本机文件不走网络，不显示缓冲转圈
+            self.isStalling = buffering && !self.isLoading && !self.isLocalFile
             if !buffering { self.isLoading = false }
         }
         engine.onEnded = { [weak self] in
