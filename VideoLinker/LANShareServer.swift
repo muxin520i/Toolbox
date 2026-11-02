@@ -76,8 +76,17 @@ final class LANShareServer: ObservableObject {
         var seen = Set<String>()
         var result: [Entry] = []
 
+        // 只出现在私密列表里的文件，不能从下载记录这条兜底路径漏到电脑上
+        let allLists = PlaylistStore.load()
+        let publicPaths = Set(allLists.filter { !$0.isPrivate }
+            .flatMap { $0.items.compactMap { $0.localPath } })
+        let privatePaths = Set(allLists.filter { $0.isPrivate }
+            .flatMap { $0.items.compactMap { $0.localPath } })
+        let hiddenPaths = privatePaths.subtracting(publicPaths)
+
         func add(_ url: URL, _ title: String) {
             let path = url.path
+            guard !hiddenPaths.contains(path) else { return }
             guard !seen.contains(path), FileManager.default.fileExists(atPath: path) else { return }
             let attr = try? FileManager.default.attributesOfItem(atPath: path)
             let size = (attr?[.size] as? NSNumber)?.int64Value ?? 0
