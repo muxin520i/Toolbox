@@ -86,6 +86,9 @@ struct PlayerScreen: View {
     @State private var boostStart: Date?
     @State private var boostWork: DispatchWorkItem?
     @State private var boostTimer: Timer?
+    /// 长按快进时露 2 秒的提示，之后自己收掉，不一直挡画面
+    @State private var boostBadgeVisible = false
+    @State private var boostBadgeHideWork: DispatchWorkItem?
     /// 这一按已经被长按快进接管：之后的滑动都当手指抖动，不再调音量/进度
     @State private var boostLocked = false
     /// 这一按里出现过滑动，用来决定松手时由谁收尾
@@ -162,7 +165,7 @@ struct PlayerScreen: View {
             // 中间的播放按钮单独一层：缓冲时即使控制条收起来，也要能看到转圈
             centerPlayButton
 
-            if boostActive {
+            if boostBadgeVisible {
                 boostBadge
                     .transition(.scale(scale: 0.9).combined(with: .opacity))
                     .allowsHitTesting(false)
@@ -406,6 +409,15 @@ struct PlayerScreen: View {
         model.forceRate(2.0)
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
 
+        // 提示只露 2 秒，之后自己淡出；2 倍速继续生效，不用一直挡着画面
+        boostBadgeHideWork?.cancel()
+        withAnimation(.easeInOut(duration: 0.15)) { boostBadgeVisible = true }
+        let hide = DispatchWorkItem {
+            withAnimation(.easeInOut(duration: 0.3)) { boostBadgeVisible = false }
+        }
+        boostBadgeHideWork = hide
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0, execute: hide)
+
         // 缓冲或重新起播时系统会把 rate 重置，按住期间持续压住；
         // 万一手势中断没收到松手事件，60 秒后自动恢复
         boostTimer?.invalidate()
@@ -424,6 +436,10 @@ struct PlayerScreen: View {
         boostStart = nil
         boostTimer?.invalidate()
         boostTimer = nil
+        // 松手就收：提示和 2 倍速一起结束
+        boostBadgeHideWork?.cancel()
+        boostBadgeHideWork = nil
+        withAnimation(.easeInOut(duration: 0.18)) { boostBadgeVisible = false }
         model.forceRate(boostBase)
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
         showHint("已恢复 \(rateText(boostBase))")
@@ -468,23 +484,23 @@ struct PlayerScreen: View {
 
     /// 长按时的醒目提示，让人一眼看出当前在快进
     private var boostBadge: some View {
-        VStack(spacing: 5) {
-            HStack(spacing: 7) {
+        VStack(spacing: 4) {
+            HStack(spacing: 6) {
                 Image(systemName: "forward.fill")
-                    .font(.system(size: 15, weight: .bold))
+                    .font(.system(size: 13, weight: .bold))
                 Text("2× 快进中")
-                    .font(.system(size: 15, weight: .bold))
+                    .font(.system(size: 13, weight: .bold))
             }
             Text("松手恢复正常速度")
-                .font(.system(size: 10, weight: .medium))
+                .font(.system(size: 9, weight: .medium))
                 .opacity(0.72)
         }
         .foregroundStyle(.white)
-        .padding(.horizontal, 18)
-        .padding(.vertical, 11)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .padding(.horizontal, 15)
+        .padding(.vertical, 9)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .strokeBorder(Color.white.opacity(0.22), lineWidth: 0.8)
         )
     }
