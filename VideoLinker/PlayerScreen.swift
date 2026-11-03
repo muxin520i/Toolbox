@@ -36,6 +36,13 @@ struct PlayRequest: Identifiable {
 
 // MARK: - 播放页
 
+/// 播放页的弹层统一成一个出口，避免几个 sheet 抢同一个呈现位置
+private enum PlayerSheet: String, Identifiable {
+    case mediaInfo, dlna, adjust, qr, audioSync
+
+    var id: String { rawValue }
+}
+
 struct PlayerScreen: View {
     let request: PlayRequest
 
@@ -48,10 +55,8 @@ struct PlayerScreen: View {
     @State private var isTheater = false
     @State private var showControls = true
     @State private var showMore = false
-    @State private var showMediaInfo = false
-    @State private var showDLNA = false
+    @State private var sheet: PlayerSheet?
     @State private var showSleep = false
-    @State private var showAdjust = false
     /// 画面旋转 / 镜像 / 缩放，按视频地址记住
     @State private var adjust = VideoAdjust()
     @State private var scrubbing = false
@@ -80,9 +85,12 @@ struct PlayerScreen: View {
     @State private var lastWatchTime: Double = 0
 
     // 手势过程状态
-    @State private var dragMode = 0            // 0 未定 1 进度 2 音量
+    @State private var dragMode = 0            // 0 未定 1 进度 2 音量 3 亮度
     @State private var dragBaseTime: Double = 0
     @State private var dragBaseVolume: Float = 0
+    @State private var dragBaseBrightness: CGFloat = 0
+    /// 进播放页时的系统亮度，退出还原，避免把桌面也调暗
+    @State private var originalBrightness: CGFloat = -1
     /// 本轮拖动的起点，用来判断是不是新手势
     @State private var dragStartPoint: CGPoint?
     /// 最近一次因为拖动改音量的时间，用来压掉误触发的双击快进
@@ -108,6 +116,11 @@ struct PlayerScreen: View {
     @State private var sessionRate: Double?
     @AppStorage(SettingsKey.gestures) private var gesturesEnabled = true
     @AppStorage(SettingsKey.autoResume) private var autoResume = true
+    @AppStorage(SettingsKey.gestureHorizontal) private var horizontalGesture = HorizontalGesture.seek.rawValue
+    @AppStorage(SettingsKey.gestureVertical) private var verticalGesture = VerticalGesture.volume.rawValue
+    @AppStorage(SettingsKey.gestureDoubleTap) private var doubleTapAction = DoubleTapAction.seek.rawValue
+    @AppStorage(SettingsKey.gestureDoubleTapSeconds) private var doubleTapSeconds = 10
+    @AppStorage(SettingsKey.gestureLongPressRate) private var longPressRate = 2.0
 
     private let rates: [Double] = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
 
@@ -242,12 +255,17 @@ struct PlayerScreen: View {
         .statusBarHidden(true)
         .onAppear {
             UIDevice.current.beginGeneratingDeviceOrientationNotifications()
+            if originalBrightness < 0 { originalBrightness = SystemBrightness.current }
             model.rate = currentRate
             loadCurrent()
             startSubtitleTicker()
             volumeMonitor.refresh()
         }
         .onDisappear {
+            if originalBrightness >= 0 {
+                SystemBrightness.set(originalBrightness)
+                originalBrightness = -1
+            }
             saveProgress()
             flushWatch()
             model.onFinished = nil
@@ -271,22 +289,31 @@ struct PlayerScreen: View {
                 leaveTheater()
             }
         }
-        .sheet(isPresented: $showMediaInfo) {
-            if let url = currentURL {
-                MediaInfoSheet(url: url, engine: engineName, durationHint: model.duration)
+        .sheet(item: $sheet, onDismiss: saveAdjust) { item in
+            switch item {
+            case .mediaInfo:
+                if let url = currentURL {
+                    MediaInfoSheet(url: url, engine: engineName, durationHint: model.duration)
+                }
+            case .dlna:
+                if let url = currentURL {
+                    DLNASheet(
+                        sourceURL: url.absoluteString,
+                        title: titleText,
+                        isLocal: url.isFileURL
+                    )
+                }
+            case .adjust:
+                VideoAdjustSheet(adjust: $adjust)
+            case .qr:
+                if let url = currentURL {
+                    QRShareSheet(title: titleText, text: url.absoluteString)
+                }
+            case .audioSync:
+                AudioSyncSheet { _ in
+                    applyAudioSync()
+                }
             }
-        }
-        .sheet(isPresented: $showDLNA) {
-            if let url = currentURL {
-                DLNASheet(
-                    sourceURL: url.absoluteString,
-                    title: titleText,
-                    isLocal: url.isFileURL
-                )
-            }
-        }
-        .sheet(isPresented: $showAdjust, onDismiss: saveAdjust) {
-            VideoAdjustSheet(adjust: $adjust)
         }
         .fileImporter(
             isPresented: $showSubtitlePicker,
@@ -438,6 +465,7 @@ struct PlayerScreen: View {
     /// 按住 0.45 秒后才进入 2 倍速，避免误触
     private func scheduleBoost() {
         boostWork?.cancel()
+        guard longPressRate > 0 else { return }
         let work = DispatchWorkItem { beginBoost() }
         boostWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.45, execute: work)
@@ -456,8 +484,8 @@ struct PlayerScreen: View {
         boostLocked = true
         boostBase = model.rate
         boostStart = Date()
-        model.forceRate(2.0)
-        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        model.forceRate(longPressRate)
+        Haptics.medium()
 
         // 提示只露 2 秒，之后自己淡出；2 倍速继续生效，不用一直挡着画面
         boostBadgeHideWork?.cancel()
@@ -476,7 +504,7 @@ struct PlayerScreen: View {
                 endBoost()
                 return
             }
-            model.forceRate(2.0)
+            model.forceRate(longPressRate)
         }
     }
 
@@ -491,7 +519,7 @@ struct PlayerScreen: View {
         boostBadgeHideWork = nil
         withAnimation(.easeInOut(duration: 0.18)) { boostBadgeVisible = false }
         model.forceRate(boostBase)
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        Haptics.light()
         showHint("已恢复 \(rateText(boostBase))")
         hideHintSoon()
     }
@@ -538,7 +566,7 @@ struct PlayerScreen: View {
             HStack(spacing: 6) {
                 Image(systemName: "forward.fill")
                     .font(.system(size: 13, weight: .bold))
-                Text("2× 快进中")
+                Text("\(rateText(longPressRate)) 快进中")
                     .font(.system(size: 13, weight: .bold))
             }
             Text("松手恢复正常速度")
@@ -561,8 +589,14 @@ struct PlayerScreen: View {
                 guard gesturesEnabled else { return }
                 // 刚在调音量：连着两下上下划很容易被认成双击，这时不要跳进度
                 if let touch = lastVolumeTouch, Date().timeIntervalSince(touch) < 0.7 { return }
+                if doubleTapAction == DoubleTapAction.playPause.rawValue {
+                    model.togglePlay()
+                    return
+                }
+
                 let isLeft = value.location.x < UIScreen.main.bounds.width / 2
-                seekRelative(isLeft ? -10 : 10)
+                let seconds = Double(max(1, doubleTapSeconds))
+                seekRelative(isLeft ? -seconds : seconds)
             }
     }
 
@@ -597,16 +631,17 @@ struct PlayerScreen: View {
                     let dy = abs(value.translation.height)
                     // 留出 1.5 倍余量：斜着划、手抖一下都不会被判成快进
                     if dx > dy * 1.5 {
-                        dragMode = 1
-                        dragBaseTime = model.currentTime
-                        scrubValue = model.currentTime
+                        dragMode = gestureAction(horizontalGesture)
                     } else if dy > dx * 1.5 {
-                        dragMode = 2
-                        dragBaseVolume = SystemVolume.current()
+                        dragMode = gestureAction(verticalGesture)
                     } else {
                         // 方向还没定下来，这一帧什么都不做
                         return
                     }
+                    dragBaseTime = model.currentTime
+                    scrubValue = model.currentTime
+                    dragBaseVolume = SystemVolume.current()
+                    dragBaseBrightness = SystemBrightness.current
                 }
 
                 // 方向一旦定下来就是真在划了，长按 2 倍速立刻退出
@@ -628,6 +663,11 @@ struct PlayerScreen: View {
                     SystemVolume.set(v)
                     lastVolumeTouch = Date()
                     showHint("音量 \(Int(v * 100))%")
+                } else if dragMode == 3 {
+                    let delta = CGFloat(-value.translation.height / height) * 1.2
+                    let v = min(1, max(0, dragBaseBrightness + delta))
+                    SystemBrightness.set(v)
+                    showHint("亮度 \(Int(v * 100))%")
                 }
             }
             .onEnded { _ in
@@ -995,7 +1035,7 @@ struct PlayerScreen: View {
                 Spacer(minLength: 0)
 
                 Button {
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    Haptics.light()
                     showMore = true
                     showControls = true
                 } label: {
@@ -1012,11 +1052,14 @@ struct PlayerScreen: View {
                         Button("下一个") { step(by: 1) }.disabled(index >= request.items.count - 1)
                     }
                     Button("重新加载") { loadCurrent() }
-                    Button("画面调节") { showAdjust = true }
+                    Button("画面调节") { sheet = .adjust }
+                    Button("音画同步") { sheet = .audioSync }
+                    Button("二维码分享") { sheet = .qr }
+                    Button("存为 Live Photo") { saveLivePhoto() }
                     Button("复制链接") { copyCurrentLink() }
-                    Button("投屏到电视") { showDLNA = true }
+                    Button("投屏到电视") { sheet = .dlna }
                     Button("用 Safari 打开") { openInSafari() }
-                    Button("技术信息") { showMediaInfo = true }
+                    Button("技术信息") { sheet = .mediaInfo }
                     Button("取消", role: .cancel) {}
                 }
             }
@@ -1025,7 +1068,7 @@ struct PlayerScreen: View {
     }
 
     private var rateLabel: String {
-        rateText(boostActive ? 2.0 : model.rate)
+        rateText(boostActive ? longPressRate : model.rate)
     }
 
     /// 当前实际在用的播放内核，技术信息面板里要标明
@@ -1134,7 +1177,9 @@ struct PlayerScreen: View {
         }
 
         model.rate = currentRate
-        model.load(url, startAt: startAt, credential: currentItem?.credential)
+        model.load(url, startAt: startAt,
+                   credential: currentItem?.credential,
+                   forceVLC: AudioSyncStore.offset() != 0)
         lastWatchTime = startAt ?? 0
 
         // 本地视频旁边有同名 srt/vtt 就自动挂上
@@ -1145,6 +1190,28 @@ struct PlayerScreen: View {
             hideHintSoon()
         }
 
+    }
+
+    /// 换过音画偏移后重新加载：非零偏移只有 VLC 的 audio-desync 支持
+    private func applyAudioSync() {
+        guard let url = currentURL else { return }
+        let position = model.currentTime
+        model.load(url, startAt: position,
+                   credential: currentItem?.credential,
+                   forceVLC: AudioSyncStore.offset() != 0)
+    }
+
+    /// 把当前画面附近 3 秒存成 Live Photo；只支持本机文件
+    private func saveLivePhoto() {
+        guard let url = currentURL else { return }
+        guard url.isFileURL else {
+            toast("在线视频先下载到本机，再存 Live Photo")
+            return
+        }
+        toast("正在生成 Live Photo…")
+        LivePhotoMaker.save(from: url, at: model.currentTime) { message in
+            toast(message)
+        }
     }
 
     private func saveProgress() {
@@ -1192,8 +1259,17 @@ struct PlayerScreen: View {
         let target = max(0, min(model.duration > 0 ? model.duration : .greatestFiniteMagnitude,
                                 model.currentTime + delta))
         model.seek(to: target)
-        showHint(delta > 0 ? "快进 10 秒" : "后退 10 秒")
+        showHint(delta > 0 ? "快进 \(Int(abs(delta))) 秒" : "后退 \(Int(abs(delta))) 秒")
         hideHintSoon()
+    }
+
+    /// 手势方向映射成动作：1 进度、2 音量、3 亮度
+    private func gestureAction(_ raw: String) -> Int {
+        switch raw {
+        case "volume": return 2
+        case "brightness": return 3
+        default: return 1
+        }
     }
 
     /// 当前生效的倍速：本次会话改过就用会话值，否则用设置里的默认值
@@ -1621,7 +1697,7 @@ final class PlayerModel: ObservableObject {
         }
     }
 
-    func load(_ url: URL, startAt: Double? = nil, credential: String? = nil) {
+    func load(_ url: URL, startAt: Double? = nil, credential: String? = nil, forceVLC: Bool = false) {
         configureAudioSession()
 
         teardownVLC()
@@ -1642,9 +1718,10 @@ final class PlayerModel: ObservableObject {
         pendingSeek = startAt
         didReachEnd = false
 
-        // mkv / flv / avi 这些系统播放器基本没戏，直接交给 VLC，省一次失败等待
+        // mkv / flv / avi 这些系统播放器基本没戏，直接交给 VLC，省一次失败等待；
+        // 设了音画偏移也一样：系统播放器没有延迟接口，只能走 VLC
         if VLCPlayback.isAvailable,
-           Self.vlcOnlyExtensions.contains(url.pathExtension.lowercased()) {
+           (forceVLC || Self.vlcOnlyExtensions.contains(url.pathExtension.lowercased())) {
             startVLC(url: url, startAt: startAt, credential: credential)
             return
         }

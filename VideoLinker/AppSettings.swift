@@ -127,6 +127,18 @@ enum SettingsKey {
     static let downloadConcurrency = "settings.downloadConcurrency"
     static let subtitleSize = "settings.subtitleSize"
 
+    // 手势与手感
+    static let gestureHorizontal = "gesture.horizontal"
+    static let gestureVertical = "gesture.vertical"
+    static let gestureDoubleTap = "gesture.doubletap"
+    static let gestureDoubleTapSeconds = "gesture.doubletap.seconds"
+    static let gestureLongPressRate = "gesture.longpress.rate"
+    static let haptics = "feel.haptics"
+    static let motion = "feel.motion"
+
+    // 列表
+    static let gridView = "list.grid"
+
     // 浏览器
     static let uaMode = "browser.uaMode"
     static let customUA = "browser.customUA"

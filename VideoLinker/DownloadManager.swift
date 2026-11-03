@@ -40,6 +40,10 @@ final class DownloadItem: ObservableObject, Identifiable {
     @Published var expected: Int64 = 0
     /// 实时速度（字节/秒），下载页直接显示
     @Published var speed: Double = 0
+    /// 置顶：排队时优先放出去，不受新任务插队影响
+    @Published var isPinned = false
+    /// 手动拖动排序后的序号，只在未完成的任务之间用
+    var queueOrder = 0
     /// 总大小是按平均值估出来的（HLS 场景），显示时加「≈」
     var estimatedTotal = false
 
@@ -323,7 +327,9 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
         var running = items.filter { $0.state == .running }.count
 
         if running < limit {
-            for item in items where item.state == .queued {
+            let queued = items.filter { $0.state == .queued }
+            let ordered = queued.filter { $0.isPinned } + queued.filter { !$0.isPinned }
+            for item in ordered {
                 guard running < limit else { break }
                 if item.isHLS {
                     beginHLS(item)
@@ -1205,6 +1211,49 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
     }
 
     /// 直链和 m3u8 都从这里进：m3u8 走分片下载，其余当普通文件下
+    // MARK: 队列顺序
+
+    /// 拖动排序：只影响未完成任务的出场顺序，已完成的不动
+    func moveQueued(from source: IndexSet, to destination: Int) {
+        // 这里不 import SwiftUI，自己算移动后的位置：
+        // 先取出被拖的几条，再插到目标位置（目标下标要扣掉前面移走的数量）
+        let moving = source.sorted().map { items[$0] }
+        var remaining = items
+        for index in source.sorted(by: >) {
+            remaining.remove(at: index)
+        }
+        let insertAt = destination - source.filter { $0 < destination }.count
+        remaining.insert(contentsOf: moving, at: min(max(0, insertAt), remaining.count))
+
+        items = remaining
+        reindexQueue()
+        save()
+        pump()
+    }
+
+    /// 置顶 / 取消置顶：置顶的任务排到所有普通任务前面
+    func togglePin(_ item: DownloadItem) {
+        item.isPinned.toggle()
+
+        if item.isPinned {
+            items.removeAll { $0.id == item.id }
+            let firstUnpinned = items.firstIndex { $0.state.isUnfinished && !$0.isPinned } ?? 0
+            items.insert(item, at: firstUnpinned)
+        }
+
+        reindexQueue()
+        save()
+        pump()
+    }
+
+    private func reindexQueue() {
+        var index = 0
+        for item in items where item.state.isUnfinished {
+            item.queueOrder = index
+            index += 1
+        }
+    }
+
     func start(from urlString: String, title: String? = nil) -> Outcome {
         let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let url = URL(string: trimmed) else { return .failed("链接格式不对") }
@@ -1336,6 +1385,9 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
         let isHLS: Bool
         let resumeData: String?
         let destPath: String?
+        /// 老数据没有这两个字段，解码时给默认值
+        let order: Int?
+        let pinned: Bool?
     }
 
     private func save() {
@@ -1376,7 +1428,9 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
                 createdAt: item.createdAt,
                 isHLS: item.isHLS,
                 resumeData: item.resumeData?.base64EncodedString(),
-                destPath: item.destURL?.path
+                destPath: item.destURL?.path,
+                order: item.queueOrder,
+                pinned: item.isPinned
             )
         }
         if let data = try? JSONEncoder().encode(queue) {
@@ -1430,7 +1484,16 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
         // 上次没下完的排回队列：暂停的仍暂停，其余自动接着下
         if let data = UserDefaults.standard.data(forKey: Self.queueKey),
            let queue = try? JSONDecoder().decode([QueueRecord].self, from: data) {
-            for record in queue {
+            let sorted = queue.enumerated()
+                .sorted { left, right in
+                    let l = left.element.order ?? left.offset
+                    let r = right.element.order ?? right.offset
+                    return l < r
+                }
+                .map { $0.element }
+
+            var pending: [DownloadItem] = []
+            for record in sorted {
                 guard let state = DownloadState(rawValue: record.state), state.isUnfinished else { continue }
                 let item = DownloadItem(fileName: record.fileName, source: record.source)
                 item.isHLS = record.isHLS
@@ -1439,8 +1502,12 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
                 item.destURL = record.destPath.map { URL(fileURLWithPath: $0) }
                 item.resumeData = record.resumeData.flatMap { Data(base64Encoded: $0) }
                 item.state = state == .paused ? .paused : .queued
-                restored.insert(item, at: 0)
+                item.isPinned = record.pinned ?? false
+                item.queueOrder = pending.count
+                pending.append(item)
             }
+            // 未完成的排在前面，保持上次的队列顺序
+            restored = pending + restored
         }
 
         items = Array(restored.prefix(80))

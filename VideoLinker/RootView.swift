@@ -46,6 +46,7 @@ struct RootView: View {
     @AppStorage(SettingsKey.theme) private var themeRaw = AppTheme.system.rawValue
     /// 上次处理过的剪贴板版本号，避免同一条链接反复弹提示
     @AppStorage("share.clipboardChangeCount") private var handledClipboardCount = -1
+    @AppStorage(SettingsKey.motion) private var motion = true
 
     @State private var tab: Tab = .play
     /// 剪贴板里有链接，顶部提示条是否显示
@@ -97,6 +98,12 @@ struct RootView: View {
         }
         .tint(theme.accent)
         .environment(\.theme, theme)
+        // 设置里关掉「界面动效」后，整个 App 的隐式动画直接不跑
+        .transaction { transaction in
+            if !motion {
+                transaction.disablesAnimations = true
+            }
+        }
         .preferredColorScheme(appTheme.colorScheme)
         .onAppear { Self.configureTabBar(theme: theme) }
         .onChange(of: themeRaw) { _ in

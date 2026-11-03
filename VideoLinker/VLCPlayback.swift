@@ -37,6 +37,12 @@ final class VLCPlayback: NSObject, VLCMediaPlayerDelegate {
         media.addOption("--no-drop-late-frames")
         media.addOption("--no-skip-frames")
 
+        // 蓝牙耳机音画不同步的补偿：正值让声音再晚一点，负值提前
+        let syncOffset = AudioSyncStore.offset()
+        if syncOffset != 0 {
+            media.addOption(":audio-desync=\(syncOffset)")
+        }
+
         // 防盗链：AVPlayer 那条路靠 AVURLAsset 的私有头字段，
         // VLC 走自己的 HTTP 模块，得逐项转成它的 option
         let headers = HTTPHeaderStore.headers(for: url)

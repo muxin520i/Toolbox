@@ -570,7 +570,7 @@ struct LANInboxView: View {
 
                     Button {
                         UIPasteboard.general.string = inbox.address
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        Haptics.light()
                         copied = true
                         DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { copied = false }
                     } label: {

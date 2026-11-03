@@ -277,6 +277,7 @@ struct DownloadsView: View {
     @State private var converting = false
     @State private var showInbox = false
     @State private var toast: String?
+    @State private var editMode: EditMode = .inactive
 
     var body: some View {
         NavigationStack {
@@ -332,8 +333,12 @@ struct DownloadsView: View {
                                 }
                             }
                         }
+                        .onMove { source, destination in
+                            manager.moveQueued(from: source, to: destination)
+                        }
                     }
                     .listStyle(.plain)
+                    .environment(\.editMode, $editMode)
                 }
             }
             .navigationTitle("下载")
@@ -349,6 +354,15 @@ struct DownloadsView: View {
                         } label: {
                             Label("从电脑传文件", systemImage: "antenna.radiowaves.left.and.right")
                         }
+
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                editMode = editMode == .active ? .inactive : .active
+                            }
+                        } label: {
+                            Label(editMode == .active ? "完成排序" : "调整顺序", systemImage: "arrow.up.arrow.down")
+                        }
+                        .disabled(manager.items.isEmpty)
 
                         Divider()
 
@@ -417,6 +431,15 @@ struct DownloadsView: View {
 
     @ViewBuilder
     private func menu(for item: DownloadItem) -> some View {
+        if item.state.isUnfinished {
+            Button {
+                manager.togglePin(item)
+            } label: {
+                Label(item.isPinned ? "取消置顶" : "置顶优先下载",
+                      systemImage: item.isPinned ? "pin.slash" : "pin")
+            }
+        }
+
         if let url = item.fileURL {
             Button {
                 MediaExporter.exportToFiles([url])
@@ -553,10 +576,17 @@ struct DownloadRow: View {
                     leading
 
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(item.fileName)
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(.primary)
-                            .lineLimit(1)
+                        HStack(spacing: 4) {
+                            if item.isPinned {
+                                Image(systemName: "pin.fill")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundStyle(.orange)
+                            }
+                            Text(item.fileName)
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+                        }
 
                         statusLine
                     }

@@ -335,7 +335,7 @@ struct FloatingSniffButton: View {
                             if !dragging {
                                 dragging = true
                                 suppressTap = true
-                                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                Haptics.light()
                             }
                             dragOffset = value.translation
                         }
@@ -350,7 +350,7 @@ struct FloatingSniffButton: View {
                                 dragOffset = .zero
                             }
                             dragging = false
-                            UIImpactFeedbackGenerator(style: .soft).impactOccurred()
+                            Haptics.soft()
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
                                 suppressTap = false
                             }

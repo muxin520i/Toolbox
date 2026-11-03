@@ -640,6 +640,10 @@ struct PlaylistDetailView: View {
     @State private var showMoveSheet = false
     @State private var pendingMoveIDs = Set<UUID>()
     @State private var renameRequest: NameRequest?
+    @State private var qrText = ""
+    @State private var qrTitle = ""
+    @State private var showQR = false
+    @AppStorage(SettingsKey.gridView) private var gridView = false
 
     var body: some View {
         ZStack {
@@ -702,6 +706,13 @@ struct PlaylistDetailView: View {
                         }
                         .disabled(selection.isEmpty)
                     } else {
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.2)) { gridView.toggle() }
+                        } label: {
+                            Image(systemName: gridView ? "list.bullet" : "square.grid.2x2")
+                                .font(.system(size: 15, weight: .semibold))
+                        }
+
                         Menu {
                             Button {
                                 addURL = ""
@@ -740,6 +751,10 @@ struct PlaylistDetailView: View {
             bulkSheet
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showQR) {
+            QRShareSheet(title: qrTitle, text: qrText)
+                .presentationDetents([.large])
         }
         .sheet(isPresented: $showMoveSheet) {
             PlaylistMoveSheet(
@@ -795,7 +810,16 @@ struct PlaylistDetailView: View {
         .padding(.top, 90)
     }
 
+    @ViewBuilder
     private func itemList(_ playlist: Playlist) -> some View {
+        if gridView {
+            gridList(playlist)
+        } else {
+            flatList(playlist)
+        }
+    }
+
+    private func flatList(_ playlist: Playlist) -> some View {
         List {
             ForEach(Array(playlist.items.enumerated()), id: \.element.id) { index, item in
                 row(item, index: index)
@@ -827,22 +851,7 @@ struct PlaylistDetailView: View {
                 toggleSelection(item.id)
                 return
             }
-            guard let playlist = playlist else { return }
-
-            if item.isLocal && !item.localFileExists {
-                toast = "文件已被删除，可以重新下载一次"
-                hideToastSoon()
-                return
-            }
-
-            // 本地文件可能被清理掉了，队列里先剔掉，避免连播时卡在坏条目上
-            let playable = playlist.items.filter { !$0.isLocal || $0.localFileExists }
-            let playbackItems = playable.map {
-                PlaybackItem(url: $0.url, title: $0.displayTitle)
-            }
-            guard !playbackItems.isEmpty else { return }
-            let start = playable.firstIndex(where: { $0.id == item.id }) ?? 0
-            request = PlayRequest(items: playbackItems, startIndex: start)
+            play(item, in: playlist)
         } label: {
             HStack(spacing: 13) {
                 if editMode == .active {
@@ -922,69 +931,222 @@ struct PlaylistDetailView: View {
             }
         }
         .buttonStyle(.plain)
-        .contextMenu {
-            Button {
-                renameRequest = NameRequest(
-                    mode: .rename,
-                    itemID: item.id,
-                    initialName: item.title.isEmpty ? item.displayTitle : item.title
-                )
-            } label: {
-                Label("重命名", systemImage: "pencil")
-            }
+        .contextMenu { itemMenu(item) }
+    }
 
-            if item.isLocal {
-                Button {
-                    UIPasteboard.general.string = item.localPath ?? item.url
-                } label: {
-                    Label("复制文件路径", systemImage: "doc.on.doc")
-                }
-            } else {
-                Button {
-                    UIPasteboard.general.string = item.url
-                } label: {
-                    Label("复制链接", systemImage: "doc.on.doc")
+    // MARK: 网格
+
+    private func gridList(_ playlist: Playlist) -> some View {
+        ScrollView {
+            LazyVGrid(
+                columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)],
+                spacing: 14
+            ) {
+                ForEach(Array(playlist.items.enumerated()), id: \.element.id) { index, item in
+                    gridCard(item, index: index, playlist: playlist)
                 }
             }
-            Button {
-                pendingMoveIDs = [item.id]
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                    showMoveSheet = true
-                }
-            } label: {
-                Label("移动到其他列表", systemImage: "folder")
+            .padding(.horizontal, 20)
+            .padding(.top, 10)
+            .padding(.bottom, 30)
+        }
+    }
+
+    private func gridCard(_ item: PlaylistItem, index: Int, playlist: Playlist) -> some View {
+        let width = max(120, (UIScreen.main.bounds.width - 52) / 2)
+        let height = width * 9 / 16
+        let watched = ResumeStore.progress(for: item.url)
+
+        return Button {
+            if editMode == .active {
+                toggleSelection(item.id)
+                return
             }
-
-            if item.isLocal, item.localFileExists {
-                Button {
-                    MediaExporter.exportToFiles([URL(fileURLWithPath: localFilePath(item))])
-                } label: {
-                    Label("导出到「文件」", systemImage: "folder.badge.plus")
-                }
-
-                Button {
-                    MediaExporter.saveToPhotos(URL(fileURLWithPath: localFilePath(item))) { message in
-                        toast = message
-                        hideToastSoon()
+            play(item, in: playlist)
+        } label: {
+            VStack(alignment: .leading, spacing: 6) {
+                ZStack(alignment: .topTrailing) {
+                    if item.isLocal, item.localFileExists {
+                        VideoThumbnail(path: item.localPath ?? (URL(string: item.url)?.path ?? ""),
+                                       width: width,
+                                       height: height,
+                                       corner: 12)
+                    } else {
+                        OnlineCover(url: item.url,
+                                    placeholder: String(format: "%02d", index + 1),
+                                    width: width,
+                                    height: height,
+                                    corner: 12)
                     }
-                } label: {
-                    Label("存到相册", systemImage: "photo")
+
+                    if editMode == .active {
+                        Image(systemName: selection.contains(item.id) ? "checkmark.circle.fill" : "circle")
+                            .font(.system(size: 20))
+                            .foregroundStyle(selection.contains(item.id) ? theme.accent : .white)
+                            .padding(7)
+                            .background(.black.opacity(0.35), in: Circle())
+                            .padding(7)
+                    } else if item.isLocal {
+                        Image(systemName: item.localFileExists ? "arrow.down.circle.fill" : "exclamationmark.triangle.fill")
+                            .font(.system(size: 11))
+                            .foregroundStyle(item.localFileExists ? theme.accent : Color.orange)
+                            .padding(7)
+                            .background(.black.opacity(0.35), in: Circle())
+                            .padding(7)
+                    }
                 }
+                .overlay(alignment: .bottom) {
+                    if let watched, watched > 0.02 {
+                        GeometryReader { geo in
+                            ZStack(alignment: .leading) {
+                                Capsule().fill(Color.white.opacity(0.25))
+                                Capsule()
+                                    .fill(watched >= 0.95 ? Color.white.opacity(0.5) : theme.accent)
+                                    .frame(width: max(2, geo.size.width * min(1, watched)))
+                            }
+                        }
+                        .frame(height: 3)
+                        .padding(.horizontal, 6)
+                        .padding(.bottom, 6)
+                    }
+                }
+
+                Text(item.displayTitle)
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .foregroundStyle(theme.text)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(height: 34, alignment: .top)
+
+                HStack(spacing: 5) {
+                    Text(item.subtitle)
+                        .font(.system(size: 10))
+                        .foregroundStyle(theme.textTertiary)
+                        .lineLimit(1)
+
+                    Spacer(minLength: 0)
+
+                    if let watched, watched > 0.02 {
+                        Text("\(Int((watched * 100).rounded()))%")
+                            .font(.system(size: 9, weight: .semibold, design: .rounded))
+                            .foregroundStyle(watched >= 0.95 ? theme.textTertiary : theme.accent)
+                    }
+                }
+            }
+            .padding(8)
+            .background(theme.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(theme.cardStroke, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .contextMenu { itemMenu(item) }
+    }
+
+    /// 列表和网格共用的播放入口
+    private func play(_ item: PlaylistItem, in playlist: Playlist?) {
+        guard let playlist else { return }
+
+        if item.isLocal && !item.localFileExists {
+            toast = "文件已被删除，可以重新下载一次"
+            hideToastSoon()
+            return
+        }
+
+        // 本地文件可能被清理掉了，队列里先剔掉，避免连播时卡在坏条目上
+        let playable = playlist.items.filter { !$0.isLocal || $0.localFileExists }
+        let playbackItems = playable.map {
+            PlaybackItem(url: $0.url, title: $0.displayTitle)
+        }
+        guard !playbackItems.isEmpty else { return }
+        let start = playable.firstIndex(where: { $0.id == item.id }) ?? 0
+        request = PlayRequest(items: playbackItems, startIndex: start)
+    }
+
+    @ViewBuilder
+    private func itemMenu(_ item: PlaylistItem) -> some View {
+        Button {
+            renameRequest = NameRequest(
+                mode: .rename,
+                itemID: item.id,
+                initialName: item.title.isEmpty ? item.displayTitle : item.title
+            )
+        } label: {
+            Label("重命名", systemImage: "pencil")
+        }
+
+        if item.isLocal {
+            Button {
+                UIPasteboard.general.string = item.localPath ?? item.url
+            } label: {
+                Label("复制文件路径", systemImage: "doc.on.doc")
+            }
+        } else {
+            Button {
+                UIPasteboard.general.string = item.url
+            } label: {
+                Label("复制链接", systemImage: "doc.on.doc")
             }
 
             Button {
-                ResumeStore.remove(url: item.url)
-                toast = "已清除这条的观看进度"
-                hideToastSoon()
+                qrText = item.url
+                qrTitle = item.displayTitle
+                showQR = true
             } label: {
-                Label("清除观看进度", systemImage: "arrow.counterclockwise")
+                Label("二维码分享", systemImage: "qrcode")
             }
-            Button(role: .destructive) {
-                PlaylistStore.removeItem(item.id, from: playlistID)
-                reload()
+        }
+
+        Button {
+            pendingMoveIDs = [item.id]
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                showMoveSheet = true
+            }
+        } label: {
+            Label("移动到其他列表", systemImage: "folder")
+        }
+
+        if item.isLocal, item.localFileExists {
+            Button {
+                MediaExporter.exportToFiles([URL(fileURLWithPath: localFilePath(item))])
             } label: {
-                Label("从列表移除", systemImage: "minus.circle")
+                Label("导出到「文件」", systemImage: "folder.badge.plus")
             }
+
+            Button {
+                MediaExporter.saveToPhotos(URL(fileURLWithPath: localFilePath(item))) { message in
+                    toast = message
+                    hideToastSoon()
+                }
+            } label: {
+                Label("存到相册", systemImage: "photo")
+            }
+
+            Button {
+                LivePhotoMaker.save(from: URL(fileURLWithPath: localFilePath(item)),
+                                    at: ResumeStore.position(for: item.url) ?? 0) { message in
+                    toast = message
+                    hideToastSoon()
+                }
+            } label: {
+                Label("存为 Live Photo", systemImage: "livephoto")
+            }
+        }
+
+        Button {
+            ResumeStore.remove(url: item.url)
+            toast = "已清除这条的观看进度"
+            hideToastSoon()
+        } label: {
+            Label("清除观看进度", systemImage: "arrow.counterclockwise")
+        }
+        Button(role: .destructive) {
+            PlaylistStore.removeItem(item.id, from: playlistID)
+            reload()
+        } label: {
+            Label("从列表移除", systemImage: "minus.circle")
         }
     }
 

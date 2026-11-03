@@ -31,6 +31,9 @@ struct SettingsView: View {
     @State private var showEndpoint = false
     @State private var showHeaders = false
     @State private var showReceiver = false
+    @State private var showGestures = false
+    @State private var showAudioSync = false
+    @State private var showDiagnostics = false
     @State private var showPrivateHelp = false
     @State private var toast: String?
 
@@ -243,6 +246,30 @@ struct SettingsView: View {
                 Divider().overlay(theme.cardStroke)
 
                 toggleRow("全屏手势", subtitle: "双击快进快退、上下滑调音量、按住画面 0.5 秒 2 倍速", isOn: $gestures)
+
+                Divider().overlay(theme.cardStroke)
+
+                Button {
+                    showGestures = true
+                } label: {
+                    actionRow("手势与手感", symbol: "hand.tap")
+                }
+                .buttonStyle(.plain)
+                .sheet(isPresented: $showGestures) {
+                    GestureSettingsView()
+                }
+
+                Divider().overlay(theme.cardStroke)
+
+                Button {
+                    showAudioSync = true
+                } label: {
+                    actionRow("音画同步（蓝牙耳机）", symbol: "headphones")
+                }
+                .buttonStyle(.plain)
+                .sheet(isPresented: $showAudioSync) {
+                    AudioSyncSheet { _ in }
+                }
             }
         }
     }
@@ -365,6 +392,18 @@ struct SettingsView: View {
                     actionRow("接收投屏（手机当电视）", symbol: "tv.badge.wifi")
                 }
                 .buttonStyle(.plain)
+
+                Divider().overlay(theme.cardStroke)
+
+                Button {
+                    showDiagnostics = true
+                } label: {
+                    actionRow("网络诊断（IP / 延迟 / 测速）", symbol: "waveform.path.ecg")
+                }
+                .buttonStyle(.plain)
+                .sheet(isPresented: $showDiagnostics) {
+                    NetworkDiagnosticsView()
+                }
             }
         }
     }
