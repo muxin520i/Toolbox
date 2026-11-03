@@ -39,34 +39,34 @@ enum LivePhotoMaker {
 
         let videoURL = folder.appendingPathComponent("clip.mov")
 
-        export(asset: asset, start: start, length: clipLength, to: videoURL) { result in
-            switch result {
-            case .failure(let message):
+        export(asset: asset, start: start, length: clipLength, to: videoURL) { failure in
+            if let failure {
                 try? FileManager.default.removeItem(at: folder)
-                DispatchQueue.main.async { completion(message) }
-
-            case .success:
-                guard let jpeg = keyFrame(of: asset, at: keyTime) else {
-                    try? FileManager.default.removeItem(at: folder)
-                    DispatchQueue.main.async { completion("取关键帧失败，这个视频可能不支持导出画面") }
-                    return
-                }
-                writeToLibrary(jpeg: jpeg, video: videoURL, folder: folder, completion: completion)
+                DispatchQueue.main.async { completion(failure) }
+                return
             }
+
+            guard let jpeg = keyFrame(of: asset, at: keyTime) else {
+                try? FileManager.default.removeItem(at: folder)
+                DispatchQueue.main.async { completion("取关键帧失败，这个视频可能不支持导出画面") }
+                return
+            }
+            writeToLibrary(jpeg: jpeg, video: videoURL, folder: folder, completion: completion)
         }
     }
 
     // MARK: 导出片段
 
+    /// completion 传 nil 表示成功，否则是给用户看的失败原因
     private static func export(asset: AVAsset,
                                start: Double,
                                length: Double,
                                to url: URL,
-                               completion: @escaping (Result<Void, String>) -> Void) {
+                               completion: @escaping (String?) -> Void) {
         try? FileManager.default.removeItem(at: url)
 
         guard let session = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetPassthrough) else {
-            completion(.failure("这个视频不支持导出"))
+            completion("这个视频不支持导出")
             return
         }
 
@@ -80,13 +80,13 @@ enum LivePhotoMaker {
 
         session.exportAsynchronously {
             if session.status == .completed, FileManager.default.fileExists(atPath: url.path) {
-                completion(.success(()))
+                completion(nil)
                 return
             }
 
             // 不支持直通（比如奇怪的编码）时，退回重编码再试一次
             guard let fallback = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetHighestQuality) else {
-                completion(.failure("导出失败：\(session.error?.localizedDescription ?? "未知原因")"))
+                completion("导出失败：\(session.error?.localizedDescription ?? "未知原因")")
                 return
             }
             try? FileManager.default.removeItem(at: url)
@@ -95,9 +95,9 @@ enum LivePhotoMaker {
             fallback.timeRange = session.timeRange
             fallback.exportAsynchronously {
                 if fallback.status == .completed, FileManager.default.fileExists(atPath: url.path) {
-                    completion(.success(()))
+                    completion(nil)
                 } else {
-                    completion(.failure("导出失败：\(fallback.error?.localizedDescription ?? "这个视频可能受保护")"))
+                    completion("导出失败：\(fallback.error?.localizedDescription ?? "这个视频可能受保护")")
                 }
             }
         }
