@@ -271,19 +271,6 @@ struct PlayerScreen: View {
                 leaveTheater()
             }
         }
-        .confirmationDialog("更多操作", isPresented: $showMore, titleVisibility: .visible) {
-            if request.items.count > 1 {
-                Button("上一个") { step(by: -1) }.disabled(index == 0)
-                Button("下一个") { step(by: 1) }.disabled(index >= request.items.count - 1)
-            }
-            Button("重新加载") { loadCurrent() }
-            Button("画面调节") { showAdjust = true }
-            Button("复制链接") { copyCurrentLink() }
-            Button("投屏到电视") { showDLNA = true }
-            Button("用 Safari 打开") { openInSafari() }
-            Button("技术信息") { showMediaInfo = true }
-            Button("取消", role: .cancel) {}
-        }
         .sheet(isPresented: $showMediaInfo) {
             if let url = currentURL {
                 MediaInfoSheet(url: url, engine: engineName, durationHint: model.duration)
@@ -324,15 +311,6 @@ struct PlayerScreen: View {
             case .failure(let error):
                 toast(error.localizedDescription)
             }
-        }
-        .confirmationDialog("睡眠定时", isPresented: $showSleep, titleVisibility: .visible) {
-            ForEach([15, 30, 45, 60, 90], id: \.self) { minutes in
-                Button("\(minutes) 分钟") { startSleep(minutes) }
-            }
-            if sleepDeadline != nil {
-                Button("关闭定时", role: .destructive) { cancelSleep() }
-            }
-            Button("取消", role: .cancel) {}
         }
     }
 
@@ -897,7 +875,7 @@ struct PlayerScreen: View {
                     .frame(width: 52, alignment: .trailing)
             }
 
-            HStack(spacing: 22) {
+            HStack(spacing: 10) {
                 Menu {
                     Button {
                         showSubtitlePicker = true
@@ -939,7 +917,8 @@ struct PlayerScreen: View {
                     Image(systemName: subtitleCues.isEmpty ? "captions.bubble" : "captions.bubble.fill")
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(.white)
-                        .frame(width: 34, height: 30)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
                 .menuStyle(.button)
                 .tint(.white)
@@ -970,6 +949,8 @@ struct PlayerScreen: View {
                     .padding(.horizontal, 12)
                     .frame(height: 30)
                     .background(.ultraThinMaterial, in: Capsule())
+                    .padding(.vertical, 7)
+                    .contentShape(Rectangle())
                 }
                 .menuStyle(.button)
                 .tint(.white)
@@ -983,9 +964,19 @@ struct PlayerScreen: View {
                     Image(systemName: sleepDeadline == nil ? "moon.zzz" : "moon.zzz.fill")
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(.white)
-                        .frame(width: 34, height: 30)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(ControlPressStyle())
+                .confirmationDialog("睡眠定时", isPresented: $showSleep, titleVisibility: .visible) {
+                    ForEach([15, 30, 45, 60, 90], id: \.self) { minutes in
+                        Button("\(minutes) 分钟") { startSleep(minutes) }
+                    }
+                    if sleepDeadline != nil {
+                        Button("关闭定时", role: .destructive) { cancelSleep() }
+                    }
+                    Button("取消", role: .cancel) {}
+                }
 
                 Button {
                     togglePictureInPicture()
@@ -993,9 +984,10 @@ struct PlayerScreen: View {
                     Image(systemName: "pip.enter")
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(.white)
-                        .frame(width: 34, height: 30)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(ControlPressStyle())
 
                 RoutePickerView()
                     .frame(width: 30, height: 30)
@@ -1003,15 +995,30 @@ struct PlayerScreen: View {
                 Spacer(minLength: 0)
 
                 Button {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     showMore = true
                     showControls = true
                 } label: {
                     Image(systemName: "ellipsis")
-                        .font(.system(size: 15, weight: .bold))
+                        .font(.system(size: 16, weight: .bold))
                         .foregroundStyle(.white)
-                        .frame(width: 34, height: 30)
+                        .frame(width: 54, height: 44)
+                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(ControlPressStyle())
+                .confirmationDialog("更多操作", isPresented: $showMore, titleVisibility: .visible) {
+                    if request.items.count > 1 {
+                        Button("上一个") { step(by: -1) }.disabled(index == 0)
+                        Button("下一个") { step(by: 1) }.disabled(index >= request.items.count - 1)
+                    }
+                    Button("重新加载") { loadCurrent() }
+                    Button("画面调节") { showAdjust = true }
+                    Button("复制链接") { copyCurrentLink() }
+                    Button("投屏到电视") { showDLNA = true }
+                    Button("用 Safari 打开") { openInSafari() }
+                    Button("技术信息") { showMediaInfo = true }
+                    Button("取消", role: .cancel) {}
+                }
             }
         }
         .background(Color.black.opacity(0.001))
@@ -2236,5 +2243,19 @@ struct VideoAdjustSheet: View {
             .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
         .buttonStyle(.plain)
+    }
+}
+
+// MARK: - 控制条按压反馈
+//
+// 原来的 .plain 样式按下没有任何变化，点了要等系统弹层滑上来才有反馈，
+// 手指会以为没点中再按一次。这里补一个很轻的缩放 + 变暗。
+
+private struct ControlPressStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed ? 0.45 : 1)
+            .scaleEffect(configuration.isPressed ? 0.9 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }
