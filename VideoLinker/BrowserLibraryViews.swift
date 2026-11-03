@@ -278,6 +278,7 @@ struct DownloadsView: View {
     @State private var showInbox = false
     @State private var toast: String?
     @State private var editMode: EditMode = .inactive
+    @State private var altItem: DownloadItem?
 
     var body: some View {
         NavigationStack {
@@ -399,6 +400,9 @@ struct DownloadsView: View {
             .sheet(isPresented: $showInbox) {
                 LANInboxView()
             }
+            .sheet(item: $altItem) { item in
+                AltSourceSheet(item: item)
+            }
             .overlay(alignment: .bottom) {
                 if let toast = toast {
                     Text(toast)
@@ -491,7 +495,15 @@ struct DownloadsView: View {
             Button {
                 manager.retry(item)
             } label: {
-                Label("重试", systemImage: "arrow.clockwise")
+                Label(item.hasNextSource ? "换源重试" : "重试", systemImage: "arrow.clockwise")
+            }
+        }
+
+        if item.state != .finished {
+            Button {
+                altItem = item
+            } label: {
+                Label("备用下载地址…", systemImage: "arrow.triangle.branch")
             }
         }
 
@@ -645,7 +657,7 @@ struct DownloadRow: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
         } else if item.state == .failed {
-            Text(item.failReason.isEmpty ? "下载失败" : item.failReason)
+            Text(failureText)
                 .font(.system(size: 10))
                 .foregroundStyle(.red.opacity(0.85))
                 .lineLimit(2)
@@ -673,7 +685,15 @@ struct DownloadRow: View {
             if !item.transferText.isEmpty { parts.append(item.transferText) }
         }
 
+        if !item.sourceCountText.isEmpty { parts.append(item.sourceCountText) }
+
         return parts.joined(separator: " · ")
+    }
+
+    private var failureText: String {
+        let reason = item.failReason.isEmpty ? "下载失败" : item.failReason
+        guard !item.sourceCountText.isEmpty else { return reason }
+        return "\(item.sourceCountText) · \(reason)"
     }
 
     // MARK: 右侧按钮
@@ -1077,6 +1097,77 @@ struct BrowserSettingsView: View {
         withAnimation(.easeOut(duration: 0.15)) { toast = text }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
             withAnimation(.easeIn(duration: 0.2)) { toast = nil }
+        }
+    }
+}
+
+// MARK: - 备用下载地址
+
+struct AltSourceSheet: View {
+    let item: DownloadItem
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var text = ""
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Text(item.fileName)
+                        .font(.system(size: 13, weight: .medium))
+                        .lineLimit(2)
+
+                    Text(item.sources.first ?? item.source)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
+                } header: {
+                    Text("主地址")
+                }
+
+                Section {
+                    TextEditor(text: $text)
+                        .frame(minHeight: 150)
+                        .font(.system(size: 11, design: .monospaced))
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                } header: {
+                    Text("备用地址（一行一个）")
+                } footer: {
+                    Text("主地址失败时会按顺序自动换下一个。也可以点下载列表里的「换源重试」手动换。")
+                }
+
+                Section {
+                    PasteButton(payloadType: String.self) { strings in
+                        guard let value = strings.first, !value.isEmpty else { return }
+                        text = text.isEmpty ? value : text + "\n" + value
+                    }
+                    .labelStyle(.titleAndIcon)
+
+                    if !text.isEmpty {
+                        Button("清空", role: .destructive) { text = "" }
+                    }
+                }
+            }
+            .navigationTitle("备用地址")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("保存") {
+                        DownloadManager.shared.setAlternates(text, for: item)
+                        dismiss()
+                    }
+                    .fontWeight(.semibold)
+                }
+            }
+        }
+        .onAppear {
+            if text.isEmpty {
+                text = item.sources.dropFirst().joined(separator: "\n")
+            }
         }
     }
 }

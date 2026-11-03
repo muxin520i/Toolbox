@@ -27,6 +27,7 @@ struct StorageManagerView: View {
     @State private var toast: String?
     @State private var confirmDuplicates = false
     @State private var confirmWatched = false
+    @State private var showDuplicateFinder = false
 
     private var duplicates: [StorageFile] {
         files.filter { $0.duplicateSize != nil }
@@ -150,6 +151,9 @@ struct StorageManagerView: View {
             } message: {
                 Text("观看进度会一起清掉，删了就找不回来了")
             }
+            .sheet(isPresented: $showDuplicateFinder) {
+                DuplicateFinderView()
+            }
         }
     }
 
@@ -166,12 +170,10 @@ struct StorageManagerView: View {
                 .listRowSeparator(.hidden)
                 .listRowInsets(EdgeInsets(top: 8, leading: 20, bottom: 6, trailing: 20))
 
-            if !duplicates.isEmpty || !watchedFiles.isEmpty {
-                actionsCard
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-                    .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 10, trailing: 20))
-            }
+            actionsCard
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+                .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 10, trailing: 20))
 
             Section {
                 ForEach(files) { file in
@@ -224,6 +226,8 @@ struct StorageManagerView: View {
                 Divider().frame(height: 26).overlay(theme.cardStroke)
                 metric(title: "未进列表", value: "\(orphanFiles.count) 个")
             }
+
+            usageBar
         }
         .padding(16)
         .background(theme.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -231,6 +235,51 @@ struct StorageManagerView: View {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .strokeBorder(theme.cardStroke, lineWidth: 1)
         )
+    }
+
+    /// 占比条：一眼看出空间被「已进列表」还是「散落的文件」吃掉了
+    private var usageBar: some View {
+        let listed = listedSize
+        let orphan = max(0, totalSize - listed)
+        let total = max(totalSize, 1)
+
+        return VStack(alignment: .leading, spacing: 7) {
+            GeometryReader { geo in
+                HStack(spacing: 2) {
+                    if listed > 0 {
+                        RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            .fill(theme.accent)
+                            .frame(width: max(4, geo.size.width * CGFloat(listed) / CGFloat(total)))
+                    }
+                    if orphan > 0 {
+                        RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            .fill(Color.orange.opacity(0.72))
+                    }
+                }
+            }
+            .frame(height: 8)
+
+            HStack(spacing: 14) {
+                legend(color: theme.accent, text: "已在列表 \(Fmt.bytes(listed))")
+                legend(color: .orange.opacity(0.72), text: "未进列表 \(Fmt.bytes(orphan))")
+            }
+        }
+        .padding(.top, 2)
+    }
+
+    private func legend(color: Color, text: String) -> some View {
+        HStack(spacing: 5) {
+            Circle()
+                .fill(color)
+                .frame(width: 6, height: 6)
+            Text(text)
+                .font(.system(size: 10.5))
+                .foregroundStyle(theme.textTertiary)
+        }
+    }
+
+    private var listedSize: Int64 {
+        files.filter { $0.inPlaylist }.reduce(0) { $0 + $1.size }
     }
 
     private func metric(title: String, value: String) -> some View {
@@ -275,6 +324,17 @@ struct StorageManagerView: View {
                 }
                 .buttonStyle(.plain)
             }
+
+            Button {
+                showDuplicateFinder = true
+            } label: {
+                actionRow(
+                    title: "按画面查重",
+                    detail: "抽帧比对指纹，不同清晰度的同一部片也能认出来",
+                    symbol: "square.on.square.dashed"
+                )
+            }
+            .buttonStyle(.plain)
         }
     }
 
@@ -309,43 +369,59 @@ struct StorageManagerView: View {
     }
 
     private func row(_ file: StorageFile) -> some View {
-        HStack(spacing: 12) {
-            VideoThumbnail(path: file.path, width: 58, height: 36, corner: 7)
+        let biggest = max(files.first?.size ?? 1, 1)
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text(file.name)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(theme.text)
-                    .lineLimit(1)
+        return VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 12) {
+                VideoThumbnail(path: file.path, width: 58, height: 36, corner: 7)
 
-                HStack(spacing: 6) {
-                    Text(Fmt.bytes(file.size))
-                        .font(.system(size: 11))
-                        .foregroundStyle(theme.textSecondary)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(file.name)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(theme.text)
+                        .lineLimit(1)
 
-                    if let duration = file.duration, duration > 0 {
-                        Text("·").font(.system(size: 11)).foregroundStyle(theme.textTertiary)
-                        Text(ThumbnailCache.timeText(duration))
+                    HStack(spacing: 6) {
+                        Text(Fmt.bytes(file.size))
                             .font(.system(size: 11))
-                            .foregroundStyle(theme.textTertiary)
-                    }
+                            .foregroundStyle(theme.textSecondary)
 
-                    if let watched = file.watched, watched > 0.02 {
-                        Text("·").font(.system(size: 11)).foregroundStyle(theme.textTertiary)
-                        Text(watched >= 0.95 ? "已看完" : "看到 \(Int((watched * 100).rounded()))%")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(watched >= 0.95 ? theme.textTertiary : theme.accent)
+                        if let duration = file.duration, duration > 0 {
+                            Text("·").font(.system(size: 11)).foregroundStyle(theme.textTertiary)
+                            Text(ThumbnailCache.timeText(duration))
+                                .font(.system(size: 11))
+                                .foregroundStyle(theme.textTertiary)
+                        }
+
+                        if let watched = file.watched, watched > 0.02 {
+                            Text("·").font(.system(size: 11)).foregroundStyle(theme.textTertiary)
+                            Text(watched >= 0.95 ? "已看完" : "看到 \(Int((watched * 100).rounded()))%")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(watched >= 0.95 ? theme.textTertiary : theme.accent)
+                        }
                     }
+                }
+
+                Spacer(minLength: 6)
+
+                if file.duplicateSize != nil {
+                    badge("重复", color: .orange)
+                } else if !file.inPlaylist {
+                    badge("未进列表", color: theme.textTertiary)
                 }
             }
 
-            Spacer(minLength: 6)
-
-            if file.duplicateSize != nil {
-                badge("重复", color: .orange)
-            } else if !file.inPlaylist {
-                badge("未进列表", color: theme.textTertiary)
+            // 相对占比：最大的那条满格，一眼看出谁在吃空间
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(theme.field)
+                    Capsule()
+                        .fill(theme.accent.opacity(0.45))
+                        .frame(width: max(3, geo.size.width * CGFloat(file.size) / CGFloat(biggest)))
+                }
             }
+            .frame(height: 3)
+            .padding(.leading, 70)
         }
         .padding(11)
         .background(theme.card, in: RoundedRectangle(cornerRadius: 15, style: .continuous))

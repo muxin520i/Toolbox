@@ -25,6 +25,7 @@ struct SettingsView: View {
     @State private var confirmClearHistory = false
     @State private var showInbox = false
     @State private var showLANShare = false
+    @State private var showLANTransfer = false
     @State private var showStats = false
     @State private var showStorage = false
     @State private var showWebDAV = false
@@ -84,6 +85,9 @@ struct SettingsView: View {
         }
         .sheet(isPresented: $showLANShare) {
             LANShareView()
+        }
+        .sheet(isPresented: $showLANTransfer) {
+            LANTransferView()
         }
         .sheet(isPresented: $showStats) {
             WatchStatsView()
@@ -345,6 +349,15 @@ struct SettingsView: View {
                     showLANShare = true
                 } label: {
                     actionRow("局域网投屏（电脑浏览器看）", symbol: "airplayvideo")
+                }
+                .buttonStyle(.plain)
+
+                Divider().overlay(theme.cardStroke)
+
+                Button {
+                    showLANTransfer = true
+                } label: {
+                    actionRow("局域网互传（手机对手机）", symbol: "arrow.left.arrow.right")
                 }
                 .buttonStyle(.plain)
 

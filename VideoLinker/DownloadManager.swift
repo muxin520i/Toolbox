@@ -46,6 +46,10 @@ final class DownloadItem: ObservableObject, Identifiable {
     var queueOrder = 0
     /// 总大小是按平均值估出来的（HLS 场景），显示时加「≈」
     var estimatedTotal = false
+    /// 候选源：主源 + 备用源，主源失败自动往后换
+    var sources: [String] = []
+    /// 当前在用第几个源（从 0 开始）
+    @Published var sourceIndex = 0
 
     /// HLS 走自研分片下载，拿不到系统的 resumeData
     var isHLS = false
@@ -72,6 +76,16 @@ final class DownloadItem: ObservableObject, Identifiable {
 
     var fileURL: URL? {
         localPath.isEmpty ? nil : URL(fileURLWithPath: localPath)
+    }
+
+    /// 「源 2/3」：有备用源时才显示
+    var sourceCountText: String {
+        sources.count > 1 ? "源 \(min(sourceIndex + 1, sources.count))/\(sources.count)" : ""
+    }
+
+    /// 还有没有下一个源可以换
+    var hasNextSource: Bool {
+        sources.count > sourceIndex + 1
     }
 
     /// 下载中的「3.2 MB / 18.4 MB」
@@ -765,6 +779,15 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
     }
 
     private func fail(_ item: DownloadItem, _ reason: String) {
+        // 还有备用源就先换一条再试，别把整条任务直接判死
+        if advanceSource(item) {
+            item.failReason = "\(item.sourceCountText) 没成功（\(reason)），已自动换源重试"
+            item.state = .queued
+            save()
+            pump()
+            return
+        }
+
         item.state = .failed
         item.failReason = reason
         item.note = ""
@@ -902,6 +925,15 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
 
     func retry(_ item: DownloadItem) {
         guard item.state == .failed else { return }
+
+        // 手动点重试时，如果还有没用过的备用源，优先换源再试
+        if advanceSource(item) {
+            item.failReason = ""
+            item.state = .queued
+            save()
+            pump()
+            return
+        }
 
         var keepParts = false
         if item.isHLS {
@@ -1254,7 +1286,7 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
         }
     }
 
-    func start(from urlString: String, title: String? = nil) -> Outcome {
+    func start(from urlString: String, title: String? = nil, alternates: [String] = []) -> Outcome {
         let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let url = URL(string: trimmed) else { return .failed("链接格式不对") }
         guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
@@ -1270,6 +1302,7 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
         let baseName = Self.displayName(title: title, url: url)
         let item = DownloadItem(fileName: baseName, source: trimmed)
         item.isHLS = HLSDownloader.looksLikeHLS(trimmed)
+        item.sources = Self.sourceChain(primary: trimmed, alternates: alternates)
 
         items.insert(item, at: 0)
         items = Array(items.prefix(80))
@@ -1281,6 +1314,95 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
     private static func referer(for url: URL) -> String? {
         guard let scheme = url.scheme, let host = url.host else { return nil }
         return "\(scheme)://\(host)/"
+    }
+
+    /// 主源 + 备用源。顺手补一个 http / https 互换的地址，
+    /// 有些站点只在其中一种协议下能通，作为最后一档兜底。
+    private static func sourceChain(primary: String, alternates: [String]) -> [String] {
+        var list = [primary]
+
+        for raw in alternates {
+            let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !value.isEmpty, !list.contains(value) else { continue }
+            guard let url = URL(string: value),
+                  let scheme = url.scheme?.lowercased(),
+                  scheme == "http" || scheme == "https" else { continue }
+            list.append(value)
+        }
+
+        if let first = URL(string: primary),
+           var components = URLComponents(url: first, resolvingAgainstBaseURL: false) {
+            let scheme = (first.scheme ?? "").lowercased()
+            components.scheme = scheme == "https" ? "http" : "https"
+            if let flipped = components.url?.absoluteString, !list.contains(flipped) {
+                list.append(flipped)
+            }
+        }
+
+        return list
+    }
+
+    /// 手动编辑备用源：第一行之后每行一个，主源始终排在最前
+    func setAlternates(_ text: String, for item: DownloadItem) {
+        let primary = item.sources.first ?? item.source
+        var list = [primary]
+
+        for line in text.components(separatedBy: .newlines) {
+            let value = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !value.isEmpty, !list.contains(value) else { continue }
+            guard let url = URL(string: value),
+                  let scheme = url.scheme?.lowercased(),
+                  scheme == "http" || scheme == "https" else { continue }
+            list.append(value)
+        }
+
+        item.sources = list
+        item.sourceIndex = 0
+        item.source = primary
+        save()
+    }
+
+    /// 换到下一个源，并把这一条重置成待下载。没有下一个就返回 false
+    @discardableResult
+    private func advanceSource(_ item: DownloadItem) -> Bool {
+        guard item.hasNextSource else { return false }
+
+        item.sourceIndex += 1
+        item.source = item.sources[item.sourceIndex]
+        let wasHLS = item.isHLS
+        item.isHLS = HLSDownloader.looksLikeHLS(item.source)
+        item.progress = 0
+        item.received = 0
+        item.expected = 0
+        item.baseOffset = 0
+        item.estimatedTotal = false
+        item.resumeData = nil
+        item.note = ""
+        item.speed = 0
+
+        // 旧源的解析任务先停掉，不然它一会儿又回来把新源的状态覆盖掉
+        jobs[item.id]?.cancel()
+        jobs.removeValue(forKey: item.id)
+
+        // 直链的旧后台任务也要取消，否则 beginDirect 会以为还能接着用
+        if !wasHLS, item.taskID != 0 {
+            let oldTaskID = item.taskID
+            session?.getAllTasks { tasks in
+                for task in tasks where task.taskIdentifier == oldTaskID {
+                    task.cancel()
+                }
+            }
+            _ = takeItem(oldTaskID)
+            item.taskID = 0
+        }
+
+        if wasHLS {
+            cancelSegments(of: item.id)
+            clearParts(item.id)
+        }
+        hlsJobs.removeValue(forKey: item.id)
+
+        return true
     }
 
     private static func displayName(title: String?, url: URL) -> String {
@@ -1388,6 +1510,9 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
         /// 老数据没有这两个字段，解码时给默认值
         let order: Int?
         let pinned: Bool?
+        /// 候选源与当前用到的第几个，老数据没有
+        let sources: [String]?
+        let sourceIndex: Int?
     }
 
     private func save() {
@@ -1430,7 +1555,9 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
                 resumeData: item.resumeData?.base64EncodedString(),
                 destPath: item.destURL?.path,
                 order: item.queueOrder,
-                pinned: item.isPinned
+                pinned: item.isPinned,
+                sources: item.sources.count > 1 ? item.sources : nil,
+                sourceIndex: item.sourceIndex
             )
         }
         if let data = try? JSONEncoder().encode(queue) {
@@ -1503,6 +1630,12 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
                 item.resumeData = record.resumeData.flatMap { Data(base64Encoded: $0) }
                 item.state = state == .paused ? .paused : .queued
                 item.isPinned = record.pinned ?? false
+                item.sources = record.sources ?? [record.source]
+                let savedIndex = record.sourceIndex ?? 0
+                item.sourceIndex = min(max(savedIndex, 0), max(0, item.sources.count - 1))
+                if item.sources.indices.contains(item.sourceIndex) {
+                    item.source = item.sources[item.sourceIndex]
+                }
                 item.queueOrder = pending.count
                 pending.append(item)
             }

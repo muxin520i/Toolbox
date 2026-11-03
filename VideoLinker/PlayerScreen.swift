@@ -38,7 +38,7 @@ struct PlayRequest: Identifiable {
 
 /// 播放页的弹层统一成一个出口，避免几个 sheet 抢同一个呈现位置
 private enum PlayerSheet: String, Identifiable {
-    case mediaInfo, dlna, adjust, qr, audioSync
+    case mediaInfo, dlna, adjust, qr, audioSync, speech
 
     var id: String { rawValue }
 }
@@ -312,6 +312,18 @@ struct PlayerScreen: View {
             case .audioSync:
                 AudioSyncSheet { _ in
                     applyAudioSync()
+                }
+            case .speech:
+                if let url = currentURL, url.isFileURL {
+                    SpeechSubtitleSheet(videoURL: url) { srt in
+                        if let cues = try? SubtitleLoader.load(url: srt) {
+                            subtitleCues = cues
+                            subtitleName = srt.lastPathComponent
+                            subtitleText = ""
+                            subtitleOffset = 0
+                            toast("已生成字幕：\(srt.lastPathComponent)")
+                        }
+                    }
                 }
             }
         }
@@ -922,6 +934,17 @@ struct PlayerScreen: View {
                         showControls = true
                     } label: {
                         Label("载入字幕文件…", systemImage: "doc.text")
+                    }
+
+                    Button {
+                        guard let url = currentURL, url.isFileURL else {
+                            toast("先把这个视频下载到本机，才能转字幕")
+                            return
+                        }
+                        showControls = true
+                        sheet = .speech
+                    } label: {
+                        Label("语音生成字幕（本地）…", systemImage: "waveform.badge.mic")
                     }
 
                     if !subtitleCues.isEmpty {

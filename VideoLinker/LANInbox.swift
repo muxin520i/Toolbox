@@ -83,6 +83,8 @@ final class LANInbox: ObservableObject {
 
         do {
             let listener = try NWListener(using: params, on: endpoint)
+            // 顺便用 Bonjour 广播出去，另一台手机打开「局域网互传」就能看到这台
+            listener.service = Self.bonjourService(port: port)
             listener.newConnectionHandler = { [weak self] connection in
                 self?.accept(connection)
             }
@@ -277,6 +279,25 @@ final class LANInbox: ObservableObject {
     }
 
     // MARK: 小工具
+
+    /// Bonjour 广播：TXT 里带上 ip 和 port，接收方不用再解析地址
+    static func bonjourService(port: UInt16) -> NWListener.Service {
+        var txt = NWTXTRecord()
+        _ = txt.setEntry("ip", value: wifiAddress() ?? "")
+        _ = txt.setEntry("port", value: "\(port)")
+        _ = txt.setEntry("kind", value: "inbox")
+
+        var name = UIDevice.current.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if name.isEmpty { name = "工具箱" }
+        if name.utf8.count > 48 { name = String(name.prefix(16)) }
+
+        return NWListener.Service(
+            name: name,
+            type: LocalNetworkPermission.serviceType,
+            domain: nil,
+            txtRecord: txt.data
+        )
+    }
 
     /// 取 Wi-Fi（en0）的 IPv4 地址
     static func wifiAddress() -> String? {

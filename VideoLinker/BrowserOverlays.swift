@@ -849,7 +849,11 @@ struct SniffResultsPanel: View {
 
         var started = 0
         for video in list.prefix(20) {
-            if case .started = DownloadManager.shared.start(from: video.url, title: video.displayName) {
+            if case .started = DownloadManager.shared.start(
+                from: video.url,
+                title: video.displayName,
+                alternates: alternates(for: video)
+            ) {
                 started += 1
             }
         }
@@ -892,12 +896,24 @@ struct SniffResultsPanel: View {
 
     /// 和播放页共用同一个 DownloadManager：进度、记录、完成后自动进「下载」列表都是同一份
     private func download(_ video: SniffedVideo) {
-        switch DownloadManager.shared.start(from: video.url, title: video.displayName) {
+        switch DownloadManager.shared.start(
+            from: video.url,
+            title: video.displayName,
+            alternates: alternates(for: video)
+        ) {
         case .started(let item):
             showHint("已开始下载：\(item.fileName)")
         case .failed(let reason):
             showHint(reason)
         }
+    }
+
+    /// 同一页面里标题相同的候选通常是同一部片的不同清晰度，失败时可以互相顶替
+    private func alternates(for video: SniffedVideo) -> [String] {
+        guard !video.displayName.isEmpty else { return [] }
+        return tab.found
+            .filter { $0.url != video.url && $0.displayName == video.displayName }
+            .map { $0.url }
     }
 
     private func showHint(_ text: String) {
