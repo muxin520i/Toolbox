@@ -10,6 +10,10 @@
 		1A0000000000000000000301 /* VideoLinkerApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000201 /* VideoLinkerApp.swift */; };
 		1A0000000000000000000302 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000202 /* ContentView.swift */; };
 		1A0000000000000000000303 /* PlayerScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000203 /* PlayerScreen.swift */; };
+		1A00000000000000000003C0 /* PlayerOptions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00000000000000000002C0 /* PlayerOptions.swift */; };
+		1A00000000000000000003C1 /* GestureSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00000000000000000002C1 /* GestureSettingsView.swift */; };
+		1A00000000000000000003C2 /* LivePhotoMaker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00000000000000000002C2 /* LivePhotoMaker.swift */; };
+		1A00000000000000000003C3 /* NetworkDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00000000000000000002C3 /* NetworkDiagnostics.swift */; };
 		1A0000000000000000000304 /* HistoryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000204 /* HistoryStore.swift */; };
 		1A0000000000000000000305 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000205 /* Assets.xcassets */; };
 		1A0000000000000000000306 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000207 /* RootView.swift */; };
@@ -106,6 +110,10 @@
 		1A0000000000000000000201 /* VideoLinkerApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoLinkerApp.swift; sourceTree = "<group>"; };
 		1A0000000000000000000202 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		1A0000000000000000000203 /* PlayerScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerScreen.swift; sourceTree = "<group>"; };
+		1A00000000000000000002C0 /* PlayerOptions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerOptions.swift; sourceTree = "<group>"; };
+		1A00000000000000000002C1 /* GestureSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GestureSettingsView.swift; sourceTree = "<group>"; };
+		1A00000000000000000002C2 /* LivePhotoMaker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LivePhotoMaker.swift; sourceTree = "<group>"; };
+		1A00000000000000000002C3 /* NetworkDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkDiagnostics.swift; sourceTree = "<group>"; };
 		1A0000000000000000000204 /* HistoryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryStore.swift; sourceTree = "<group>"; };
 		1A0000000000000000000205 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		1A000000000000000000020B /* OrientationLock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrientationLock.swift; sourceTree = "<group>"; };
@@ -216,6 +224,10 @@
 				1A0000000000000000000201 /* VideoLinkerApp.swift */,
 				1A0000000000000000000202 /* ContentView.swift */,
 				1A0000000000000000000203 /* PlayerScreen.swift */,
+				1A00000000000000000002C0 /* PlayerOptions.swift */,
+				1A00000000000000000002C1 /* GestureSettingsView.swift */,
+				1A00000000000000000002C2 /* LivePhotoMaker.swift */,
+				1A00000000000000000002C3 /* NetworkDiagnostics.swift */,
 				1A0000000000000000000204 /* HistoryStore.swift */,
 				1A0000000000000000000205 /* Assets.xcassets */,
 				1A000000000000000000020B /* OrientationLock.swift */,
@@ -399,6 +411,10 @@
 				1A0000000000000000000302 /* ContentView.swift in Sources */,
 				1A0000000000000000000304 /* HistoryStore.swift in Sources */,
 				1A0000000000000000000303 /* PlayerScreen.swift in Sources */,
+				1A00000000000000000003C0 /* PlayerOptions.swift in Sources */,
+				1A00000000000000000003C1 /* GestureSettingsView.swift in Sources */,
+				1A00000000000000000003C2 /* LivePhotoMaker.swift in Sources */,
+				1A00000000000000000003C3 /* NetworkDiagnostics.swift in Sources */,
 				1A0000000000000000000306 /* RootView.swift in Sources */,
 				1A0000000000000000000307 /* PlaylistStore.swift in Sources */,
 				1A0000000000000000000308 /* PlaylistListView.swift in Sources */,
