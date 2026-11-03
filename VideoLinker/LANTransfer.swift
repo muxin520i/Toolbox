@@ -101,9 +101,9 @@ final class LANTransfer: NSObject, ObservableObject {
 
             for result in results {
                 guard case let .bonjour(txt) = result.metadata else { continue }
-                guard let host = txt.getEntry(for: "ip"), !host.isEmpty,
+                guard case let .string(host)? = txt.getEntry(for: "ip"), !host.isEmpty,
                       host != myAddress,
-                      let portText = txt.getEntry(for: "port"),
+                      case let .string(portText)? = txt.getEntry(for: "port"),
                       let port = Int(portText) else { continue }
                 guard case let .service(name, _, _, _) = result.endpoint else { continue }
 

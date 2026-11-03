@@ -34,10 +34,12 @@ enum MediaFingerprint {
             context.interpolationQuality = .low
             context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
 
+            // 读的时候必须走这块 buffer，回头再下标访问 pixels 会撞上独占访问检查
+            let gray = buffer.bindMemory(to: UInt8.self)
             for row in 0..<height {
                 for column in 0..<(width - 1) {
-                    let left = pixels[row * width + column]
-                    let right = pixels[row * width + column + 1]
+                    let left = gray[row * width + column]
+                    let right = gray[row * width + column + 1]
                     if left > right {
                         hash |= (UInt64(1) << UInt64(row * (width - 1) + column))
                     }

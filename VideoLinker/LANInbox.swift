@@ -283,9 +283,9 @@ final class LANInbox: ObservableObject {
     /// Bonjour 广播：TXT 里带上 ip 和 port，接收方不用再解析地址
     static func bonjourService(port: UInt16) -> NWListener.Service {
         var txt = NWTXTRecord()
-        _ = txt.setEntry("ip", value: wifiAddress() ?? "")
-        _ = txt.setEntry("port", value: "\(port)")
-        _ = txt.setEntry("kind", value: "inbox")
+        _ = txt.setEntry(.string(wifiAddress() ?? ""), for: "ip")
+        _ = txt.setEntry(.string("\(port)"), for: "port")
+        _ = txt.setEntry(.string("inbox"), for: "kind")
 
         var name = UIDevice.current.name.trimmingCharacters(in: .whitespacesAndNewlines)
         if name.isEmpty { name = "工具箱" }

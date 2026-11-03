@@ -10,6 +10,11 @@ import UIKit
 // 拿回带时间戳的词片段后合成一条条字幕，最后写成 srt 放到「字幕」目录。
 // 全程不联网（设备支持离线识别时），音频和识别结果都不出本机。
 
+/// 转写失败时带一句话原因，交给界面显示
+struct SpeechFailure: Error {
+    let message: String
+}
+
 enum SpeechError: LocalizedError {
     case denied
     case unavailable
@@ -88,7 +93,7 @@ final class SpeechTranscriber: ObservableObject {
     func transcribe(
         video: URL,
         language: Language,
-        completion: @escaping (Result<URL, String>) -> Void
+        completion: @escaping (Result<URL, SpeechFailure>) -> Void
     ) {
         guard !running else { return }
 
@@ -114,7 +119,7 @@ final class SpeechTranscriber: ObservableObject {
                     self.running = false
                     self.statusText = ""
                     if !self.isCancelled() { self.errorText = message }
-                    completion(.failure(message))
+                    completion(.failure(SpeechFailure(message: message)))
                 }
             }
         }
