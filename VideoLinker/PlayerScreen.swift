@@ -76,6 +76,9 @@ struct PlayerScreen: View {
     @State private var subtitleText = ""
     @State private var subtitleTicker: Timer?
     @State private var showSubtitlePicker = false
+    /// 下载前的清晰度选择
+    @State private var qualityChoice: DownloadManager.QualityChoice?
+    @State private var showQuality = false
     /// 字幕时间轴偏移：正数表示字幕整体往后延，负数表示提前
     @State private var subtitleOffset: Double = 0
     @AppStorage(SettingsKey.subtitleSize) private var subtitleSize = 17.0
@@ -326,6 +329,18 @@ struct PlayerScreen: View {
                     }
                 }
             }
+        }
+        .confirmationDialog("选择清晰度", isPresented: $showQuality, titleVisibility: .visible) {
+            if let choice = qualityChoice {
+                ForEach(choice.variants) { variant in
+                    Button("\(variant.shortTitle) · \(variant.detail)") {
+                        _ = DownloadManager.shared.start(choice, variant: variant)
+                    }
+                }
+            }
+            Button("取消", role: .cancel) { }
+        } message: {
+            Text("下载的是 \(qualityChoice?.title ?? "这个视频")，挑一档占地方合适的")
         }
         .fileImporter(
             isPresented: $showSubtitlePicker,
@@ -1164,7 +1179,10 @@ struct PlayerScreen: View {
         if HLSDownloader.looksLikeHLS(item.url) {
             // m3u8 先探一下主清单，多档码率时弹选择
             toast("正在检查清晰度…")
-            DownloadManager.shared.requestDownload(from: item.url, title: titleText)
+            DownloadManager.shared.requestDownload(from: item.url, title: titleText) { choice in
+                qualityChoice = choice
+                showQuality = true
+            }
             return
         }
 

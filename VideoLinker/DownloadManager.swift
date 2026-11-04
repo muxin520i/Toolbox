@@ -134,10 +134,6 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
     @Published private(set) var items: [DownloadItem] = []
     /// 当前正在下载的那一条。items 数组本身不随进度变化，首页要靠它才能拿到最新进度
     @Published private(set) var runningItem: DownloadItem?
-    /// 正在解析 m3u8 主清单，界面可以显示一个「正在检查清晰度」
-    @Published private(set) var parsingQuality = false
-    /// 待用户选择清晰度的下载请求，根视图监听它弹选择器
-    @Published var pendingQuality: QualityChoice?
     /// 同时下载几条，设置页可改
     @Published var concurrency: Int = 3 {
         didSet {
@@ -1788,18 +1784,18 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
         let variants: [HLSVariant]
     }
 
-    /// 单条下载入口：m3u8 先看一眼主清单，有多档清晰度就让用户挑，其余直接开下。
-    /// 批量下载不走这里，否则二十条能弹二十次。
+    /// 单条下载入口：m3u8 先看一眼主清单，有多档清晰度就交给调用方弹选择器，
+    /// 其余直接开下。批量下载不走这里，否则二十条能弹二十次。
     func requestDownload(from urlString: String,
                          title: String? = nil,
-                         alternates: [String] = []) {
+                         alternates: [String] = [],
+                         onChoice: @escaping (QualityChoice) -> Void) {
         let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard HLSDownloader.looksLikeHLS(trimmed), let url = URL(string: trimmed) else {
             _ = start(from: trimmed, title: title, alternates: alternates)
             return
         }
 
-        parsingQuality = true
         Task { [weak self] in
             guard let self = self else { return }
             let variants = (try? await HLSDownloader.variants(
@@ -1808,14 +1804,13 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
             )) ?? []
 
             await MainActor.run {
-                self.parsingQuality = false
                 if variants.count > 1 {
-                    self.pendingQuality = QualityChoice(
+                    onChoice(QualityChoice(
                         url: trimmed,
                         title: title,
                         alternates: alternates,
                         variants: variants
-                    )
+                    ))
                 } else {
                     // 只有一路（或者根本读不到主清单）就别打扰用户，直接按能拿到的最好的下
                     _ = self.start(from: trimmed, title: title, alternates: alternates,

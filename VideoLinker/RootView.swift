@@ -53,7 +53,6 @@ struct RootView: View {
     @State private var clipboardHasLink = false
 
     @ObservedObject private var undo = UndoCenter.shared
-    @ObservedObject private var downloads = DownloadManager.shared
 
     private var appTheme: AppTheme {
         AppTheme(rawValue: themeRaw) ?? .system
@@ -138,16 +137,6 @@ struct RootView: View {
         .onAppear { checkClipboardForLink() }
         .onChange(of: scenePhase) { phase in
             if phase == .active { checkClipboardForLink() }
-        }
-        .sheet(item: $downloads.pendingQuality) { choice in
-            QualityPickerSheet(
-                choice: choice,
-                onPick: { variant in
-                    _ = DownloadManager.shared.start(choice, variant: variant)
-                    downloads.pendingQuality = nil
-                },
-                onCancel: { downloads.pendingQuality = nil }
-            )
         }
         .overlay(alignment: .bottom) {
             if let pending = undo.pending {
@@ -343,91 +332,6 @@ struct RootView: View {
 
         UITabBar.appearance().standardAppearance = appearance
         UITabBar.appearance().scrollEdgeAppearance = appearance
-    }
-}
-
-// MARK: - 清晰度选择
-
-/// 下载前的选清晰度面板。默认把最高码率放在第一行，直接点第一行就是原来的行为
-struct QualityPickerSheet: View {
-    let choice: DownloadManager.QualityChoice
-    var onPick: (HLSVariant?) -> Void
-    var onCancel: () -> Void
-
-    @Environment(\.theme) private var theme
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("选择清晰度")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(theme.text)
-                Text(choice.title ?? "这个视频有多档码率，挑一个占地方合适的")
-                    .font(.system(size: 12))
-                    .foregroundStyle(theme.textTertiary)
-                    .lineLimit(2)
-            }
-            .padding(.horizontal, 20)
-            .padding(.top, 22)
-            .padding(.bottom, 14)
-
-            ScrollView {
-                VStack(spacing: 8) {
-                    ForEach(Array(choice.variants.enumerated()), id: \.element.id) { pair in
-                        Button {
-                            onPick(pair.element)
-                        } label: {
-                            HStack(spacing: 12) {
-                                Text(pair.element.shortTitle)
-                                    .font(.system(size: 15, weight: .semibold))
-                                    .foregroundStyle(theme.text)
-                                    .frame(width: 62, alignment: .leading)
-
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(pair.element.detail)
-                                        .font(.system(size: 12))
-                                        .foregroundStyle(theme.textSecondary)
-                                    if pair.offset == 0 {
-                                        Text("最高画质")
-                                            .font(.system(size: 10))
-                                            .foregroundStyle(theme.accent)
-                                    }
-                                }
-
-                                Spacer(minLength: 4)
-
-                                Image(systemName: "arrow.down.circle")
-                                    .font(.system(size: 17))
-                                    .foregroundStyle(theme.textTertiary)
-                            }
-                            .padding(.horizontal, 14)
-                            .frame(height: 56)
-                            .background(
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .fill(theme.field)
-                            )
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 12)
-            }
-
-            Button {
-                onCancel()
-            } label: {
-                Text("取消")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(theme.textSecondary)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 48)
-            }
-            .buttonStyle(.plain)
-            .padding(.horizontal, 20)
-            .padding(.bottom, 18)
-        }
-        .background(theme.bg)
     }
 }
 

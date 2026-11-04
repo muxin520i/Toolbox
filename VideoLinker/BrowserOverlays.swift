@@ -426,6 +426,9 @@ struct SniffResultsPanel: View {
     @State private var selected: Set<String> = []
     /// 视频还是图片；页面只有图片时自动切到图片
     @State private var mode: Mode = .video
+    /// 下载前的清晰度选择
+    @State private var qualityChoice: DownloadManager.QualityChoice?
+    @State private var showQuality = false
 
     private enum Mode: Hashable {
         case video, image
@@ -544,6 +547,18 @@ struct SniffResultsPanel: View {
             }
         }
         .presentationDetents([.medium, .large])
+        .confirmationDialog("选择清晰度", isPresented: $showQuality, titleVisibility: .visible) {
+            if let choice = qualityChoice {
+                ForEach(choice.variants) { variant in
+                    Button("\(variant.shortTitle) · \(variant.detail)") {
+                        _ = DownloadManager.shared.start(choice, variant: variant)
+                    }
+                }
+            }
+            Button("取消", role: .cancel) { }
+        } message: {
+            Text("下载的是 \(qualityChoice?.title ?? "这个视频")，挑一档占地方合适的")
+        }
         .overlay(alignment: .bottom) {
             if let hint = hint {
                 Text(hint)
@@ -909,7 +924,10 @@ struct SniffResultsPanel: View {
                 from: video.url,
                 title: video.displayName,
                 alternates: alternates(for: video)
-            )
+            ) { choice in
+                qualityChoice = choice
+                showQuality = true
+            }
             return
         }
 
