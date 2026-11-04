@@ -555,10 +555,16 @@ enum PlaylistStore {
                       matches.count == 1 else { continue }
 
                 let target = matches[0]
+                let oldURL = item.url
                 item.localPath = target
                 item.url = URL(fileURLWithPath: target).absoluteString
                 lists[listIndex].items[itemIndex] = item
                 changed += 1
+
+                // 地址换了，观看进度跟着搬，不然这条的进度条会归零
+                if oldURL != item.url {
+                    ResumeStore.migrate(from: oldURL, to: item.url)
+                }
             }
         }
 
