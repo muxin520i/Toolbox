@@ -144,6 +144,7 @@ enum BrowserMenuAction {
     case copyURL
     case addShortcut
     case tabs
+    case autoScroll
 }
 
 struct BrowserMenuSheet: View {
@@ -179,6 +180,7 @@ struct BrowserMenuSheet: View {
 
                     group {
                         row("在页面中查找", "magnifyingglass") { onAction(.find) }
+                        row("自动滚动收集", "arrow.down.to.line") { onAction(.autoScroll) }
                         toggleRow("桌面版网站", "desktopcomputer", isOn: desktop) {
                             ua = desktop ? UAMode.mobile.rawValue : UAMode.desktop.rawValue
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
@@ -900,6 +902,17 @@ struct SniffResultsPanel: View {
 
     /// 和播放页共用同一个 DownloadManager：进度、记录、完成后自动进「下载」列表都是同一份
     private func download(_ video: SniffedVideo) {
+        // m3u8 有多档清晰度时先让用户挑，普通直链直接开下
+        if HLSDownloader.looksLikeHLS(video.url) {
+            showHint("正在检查清晰度…")
+            DownloadManager.shared.requestDownload(
+                from: video.url,
+                title: video.displayName,
+                alternates: alternates(for: video)
+            )
+            return
+        }
+
         switch DownloadManager.shared.start(
             from: video.url,
             title: video.displayName,

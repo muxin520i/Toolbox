@@ -4,6 +4,12 @@ import UniformTypeIdentifiers
 
 // MARK: - 本机视频
 
+/// 导入来源：文件 App 或相册，两个走同一套拷贝和登记流程
+private enum ImportSource: String, Identifiable {
+    case files, photos
+    var id: String { rawValue }
+}
+
 /// 扫描 App 文件夹里的视频，或者从「文件」App 导入。
 /// 列表分两段：还没进过列表的在前，已经在播放列表里的在后，避免重复添加
 struct LocalMediaView: View {
@@ -21,7 +27,7 @@ struct LocalMediaView: View {
     @State private var importNote: String?
     @State private var toast: String?
     @State private var request: PlayRequest?
-    @State private var showPicker = false
+    @State private var importSource: ImportSource?
 
     private var freshFiles: [LocalMediaFile] {
         files.filter { !known.contains($0.path) }
@@ -53,14 +59,22 @@ struct LocalMediaView: View {
                         }
                         .disabled(scanning || importing)
 
-                        Button {
-                            presentImporter()
+                        Menu {
+                            Button {
+                                importSource = .files
+                            } label: {
+                                Label("从「文件」导入", systemImage: "folder")
+                            }
+                            Button {
+                                importSource = .photos
+                            } label: {
+                                Label("从相册导入", systemImage: "photo.on.rectangle")
+                            }
                         } label: {
                             Image(systemName: "square.and.arrow.down")
                                 .font(.system(size: 16, weight: .semibold))
                         }
-                        .disabled(importing)
-                    }
+                        .disabled(importing)                    }
                 }
             }
             .safeAreaInset(edge: .bottom) {
@@ -73,22 +87,34 @@ struct LocalMediaView: View {
         .fullScreenCover(item: $request) { req in
             PlayerScreen(request: req)
         }
-        .sheet(isPresented: $showPicker) {
-            DocumentPickerSheet(
-                contentTypes: [.movie, .video, .audio, .data],
-                onPick: { urls in
-                    showPicker = false
-                    handlePicked(urls)
-                },
-                onCancel: { failed in
-                    showPicker = false
-                    if failed {
-                        showToast("系统选择器没能打开，试试底部「去「文件」App」")
+        .sheet(item: $importSource) { source in
+            switch source {
+            case .files:
+                DocumentPickerSheet(
+                    contentTypes: [.movie, .video, .audio, .data],
+                    onPick: { urls in
+                        importSource = nil
+                        handlePicked(urls)
+                    },
+                    onCancel: { failed in
+                        importSource = nil
+                        if failed {
+                            showToast("系统选择器没能打开，试试底部「去「文件」App」")
+                        }
                     }
-                }
-            )
-            .presentationDetents([.height(1)])
-            .presentationDragIndicator(.hidden)
+                )
+                .presentationDetents([.height(1)])
+                .presentationDragIndicator(.hidden)
+
+            case .photos:
+                PhotoPickerSheet(
+                    onPick: { urls in
+                        importSource = nil
+                        handlePicked(urls)
+                    },
+                    onCancel: { importSource = nil }
+                )
+            }
         }
         .overlay(alignment: .bottom) {
             if let toast {
@@ -286,7 +312,7 @@ struct LocalMediaView: View {
             .padding(.top, 2)
 
             Button {
-                presentImporter()
+                importSource = .files
             } label: {
                 Text("从「文件」导入")
                     .font(.system(size: 14, weight: .semibold))
@@ -440,11 +466,6 @@ struct LocalMediaView: View {
             return "\(outcome.skipped) 个已在列表，\(outcome.failed) 个读不出来"
         }
         return "读不出来，试试先把它下载到本机"
-    }
-
-    private func presentImporter() {
-        // ts / m2ts / flv 这些没有标准的 UTType，用 .data 兜住，导入时再按后缀过滤
-        showPicker = true
     }
 
     private func showToast(_ text: String) {

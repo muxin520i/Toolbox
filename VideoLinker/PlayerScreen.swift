@@ -1161,6 +1161,13 @@ struct PlayerScreen: View {
             return
         }
 
+        if HLSDownloader.looksLikeHLS(item.url) {
+            // m3u8 先探一下主清单，多档码率时弹选择
+            toast("正在检查清晰度…")
+            DownloadManager.shared.requestDownload(from: item.url, title: titleText)
+            return
+        }
+
         switch DownloadManager.shared.start(from: item.url, title: titleText) {
         case .started(let record):
             toast("已加入下载：\(record.fileName)")
@@ -1199,20 +1206,33 @@ struct PlayerScreen: View {
             startAt = saved
         }
 
-        model.rate = currentRate
-        model.load(url, startAt: startAt,
-                   credential: currentItem?.credential,
-                   forceVLC: AudioSyncStore.offset() != 0)
+        // 下一集已经在队列里候着就直接切过去，不用再走一遍加载
+        let reused = model.playPreloaded(url: url, startAt: startAt)
+
+        if !reused {
+            model.rate = currentRate
+            model.load(url, startAt: startAt,
+                       credential: currentItem?.credential,
+                       forceVLC: AudioSyncStore.offset() != 0)
+            if let saved = startAt {
+                showHint("从上次的 \(Fmt.time(saved)) 继续")
+                hideHintSoon()
+            }
+        }
         lastWatchTime = startAt ?? 0
 
         // 本地视频旁边有同名 srt/vtt 就自动挂上
         autoLoadSubtitle(for: url)
 
-        if let saved = startAt {
-            showHint("从上次的 \(Fmt.time(saved)) 继续")
-            hideHintSoon()
-        }
+        preloadUpcoming()
+    }
 
+    /// 把下一集塞进播放队列预热。本机文件和需要认证的源不预加载
+    private func preloadUpcoming() {
+        guard index + 1 < request.items.count else { return }
+        let next = request.items[index + 1]
+        guard let url = URL(string: next.url), !url.isFileURL else { return }
+        model.preloadNext(url: url, credential: next.credential)
     }
 
     /// 换过音画偏移后重新加载：非零偏移只有 VLC 的 audio-desync 支持
@@ -1576,7 +1596,9 @@ final class PlayerModel: ObservableObject {
     /// 每秒回调一次进度，用于保存续播位置
     var onProgress: ((Double, Double) -> Void)?
 
-    let player = AVPlayer()
+    /// 用 AVQueuePlayer 而不是 AVPlayer：连播时可以把下一集提前塞进队列，
+    /// 当前这集播完切过去基本是秒开，不用再走一遍握手和首片下载。
+    let player = AVQueuePlayer()
 
     private(set) var vlcEngine: VLCPlayback?
 
@@ -1724,22 +1746,8 @@ final class PlayerModel: ObservableObject {
         configureAudioSession()
 
         teardownVLC()
-        statusObserver?.invalidate()
-        timeoutWorkItem?.cancel()
-        removeEndObserver()
-
-        isLoading = true
-        errorMessage = nil
-        isStalling = false
+        resetForNewItem(startAt: startAt)
         isLocalFile = url.isFileURL
-        stallWatch?.invalidate()
-        stallWatch = nil
-        currentTime = 0
-        duration = 0
-        lastSavedSecond = -100
-        lastTickSecond = -1
-        pendingSeek = startAt
-        didReachEnd = false
 
         // mkv / flv / avi 这些系统播放器基本没戏，直接交给 VLC，省一次失败等待；
         // 设了音画偏移也一样：系统播放器没有延迟接口，只能走 VLC
@@ -1751,6 +1759,64 @@ final class PlayerModel: ObservableObject {
 
         let item = AVPlayerItem(asset: Self.makeAsset(url: url, credential: credential))
         item.preferredForwardBufferDuration = 4
+
+        player.removeAllItems()
+        player.insert(item, after: nil)
+        bind(item, url: url, credential: credential)
+
+        player.play()
+        player.rate = Float(rate)
+
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self = self, self.isLoading else { return }
+            // 超时不直接判死，VLC 对某些流更宽容
+            self.switchToVLC(url: url, startAt: self.pendingSeek, credential: credential)
+        }
+        timeoutWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 20, execute: workItem)
+    }
+
+    /// 需要认证的源（WebDAV）走 AVURLAsset，把 Basic 头挂在 asset 上，
+    /// AVPlayer 请求主文件和各分片时都会带上。
+    /// 防盗链站点同理：Referer / Cookie / UA 由 HTTPHeaderStore 统一给，
+    /// 这里只负责把它们塞进 AVURLAsset 的私有头字段。
+    private static func makeAsset(url: URL, credential: String?) -> AVURLAsset {
+        var extra: [String: String] = [:]
+        if let credential, !credential.isEmpty {
+            extra["Authorization"] = "Basic " + Data(credential.utf8).base64EncodedString()
+        }
+        let headers = HTTPHeaderStore.headers(for: url, extra: extra)
+        guard !headers.isEmpty else { return AVURLAsset(url: url) }
+        return AVURLAsset(
+            url: url,
+            options: ["AVURLAssetHTTPHeaderFieldsKey": headers as [String: Any]]
+        )
+    }
+
+    /// 换一条播放内容前的统一复位。观察者先摘掉，状态清干净
+    private func resetForNewItem(startAt: Double?) {
+        statusObserver?.invalidate()
+        statusObserver = nil
+        timeoutWorkItem?.cancel()
+        removeEndObserver()
+
+        isLoading = true
+        errorMessage = nil
+        isStalling = false
+        stallWatch?.invalidate()
+        stallWatch = nil
+        currentTime = 0
+        duration = 0
+        lastSavedSecond = -100
+        lastTickSecond = -1
+        pendingSeek = startAt
+        didReachEnd = false
+    }
+
+    /// 把状态观察和结束通知挂到当前这条上
+    private func bind(_ item: AVPlayerItem, url: URL, credential: String?) {
+        statusObserver?.invalidate()
+        removeEndObserver()
 
         statusObserver = item.observe(\.status, options: [.new, .initial]) { [weak self] observedItem, _ in
             let status = observedItem.status
@@ -1788,40 +1854,51 @@ final class PlayerModel: ObservableObject {
             self?.onFinished?()
         }
 
-        player.replaceCurrentItem(with: item)
         // 本机文件可能已经准备好了（状态回调不一定赶得上），补一刀，别让「正在加载…」一直转
         if item.status == .readyToPlay {
             isLoading = false
             timeoutWorkItem?.cancel()
             applyPendingSeek()
         }
-        player.play()
-        player.rate = Float(rate)
-
-        let workItem = DispatchWorkItem { [weak self] in
-            guard let self = self, self.isLoading else { return }
-            // 超时不直接判死，VLC 对某些流更宽容
-            self.switchToVLC(url: url, startAt: self.pendingSeek, credential: credential)
-        }
-        timeoutWorkItem = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + 20, execute: workItem)
     }
 
-    /// 需要认证的源（WebDAV）走 AVURLAsset，把 Basic 头挂在 asset 上，
-    /// AVPlayer 请求主文件和各分片时都会带上。
-    /// 防盗链站点同理：Referer / Cookie / UA 由 HTTPHeaderStore 统一给，
-    /// 这里只负责把它们塞进 AVURLAsset 的私有头字段。
-    private static func makeAsset(url: URL, credential: String?) -> AVURLAsset {
-        var extra: [String: String] = [:]
-        if let credential, !credential.isEmpty {
-            extra["Authorization"] = "Basic " + Data(credential.utf8).base64EncodedString()
+    /// 把下一集提前塞进播放队列。真正开始缓冲由系统决定，
+    /// 一般当前这集播到一半它就把下一集的头部拉下来了。
+    func preloadNext(url: URL, credential: String?) {
+        guard !usingVLC else { return }
+        // 需要单独认证的源先不预加载：切集时认证头要重新拼，宁可慢一点也别出错
+        if let credential = credential, !credential.isEmpty { return }
+        // VLC 才能播的容器塞进队列只会失败，占着位置还挡后面的
+        guard !Self.vlcOnlyExtensions.contains(url.pathExtension.lowercased()) else { return }
+        // 队列里已经排了下一集就不重复塞
+        guard player.items().count <= 1 else { return }
+        guard player.currentItem != nil else { return }
+
+        let item = AVPlayerItem(asset: Self.makeAsset(url: url, credential: credential))
+        item.preferredForwardBufferDuration = 3
+        player.insert(item, after: player.currentItem)
+    }
+
+    /// 切到预加载好的下一集。false 表示没预加载或者预加载的那条已经坏了，调用方改用 load 重来
+    func playPreloaded(url: URL, startAt: Double?) -> Bool {
+        guard !usingVLC, player.items().count > 1 else { return false }
+        let next = player.items()[1]
+        guard let asset = next.asset as? AVURLAsset, asset.url == url else { return false }
+
+        if next.status == .failed {
+            player.remove(next)
+            return false
         }
-        let headers = HTTPHeaderStore.headers(for: url, extra: extra)
-        guard !headers.isEmpty else { return AVURLAsset(url: url) }
-        return AVURLAsset(
-            url: url,
-            options: ["AVURLAssetHTTPHeaderFieldsKey": headers as [String: Any]]
-        )
+
+        resetForNewItem(startAt: startAt)
+        isLocalFile = url.isFileURL
+
+        player.advanceToNextItem()
+        // 认证头在预加载时已经挂在 asset 上了，这里不用再传
+        bind(next, url: url, credential: nil)
+        player.play()
+        player.rate = Float(rate)
+        return true
     }
 
     private func applyPendingSeek() {
@@ -1936,7 +2013,7 @@ final class PlayerModel: ObservableObject {
         stallWatch?.invalidate()
         stallWatch = nil
         player.pause()
-        player.replaceCurrentItem(with: nil)
+        player.removeAllItems()
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 
@@ -1963,7 +2040,7 @@ final class PlayerModel: ObservableObject {
         statusObserver?.invalidate()
         statusObserver = nil
         player.pause()
-        player.replaceCurrentItem(with: nil)
+        player.removeAllItems()
         startVLC(url: url, startAt: startAt, credential: credential)
     }
 

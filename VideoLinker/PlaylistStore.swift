@@ -302,6 +302,21 @@ enum PlaylistStore {
         return load()
     }
 
+    /// 撤销删除：按原来的位置插回去。位置超出范围就放到末尾
+    @discardableResult
+    static func insert(_ item: PlaylistItem, at index: Int, into playlistID: UUID) -> [Playlist] {
+        var playlists = load()
+        guard let listIndex = playlists.firstIndex(where: { $0.id == playlistID }) else { return playlists }
+        // 同一条已经在了（重复点撤销），不要插两份
+        guard !playlists[listIndex].items.contains(where: { $0.id == item.id }) else {
+            return load()
+        }
+        let target = max(0, min(index, playlists[listIndex].items.count))
+        playlists[listIndex].items.insert(item, at: target)
+        save(playlists)
+        return load()
+    }
+
     // MARK: 列表排序
 
     /// 列表总览的排序方式

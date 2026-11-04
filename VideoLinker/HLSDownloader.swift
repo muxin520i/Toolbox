@@ -7,6 +7,37 @@ struct HLSFailure: LocalizedError {
     var errorDescription: String? { message }
 }
 
+/// 主清单里的一个清晰度。下载前让用户挑，别一律拉最高码率
+struct HLSVariant: Identifiable, Hashable {
+    let url: URL
+    let bandwidth: Int
+    let width: Int
+    let height: Int
+
+    var id: String { url.absoluteString }
+
+    /// 「1080p」「720p」这种一眼能认的短标签
+    var shortTitle: String {
+        if height > 0 { return "\(height)p" }
+        if width > 0 { return "\(width)p" }
+        if bandwidth > 0 { return String(format: "%.0f kbps", Double(bandwidth) / 1000) }
+        return "未知"
+    }
+
+    var detail: String {
+        var parts: [String] = []
+        if width > 0, height > 0 { parts.append("\(width)×\(height)") }
+        if bandwidth > 0 { parts.append(String(format: "%.1f Mbps", Double(bandwidth) / 1_000_000)) }
+        return parts.isEmpty ? url.lastPathComponent : parts.joined(separator: " · ")
+    }
+
+    /// 估算体积：码率 × 时长
+    func estimatedBytes(duration: Double) -> Int64 {
+        guard bandwidth > 0, duration > 0 else { return 0 }
+        return Int64(Double(bandwidth) / 8 * duration)
+    }
+}
+
 /// 一条待下载的分片
 struct HLSSegment {
     let url: URL
@@ -115,20 +146,25 @@ enum HLSDownloader {
     // MARK: - 解析
 
     /// 解析清单（主清单会自动选中码率最高的那一路）
-    static func parse(playlistURL: URL, referer: String?) async throws -> HLSPlaylist {
+    static func parse(playlistURL: URL,
+                      referer: String?,
+                      preferredVariant: URL? = nil) async throws -> HLSPlaylist {
         var current = playlistURL
         var text = try await fetchText(current, referer: referer)
 
-        // 主清单：挑码率最高的一路
+        // 主清单：用户指定了就用指定的，没指定挑码率最高的一路
         if text.contains("#EXT-X-STREAM-INF") {
             let variants = parseVariants(text, base: current)
-            guard let best = variants.max(by: { $0.bandwidth < $1.bandwidth }) else {
+            guard let fallback = variants.max(by: { $0.bandwidth < $1.bandwidth }) else {
                 throw HLSFailure(message: "清单里没有可用的清晰度")
             }
             if hasSeparateAudio(text) {
                 throw HLSFailure(message: "这个流把音频单独拆开了，合并需要一个完整转码器，暂时下不了")
             }
-            current = best.url
+            let chosen = preferredVariant.flatMap { target in
+                variants.first(where: { $0.url == target })
+            } ?? fallback
+            current = chosen.url
             text = try await fetchText(current, referer: referer)
         }
 
@@ -230,23 +266,62 @@ enum HLSDownloader {
     private struct Variant {
         let url: URL
         let bandwidth: Int
+        let width: Int
+        let height: Int
     }
 
     private static func parseVariants(_ text: String, base: URL) -> [Variant] {
         var result: [Variant] = []
         var pendingBandwidth = 0
+        var pendingSize = (width: 0, height: 0)
         for rawLine in text.components(separatedBy: .newlines) {
             let line = rawLine.trimmingCharacters(in: .whitespaces)
             if line.hasPrefix("#EXT-X-STREAM-INF:") {
                 let attrs = attributes(of: line)
                 pendingBandwidth = Int(attrs["BANDWIDTH"] ?? "") ?? 0
+                // RESOLUTION=1920x1080
+                if let res = attrs["RESOLUTION"], res.contains("x") {
+                    let bits = res.lowercased().split(separator: "x")
+                    if bits.count == 2 {
+                        pendingSize = (Int(bits[0]) ?? 0, Int(bits[1]) ?? 0)
+                    }
+                } else {
+                    pendingSize = (0, 0)
+                }
                 continue
             }
             if line.isEmpty || line.hasPrefix("#") { continue }
             if let url = resolve(line, base: base) {
-                result.append(Variant(url: url, bandwidth: pendingBandwidth))
+                result.append(Variant(url: url,
+                                      bandwidth: pendingBandwidth,
+                                      width: pendingSize.width,
+                                      height: pendingSize.height))
             }
             pendingBandwidth = 0
+            pendingSize = (0, 0)
+        }
+        return result
+    }
+
+    /// 主清单里的可选清晰度。不是主清单（没有 #EXT-X-STREAM-INF）返回空数组
+    static func variants(playlistURL: URL, referer: String?) async throws -> [HLSVariant] {
+        let text = try await fetchText(playlistURL, referer: referer)
+        guard text.contains("#EXT-X-STREAM-INF") else { return [] }
+        // 音频单独拆开的流下不了，别把用户引到一个必然会失败的选项上
+        guard !hasSeparateAudio(text) else { return [] }
+
+        let list = parseVariants(text, base: playlistURL)
+        // 同一分辨率的重复项去掉，按码率从高到低排
+        var seen = Set<String>()
+        var result: [HLSVariant] = []
+        for item in list.sorted(by: { $0.bandwidth > $1.bandwidth }) {
+            let key = "\(item.height)x\(item.width)-\(item.bandwidth)"
+            guard !seen.contains(key) else { continue }
+            seen.insert(key)
+            result.append(HLSVariant(url: item.url,
+                                     bandwidth: item.bandwidth,
+                                     width: item.width,
+                                     height: item.height))
         }
         return result
     }

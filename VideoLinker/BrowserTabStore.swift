@@ -160,6 +160,27 @@ final class BrowserTab: ObservableObject, Identifiable {
     func goBack() { webView.goBack() }
     func goForward() { webView.goForward() }
 
+    /// 自动往下滚，把懒加载的图片和视频都摇出来；正在滚的时候再调一次就是停
+    func toggleAutoScroll() {
+        guard webView.url != nil else { return }
+        // 先注入定义，再触发；脚本自己判断当前是不是在滚
+        webView.evaluateJavaScript(BrowserInject.autoScroll) { [weak self] _, _ in
+            guard let self = self else { return }
+            self.webView.evaluateJavaScript(
+                "window.__vlAutoScroll ? window.__vlAutoScroll(false) : false",
+                completionHandler: nil
+            )
+        }
+        Haptics.light()
+    }
+
+    func stopAutoScroll() {
+        webView.evaluateJavaScript(
+            "window.__vlAutoScroll ? window.__vlAutoScroll(true) : false",
+            completionHandler: nil
+        )
+    }
+
     func showHome() {
         webView.stopLoading()
         found.removeAll()

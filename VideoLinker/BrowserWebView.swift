@@ -358,6 +358,82 @@ enum BrowserInject {
 
     static let readerRun = "window.__vlReader ? window.__vlReader() : false"
 
+    /// 自动滚动收集：懒加载的图集 / 长页面，一行一行往下推，
+    /// 每滚一屏就把已经加载出来的图扫一遍，到底后等两次加载再收网。
+    /// 参数 stop 为 true 时只负责停下。
+    static let autoScroll = """
+    window.__vlAutoScroll = function(stop) {
+      try {
+        if (window.__vlScrollTimer) {
+          clearInterval(window.__vlScrollTimer);
+          window.__vlScrollTimer = null;
+        }
+        if (stop || window.__vlScrolling) {
+          window.__vlScrolling = false;
+          window.__vlToast && window.__vlToast('已停止滚动');
+          return false;
+        }
+
+        var still = 0;          // 连续贴底且页面没变长的次数
+        var lastHeight = 0;
+        var ticks = 0;
+        window.__vlScrolling = true;
+
+        function height() {
+          return Math.max(
+            document.body ? document.body.scrollHeight : 0,
+            document.documentElement ? document.documentElement.scrollHeight : 0
+          );
+        }
+
+        window.__vlScrollTimer = setInterval(function() {
+          ticks++;
+          var h = height();
+          var vh = window.innerHeight || 600;
+          var y = window.scrollY || window.pageYOffset || 0;
+
+          // 页面又长高了，说明懒加载还在吐内容，重新计数
+          if (h > lastHeight + 40) {
+            lastHeight = h;
+            still = 0;
+          }
+
+          var atBottom = (y + vh) >= (h - 100);
+          window.scrollBy(0, Math.round(vh * (atBottom ? 0.5 : 0.8)));
+
+          if (window.__vlScan) { window.__vlScan(); }
+
+          if (atBottom) {
+            still++;
+            // 到底之后再多等三秒，给图片留加载时间
+            if (still >= 6) {
+              clearInterval(window.__vlScrollTimer);
+              window.__vlScrollTimer = null;
+              window.__vlScrolling = false;
+              window.__vlScan && window.__vlScan();
+              var n = document.images ? document.images.length : 0;
+              window.__vlToast && window.__vlToast('已经滚到底，页面里共有 ' + n + ' 张图');
+              return;
+            }
+          } else {
+            still = 0;
+          }
+
+          // 兜底：最多滚 4 分钟，别在无限滚动的站点上停不下来
+          if (ticks >= 440) {
+            clearInterval(window.__vlScrollTimer);
+            window.__vlScrollTimer = null;
+            window.__vlScrolling = false;
+            window.__vlToast && window.__vlToast('滚动时间到，先收了这些');
+          }
+        }, 550);
+
+        window.__vlToast && window.__vlToast('正在向下滚动收集，再点一次可停');
+        return true;
+      } catch (e) { return false; }
+    };
+    """
+
     /// 脚本镜像站：这些站点一律按浅色渲染，避免跟随系统深色变黑
     static func isLightSite(_ host: String?) -> Bool {
         guard let h = host?.lowercased(), !h.isEmpty else { return false }

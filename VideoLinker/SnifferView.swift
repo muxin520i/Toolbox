@@ -769,6 +769,10 @@ struct BrowserView: View {
             showFind = true
             addressFocused = false
 
+        case .autoScroll:
+            sheet = nil
+            tab.toggleAutoScroll()
+
         case .scripts:
             openPanel(.scripts)
 

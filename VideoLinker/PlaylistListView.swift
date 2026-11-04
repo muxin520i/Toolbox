@@ -828,8 +828,7 @@ struct PlaylistDetailView: View {
                     .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 4, trailing: 20))
                     .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                         Button(role: .destructive) {
-                            PlaylistStore.removeItem(item.id, from: playlistID)
-                            reload()
+                            removeWithUndo([item])
                         } label: {
                             Label("删除", systemImage: "trash")
                         }
@@ -1143,8 +1142,7 @@ struct PlaylistDetailView: View {
             Label("清除观看进度", systemImage: "arrow.counterclockwise")
         }
         Button(role: .destructive) {
-            PlaylistStore.removeItem(item.id, from: playlistID)
-            reload()
+            removeWithUndo([item])
         } label: {
             Label("从列表移除", systemImage: "minus.circle")
         }
@@ -1308,12 +1306,24 @@ struct PlaylistDetailView: View {
     }
 
     private func deleteSelected() {
-        guard !selection.isEmpty else { return }
-        for id in selection {
-            PlaylistStore.removeItem(id, from: playlistID)
-        }
+        guard !selection.isEmpty, let list = playlist else { return }
+        let targets = list.items.filter { selection.contains($0.id) }
+        removeWithUndo(targets)
         selection.removeAll()
         editMode = .inactive
+    }
+
+    /// 删除并留一条撤销。按删除前的位置记下来，撤销时才能插回原处
+    private func removeWithUndo(_ targets: [PlaylistItem]) {
+        guard !targets.isEmpty, let list = playlist else { return }
+        let entries = targets.compactMap { target -> (item: PlaylistItem, index: Int)? in
+            guard let index = list.items.firstIndex(where: { $0.id == target.id }) else { return nil }
+            return (item: target, index: index)
+        }
+        UndoCenter.shared.stage(entries, playlistID: playlistID, playlistName: list.name)
+        for target in targets {
+            PlaylistStore.removeItem(target.id, from: playlistID)
+        }
         reload()
     }
 

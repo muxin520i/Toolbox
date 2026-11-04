@@ -54,6 +54,14 @@ final class DownloadItem: ObservableObject, Identifiable {
     var preflighted = false
     /// 服务器是否支持 Range（决定能不能续传）
     var supportsResume = true
+    /// HLS 主清单里用户挑的那一路；nil 表示按最高码率
+    var variantURL: URL?
+    /// 直链分段下载：每段已经收了多少字节，顺序对应分段
+    var partReceived: [Int64] = []
+    /// 分段下载的文件总大小；0 表示没在分段
+    var chunkTotal: Int64 = 0
+    /// 服务器不认 Range 时置为 true，这条以后就走单线程，不再试分段
+    var chunkDisabled = false
 
     /// HLS 走自研分片下载，拿不到系统的 resumeData
     var isHLS = false
@@ -126,6 +134,10 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
     @Published private(set) var items: [DownloadItem] = []
     /// 当前正在下载的那一条。items 数组本身不随进度变化，首页要靠它才能拿到最新进度
     @Published private(set) var runningItem: DownloadItem?
+    /// 正在解析 m3u8 主清单，界面可以显示一个「正在检查清晰度」
+    @Published private(set) var parsingQuality = false
+    /// 待用户选择清晰度的下载请求，根视图监听它弹选择器
+    @Published var pendingQuality: QualityChoice?
     /// 同时下载几条，设置页可改
     @Published var concurrency: Int = 3 {
         didSet {
@@ -160,6 +172,12 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
     private var preflighting: Set<UUID> = []
     /// 正在拼文件的，避免重复进入
     private var hlsAssembling: Set<UUID> = []
+    /// 正在分段下载的直链任务
+    private var chunkJobs: [UUID: ChunkJob] = [:]
+    /// taskID → 属于哪一条、第几段、写到文件的哪个位置
+    private var chunkTasks: [Int: ChunkTaskInfo] = [:]
+    /// 每段本次已经写了多少字节（相对段起点），受 indexLock 保护
+    private var chunkWritten: [Int: Int64] = [:]
     /// 速度采样：每秒算一次 received 的增量
     private var speedTimer: Timer?
     private var lastSample: [UUID: (bytes: Int64, at: Date)] = [:]
@@ -452,6 +470,301 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
         }
     }
 
+    // MARK: 分段下载（直链大文件）
+
+    /// 一条文件按字节切成几段，每段一个后台任务并发拉，
+    /// 完成一段就按自己的起点写进目标文件，不用最后再拼一遍。
+    private struct ChunkJob {
+        let total: Int64
+        let dest: URL
+        let chunkSize: Int64
+        var parts: [Int64]
+
+        var partCount: Int { parts.count }
+        var received: Int64 { parts.reduce(0, +) }
+        var finished: Bool { received >= total }
+
+        func start(_ index: Int) -> Int64 { Int64(index) * chunkSize }
+        func end(_ index: Int) -> Int64 { min(total - 1, start(index) + chunkSize - 1) }
+    }
+
+    private struct ChunkTaskInfo {
+        let itemID: UUID
+        let index: Int
+        /// 这一段从文件的哪个字节开始写
+        let offset: Int64
+        /// 本次任务开始时这段已经有多少字节（续传）
+        let base: Int64
+        /// 最终要写进哪个文件
+        let dest: URL
+    }
+
+    /// 小于这个大小就一条线拉倒，切段反而多几次握手
+    private static let chunkThreshold = Int64(30 * 1024 * 1024)
+
+    /// 最多切几段。再多对家用宽带没意义，还容易被站点限流
+    private static let chunkLimit = 4
+
+    private func makeMediaRequest(_ url: URL, range: String? = nil) -> URLRequest {
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 300
+        request.setValue(Self.mobileUA, forHTTPHeaderField: "User-Agent")
+        if let referer = Self.referer(for: url) {
+            request.setValue(referer, forHTTPHeaderField: "Referer")
+        }
+        HTTPHeaderStore.apply(to: &request, url: url)
+        if let range = range {
+            request.setValue(range, forHTTPHeaderField: "Range")
+        }
+        return request
+    }
+
+    /// 值不值得切段：大文件、服务器认 Range、没有系统断点数据
+    private func shouldChunk(_ item: DownloadItem) -> Bool {
+        guard !item.isHLS, !item.chunkDisabled else { return false }
+        guard item.supportsResume else { return false }
+        let total = item.expected > 0 ? item.expected : item.chunkTotal
+        guard total >= Self.chunkThreshold else { return false }
+        if let data = item.resumeData, !data.isEmpty { return false }
+        return true
+    }
+
+    private func beginChunked(_ item: DownloadItem) {
+        guard let url = URL(string: item.source) else {
+            fail(item, "链接格式不对")
+            return
+        }
+
+        if item.expected <= 0, item.chunkTotal > 0 {
+            item.expected = item.chunkTotal
+        }
+        guard item.expected > 0 else {
+            fail(item, "拿不到文件大小，没法分段")
+            return
+        }
+
+        item.state = .running
+        item.note = ""
+        item.failReason = ""
+        item.speed = 0
+        item.estimatedTotal = false
+
+        let dest: URL
+        if let job = chunkJobs[item.id] {
+            dest = job.dest
+        } else if let saved = item.destURL {
+            dest = saved
+        } else {
+            let base = (item.fileName as NSString).deletingPathExtension
+            var ext = url.pathExtension.lowercased()
+            if ext.isEmpty { ext = "mp4" }
+            dest = Self.unique(in: Self.directory(), name: base + "." + ext)
+            item.destURL = dest
+        }
+
+        var job: ChunkJob
+        if let existing = chunkJobs[item.id] {
+            job = existing
+        } else if item.partReceived.count >= 2, item.chunkTotal > 0 {
+            // 上次退出时记下的分段进度，接着写
+            job = ChunkJob(
+                total: item.chunkTotal,
+                dest: dest,
+                chunkSize: (item.chunkTotal + Int64(item.partReceived.count) - 1) / Int64(item.partReceived.count),
+                parts: item.partReceived
+            )
+        } else {
+            let count = min(Self.chunkLimit, max(2, Int(item.expected / (10 * 1024 * 1024))))
+            let size = (item.expected + Int64(count) - 1) / Int64(count)
+            job = ChunkJob(total: item.expected, dest: dest, chunkSize: size,
+                           parts: Array(repeating: 0, count: count))
+        }
+
+        chunkJobs[item.id] = job
+        item.chunkTotal = job.total
+        item.partReceived = job.parts
+        item.expected = job.total
+        item.baseOffset = 0
+        item.received = job.received
+        item.progress = min(0.99, Double(job.received) / Double(max(job.total, 1)))
+
+        // 先把文件占到位，各段才能往自己的位置写
+        ensureSizedFile(dest, size: job.total)
+
+        item.note = job.received > 0 ? "正在接着上次的位置…" : "分 \(job.partCount) 段并行下载"
+        save()
+        startSpeedTimer()
+
+        for index in 0..<job.partCount {
+            let span = job.end(index) - job.start(index) + 1
+            guard job.parts[index] < span else { continue }
+
+            let from = job.start(index) + job.parts[index]
+            let to = job.end(index)
+            let task = backgroundSession.downloadTask(
+                with: makeMediaRequest(url, range: "bytes=\(from)-\(to)")
+            )
+            task.taskDescription = "chunk:\(item.id.uuidString):\(index)"
+
+            indexLock.lock()
+            chunkTasks[task.taskIdentifier] = ChunkTaskInfo(
+                itemID: item.id,
+                index: index,
+                offset: job.start(index),
+                base: job.parts[index],
+                dest: dest
+            )
+            chunkWritten[task.taskIdentifier] = 0
+            indexLock.unlock()
+
+            task.resume()
+        }
+    }
+
+    /// 分段任务的收尾：校验 206、写进目标偏移、齐了结单
+    private func handleChunkFinished(_ task: URLSessionDownloadTask, location: URL) -> Bool {
+        guard let info = takeChunkInfo(task.taskIdentifier) else { return false }
+
+        // 有些服务器收了 Range 还是回 200 全文，照着写会把文件写花
+        let status = (task.response as? HTTPURLResponse)?.statusCode ?? 206
+        guard status == 206 else {
+            DispatchQueue.main.async {
+                guard let item = self.items.first(where: { $0.id == info.itemID }) else { return }
+                self.abortChunks(item, reason: "服务器没按分段返回，已改回单线程")
+            }
+            return true
+        }
+
+        let written = Self.fileSize(location)
+        let ok = written > 0 && writeChunk(location, into: info.dest, offset: info.offset)
+
+        DispatchQueue.main.async {
+            guard let item = self.items.first(where: { $0.id == info.itemID }),
+                  var job = self.chunkJobs[info.itemID] else { return }
+            guard ok else {
+                self.cancelChunks(of: info.itemID)
+                self.chunkJobs.removeValue(forKey: info.itemID)
+                self.fail(item, "分段写入失败，存储空间可能不够")
+                return
+            }
+
+            let span = job.end(info.index) - job.start(info.index) + 1
+            job.parts[info.index] = min(span, info.base + written)
+            self.chunkJobs[info.itemID] = job
+            item.partReceived = job.parts
+            item.received = job.received
+            item.progress = min(0.99, Double(job.received) / Double(max(job.total, 1)))
+
+            if job.finished {
+                item.progress = 1
+                item.localPath = job.dest.path
+                item.fileName = job.dest.lastPathComponent
+                item.partReceived = []
+                item.chunkTotal = 0
+                self.chunkJobs.removeValue(forKey: info.itemID)
+                self.finish(item)
+            }
+        }
+        return true
+    }
+
+    /// 建一个指定长度的空文件；已有文件不动内容，只保证长度够
+    private func ensureSizedFile(_ url: URL, size: Int64) {
+        let fm = FileManager.default
+        if !fm.fileExists(atPath: url.path) {
+            fm.createFile(atPath: url.path, contents: nil)
+        }
+        guard let handle = try? FileHandle(forWritingTo: url) else { return }
+        defer { try? handle.close() }
+        let current = (try? handle.seekToEnd()) ?? 0
+        if current != UInt64(size) {
+            try? handle.truncate(atOffset: UInt64(size))
+        }
+    }
+
+    private func chunkInfo(_ taskID: Int) -> ChunkTaskInfo? {
+        indexLock.lock()
+        defer { indexLock.unlock() }
+        return chunkTasks[taskID]
+    }
+
+    private func takeChunkInfo(_ taskID: Int) -> ChunkTaskInfo? {
+        indexLock.lock()
+        defer { indexLock.unlock() }
+        let info = chunkTasks.removeValue(forKey: taskID)
+        chunkWritten.removeValue(forKey: taskID)
+        return info
+    }
+
+    private func addChunkBytes(_ bytes: Int64, taskID: Int) {
+        indexLock.lock()
+        chunkWritten[taskID, default: 0] += bytes
+        indexLock.unlock()
+    }
+
+    private func chunkWrittenBytes(_ taskID: Int) -> Int64 {
+        indexLock.lock()
+        defer { indexLock.unlock() }
+        return chunkWritten[taskID] ?? 0
+    }
+
+    /// 把临时文件整段写到目标文件的指定位置
+    private func writeChunk(_ source: URL, into dest: URL, offset: Int64) -> Bool {
+        guard let input = try? FileHandle(forReadingFrom: source) else { return false }
+        defer { try? input.close() }
+        guard let output = try? FileHandle(forWritingTo: dest) else { return false }
+        defer { try? output.close() }
+
+        do {
+            _ = try output.seek(toOffset: UInt64(offset))
+            while true {
+                let data = try input.read(upToCount: 1 << 20) ?? Data()
+                if data.isEmpty { break }
+                try output.write(contentsOf: data)
+            }
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// 取消某条的所有分段任务（暂停 / 删除 / 降级）
+    private func cancelChunks(of itemID: UUID) {
+        indexLock.lock()
+        let ids = chunkTasks.filter { $0.value.itemID == itemID }.map { $0.key }
+        for id in ids {
+            chunkTasks.removeValue(forKey: id)
+            chunkWritten.removeValue(forKey: id)
+        }
+        indexLock.unlock()
+
+        guard !ids.isEmpty else { return }
+        backgroundSession.getAllTasks { tasks in
+            for task in tasks where ids.contains(task.taskIdentifier) {
+                task.cancel()
+            }
+        }
+    }
+
+    /// 服务器没按 Range 返回：整条降级成单线程，已经写的半成品留着被覆盖
+    private func abortChunks(_ item: DownloadItem, reason: String) {
+        cancelChunks(of: item.id)
+        chunkJobs.removeValue(forKey: item.id)
+        item.chunkDisabled = true
+        item.partReceived = []
+        item.chunkTotal = 0
+        item.received = 0
+        item.progress = 0
+        item.expected = 0
+        item.speed = 0
+        item.preflighted = false
+        item.state = .queued
+        item.note = reason
+        item.failReason = ""
+        save()
+        pump()
+    }
+
     private func beginDirect(_ item: DownloadItem) {
         guard let url = URL(string: item.source) else {
             item.state = .failed
@@ -475,6 +788,12 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
         item.speed = 0
         // 直链的总大小是服务端给的，不是估的
         item.estimatedTotal = false
+
+        // 超过 30 MB、服务器又认 Range 的，切成几段一起拉
+        if shouldChunk(item) {
+            beginChunked(item)
+            return
+        }
 
         let hasResume = !(item.resumeData?.isEmpty ?? true)
         if hasResume {
@@ -571,7 +890,11 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
         let job = Task { [weak self] in
             guard let self = self else { return }
             do {
-                let playlist = try await HLSDownloader.parse(playlistURL: url, referer: referer)
+                let playlist = try await HLSDownloader.parse(
+                    playlistURL: url,
+                    referer: referer,
+                    preferredVariant: item.variantURL
+                )
                 let key = try await HLSDownloader.fetchKey(for: playlist, referer: referer)
                 let record = HLSDownloader.makeJob(from: playlist, key: key)
                 try Self.saveJob(record, for: item.id)
@@ -884,8 +1207,13 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
         item.failReason = reason
         item.note = ""
         item.speed = 0
-        // 失败了就把还在飞的分片停掉，别让它们继续写字节数
-        if item.isHLS { cancelSegments(of: item.id) }
+        // 失败了就把还在飞的分片 / 分段停掉，别让它们继续写字节数
+        if item.isHLS {
+            cancelSegments(of: item.id)
+        } else {
+            cancelChunks(of: item.id)
+            chunkJobs.removeValue(forKey: item.id)
+        }
         save()
         pump()
     }
@@ -985,6 +1313,12 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
             jobs[item.id]?.cancel()
             jobs.removeValue(forKey: item.id)
             cancelSegments(of: item.id)
+        } else if let job = chunkJobs[item.id] {
+            // 分段任务：把每段已经写到哪记下来，继续时接着写
+            item.partReceived = job.parts
+            item.chunkTotal = job.total
+            item.received = job.received
+            cancelChunks(of: item.id)
         } else if item.taskID != 0 {
             // 暂停时尽量把断点数据留下来，继续时能接着下
             backgroundSession.getAllTasks { tasks in
@@ -1074,6 +1408,23 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
                     totalBytesExpectedToWrite: Int64) {
         let taskID = downloadTask.taskIdentifier
 
+        // 直链分段：几段并行，各记各的，进度按总和算
+        if let info = chunkInfo(taskID) {
+            addChunkBytes(bytesWritten, taskID: taskID)
+            let written = chunkWrittenBytes(taskID)
+            DispatchQueue.main.async {
+                guard let item = self.items.first(where: { $0.id == info.itemID }),
+                      var job = self.chunkJobs[info.itemID],
+                      item.state == .running else { return }
+                let span = job.end(info.index) - job.start(info.index) + 1
+                job.parts[info.index] = min(span, info.base + written)
+                self.chunkJobs[info.itemID] = job
+                item.received = job.received
+                item.progress = min(0.99, Double(job.received) / Double(max(job.total, 1)))
+            }
+            return
+        }
+
         // 分片任务报的是「这一小片」的字节数，几片并行时拿它当整条任务的进度，
         // 百分比就会在这几片之间来回跳。这里只记字节，进度交给「已落地几片」算。
         if let itemID = segmentOwner(taskID) {
@@ -1100,6 +1451,9 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
     }
 
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
+        // 直链分段：写进目标文件的对应偏移
+        if handleChunkFinished(downloadTask, location: location) { return }
+
         // 分片任务：存进 parts 目录后继续排下一片
         if handleSegmentFinished(taskID: downloadTask.taskIdentifier, location: location) { return }
 
@@ -1146,6 +1500,22 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        // 直链分段：成功的那条已经在 didFinishDownloadingTo 里摘掉了，这里只剩失败
+        if let info = takeChunkInfo(task.taskIdentifier) {
+            guard error != nil else { return }
+            DispatchQueue.main.async {
+                guard let item = self.items.first(where: { $0.id == info.itemID }) else { return }
+                if item.state == .paused || item.state == .queued {
+                    self.save()
+                    self.pump()
+                    return
+                }
+                self.cancelChunks(of: info.itemID)
+                self.fail(item, "分段下载中断，点「继续」会接着下")
+            }
+            return
+        }
+
         // 分片任务：成功的那条已经在 didFinishDownloadingTo 处理过
         if takeSegment(task.taskIdentifier) != nil {
             guard error != nil else { return }
@@ -1378,7 +1748,10 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
         }
     }
 
-    func start(from urlString: String, title: String? = nil, alternates: [String] = []) -> Outcome {
+    func start(from urlString: String,
+               title: String? = nil,
+               alternates: [String] = [],
+               variant: URL? = nil) -> Outcome {
         let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let url = URL(string: trimmed) else { return .failed("链接格式不对") }
         guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
@@ -1394,6 +1767,7 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
         let baseName = Self.displayName(title: title, url: url)
         let item = DownloadItem(fileName: baseName, source: trimmed)
         item.isHLS = HLSDownloader.looksLikeHLS(trimmed)
+        item.variantURL = variant
         item.sources = Self.sourceChain(primary: trimmed, alternates: alternates)
 
         items.insert(item, at: 0)
@@ -1401,6 +1775,60 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
         save()
         pump()
         return .started(item)
+    }
+
+    // MARK: 清晰度选择
+
+    /// 一次「先看清晰度再下载」的请求。挂在 DownloadManager 上，根视图统一弹选择器
+    struct QualityChoice: Identifiable {
+        let id = UUID()
+        let url: String
+        let title: String?
+        let alternates: [String]
+        let variants: [HLSVariant]
+    }
+
+    /// 单条下载入口：m3u8 先看一眼主清单，有多档清晰度就让用户挑，其余直接开下。
+    /// 批量下载不走这里，否则二十条能弹二十次。
+    func requestDownload(from urlString: String,
+                         title: String? = nil,
+                         alternates: [String] = []) {
+        let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard HLSDownloader.looksLikeHLS(trimmed), let url = URL(string: trimmed) else {
+            _ = start(from: trimmed, title: title, alternates: alternates)
+            return
+        }
+
+        parsingQuality = true
+        Task { [weak self] in
+            guard let self = self else { return }
+            let variants = (try? await HLSDownloader.variants(
+                playlistURL: url,
+                referer: Self.referer(for: url)
+            )) ?? []
+
+            await MainActor.run {
+                self.parsingQuality = false
+                if variants.count > 1 {
+                    self.pendingQuality = QualityChoice(
+                        url: trimmed,
+                        title: title,
+                        alternates: alternates,
+                        variants: variants
+                    )
+                } else {
+                    // 只有一路（或者根本读不到主清单）就别打扰用户，直接按能拿到的最好的下
+                    _ = self.start(from: trimmed, title: title, alternates: alternates,
+                                   variant: variants.first?.url)
+                }
+            }
+        }
+    }
+
+    /// 用户选完清晰度后真正入队
+    func start(_ choice: QualityChoice, variant: HLSVariant?) -> Outcome {
+        start(from: choice.url, title: choice.title,
+              alternates: choice.alternates, variant: variant?.url)
     }
 
     private static func referer(for url: URL) -> String? {
@@ -1493,6 +1921,16 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
             cancelSegments(of: item.id)
             clearParts(item.id)
         }
+
+        // 新源可能不支持分段，也可能支持，一律重新判断
+        cancelChunks(of: item.id)
+        chunkJobs.removeValue(forKey: item.id)
+        item.chunkTotal = 0
+        item.partReceived = []
+        item.chunkDisabled = false
+        // 换了源，主清单里的清晰度地址不一定还有效，让新源重新挑
+        item.variantURL = nil
+
         hlsJobs.removeValue(forKey: item.id)
 
         return true
@@ -1542,6 +1980,8 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
         jobs.removeValue(forKey: item.id)
         stopTimer(item.id)
         cancelSegments(of: item.id)
+        cancelChunks(of: item.id)
+        chunkJobs.removeValue(forKey: item.id)
         hlsJobs.removeValue(forKey: item.id)
         clearParts(item.id)
 
@@ -1612,6 +2052,11 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
         /// 候选源与当前用到的第几个，老数据没有
         let sources: [String]?
         let sourceIndex: Int?
+        /// HLS 选中的清晰度地址，老数据没有
+        let variant: String?
+        /// 直链分段下载的进度，老数据没有
+        let chunkTotal: Int64?
+        let chunkParts: [Int64]?
     }
 
     private func save() {
@@ -1656,7 +2101,10 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
                 order: item.queueOrder,
                 pinned: item.isPinned,
                 sources: item.sources.count > 1 ? item.sources : nil,
-                sourceIndex: item.sourceIndex
+                sourceIndex: item.sourceIndex,
+                variant: item.variantURL?.absoluteString,
+                chunkTotal: item.chunkTotal > 0 ? item.chunkTotal : nil,
+                chunkParts: item.partReceived.isEmpty ? nil : item.partReceived
             )
         }
         if let data = try? JSONEncoder().encode(queue) {
@@ -1730,6 +2178,19 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
                 item.state = state == .paused ? .paused : .queued
                 item.isPinned = record.pinned ?? false
                 item.sources = record.sources ?? [record.source]
+                item.variantURL = record.variant.flatMap { URL(string: $0) }
+                // 目标文件被删了就别认这些分段进度了，否则会从半截开始写，
+                // 前面缺的永远补不回来
+                let destExists = record.destPath.map {
+                    FileManager.default.fileExists(atPath: $0)
+                } ?? false
+                if destExists, let total = record.chunkTotal, total > 0 {
+                    item.chunkTotal = total
+                    item.partReceived = record.chunkParts ?? []
+                } else {
+                    item.chunkTotal = 0
+                    item.partReceived = []
+                }
                 let savedIndex = record.sourceIndex ?? 0
                 item.sourceIndex = min(max(savedIndex, 0), max(0, item.sources.count - 1))
                 if item.sources.indices.contains(item.sourceIndex) {

@@ -159,7 +159,20 @@ enum LocalMedia {
             outcome.added += 1
         }
 
+        cleanPhotoImportFolders()
         return outcome
+    }
+
+    /// 相册导入会先落到 tmp/photo-import-xxx 下，导完连目录一起清掉，别留一地空壳
+    private static func cleanPhotoImportFolders() {
+        let tmp = FileManager.default.temporaryDirectory
+        guard let entries = try? FileManager.default.contentsOfDirectory(
+            at: tmp,
+            includingPropertiesForKeys: nil
+        ) else { return }
+        for url in entries where url.lastPathComponent.hasPrefix("photo-import-") {
+            try? FileManager.default.removeItem(at: url)
+        }
     }
 
     private enum ImportFailure: Error {
