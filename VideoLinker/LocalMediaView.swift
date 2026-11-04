@@ -230,7 +230,7 @@ struct LocalMediaView: View {
 
             Spacer(minLength: 8)
 
-            if known.contains(file.path) {
+            if isKnown(file) {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: 19))
                     .foregroundStyle(theme.accent.opacity(0.85))
@@ -258,7 +258,7 @@ struct LocalMediaView: View {
             } label: {
                 Label("播放", systemImage: "play.fill")
             }
-            if !known.contains(file.path) {
+            if !isKnown(file) {
                 Button {
                     add(file)
                 } label: {
@@ -437,10 +437,18 @@ struct LocalMediaView: View {
     }
 
     private func add(_ file: LocalMediaFile) {
-        if let list = PlaylistStore.attachDownload(path: file.path, title: file.title) {
-            showToast("已加入「\(list.name)」")
+        // 已经被任何列表收下了就不再往库里写，避免手快连点堆出重复条目
+        guard !isKnown(file) else {
+            showToast("已经在播放列表里了")
+            return
+        }
+
+        if let outcome = PlaylistStore.attachDownload(path: file.path, title: file.title) {
+            showToast(outcome.added
+                      ? "已加入「\(outcome.list.name)」"
+                      : "「\(outcome.list.name)」里已经有这个视频了")
         } else {
-            showToast("已加入播放列表")
+            showToast("加入失败，再试一次")
         }
         withAnimation(.easeInOut(duration: 0.18)) {
             known.insert(MediaPath.canonical(file.path))
@@ -452,13 +460,17 @@ struct LocalMediaView: View {
         let targets = freshFiles
         guard !targets.isEmpty else { return }
         importing = true
+        var added = 0
         for file in targets {
-            PlaylistStore.attachDownload(path: file.path, title: file.title)
+            if let outcome = PlaylistStore.attachDownload(path: file.path, title: file.title),
+               outcome.added {
+                added += 1
+            }
             known.insert(MediaPath.canonical(file.path))
             knownKeys.insert("\(file.name)|\(file.size)")
         }
         importing = false
-        showToast("已加入 \(targets.count) 个视频")
+        showToast(added > 0 ? "已加入 \(added) 个视频" : "这些视频已经在列表里了")
     }
 
     private func handlePicked(_ urls: [URL]) {

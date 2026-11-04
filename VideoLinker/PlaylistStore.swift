@@ -179,10 +179,19 @@ enum PlaylistStore {
         }
 
         // 数据库读不到时回落到旧版 JSON，两边都要过一遍路径修复
-        let (result, repairs) = repairingPaths(lists ?? legacyLoad())
+        let (repaired, repairs) = repairingPaths(lists ?? legacyLoad())
+        // 路径折回当前容器之后再合并重复条目：同一个列表里指向同一份文件的
+        // 只留第一条。老版本「+」判断失误时反复点，会堆出好几条一模一样的分集
+        let (result, deduped) = dedupingLocalItems(repaired)
         cache = result
 
-        if lists != nil, !repairs.isEmpty {
+        if deduped > 0 {
+            // 整表重写，路径修复和去重一起落库
+            save(result)
+            for fix in repairs where fix.oldURL != fix.url {
+                ResumeStore.migrate(from: fix.oldURL, to: fix.url)
+            }
+        } else if lists != nil, !repairs.isEmpty {
             // 直接把新路径写回这两列。这里不能调 save()：save 会回头再 load，
             // 而这时候缓存刚坐稳，容易绕成环
             AppDB.write { db in
@@ -258,6 +267,56 @@ enum PlaylistStore {
         }
 
         return (output, repairs)
+    }
+
+    /// 两个本地条目是不是同一份文件。
+    ///
+    /// 光比路径字符串不够：覆盖安装会换容器 UUID，文件被挪过目录、或者旧容器
+    /// 还残留着一份副本时，同一个片子会有好几种写法。规范路径一样算同一份；
+    /// 规范化之后还是对不上，就退回「文件名 + 字节数」——同一部片换了目录，
+    /// 名字和大小不会变。
+    static func isSameLocalFile(_ a: PlaylistItem, _ b: PlaylistItem) -> Bool {
+        guard let pa = a.effectiveLocalPath, let pb = b.effectiveLocalPath else { return false }
+        if MediaPath.canonical(pa) == MediaPath.canonical(pb) { return true }
+        guard let na = MediaPath.fileName(of: pa), let nb = MediaPath.fileName(of: pb), na == nb,
+              let sa = MediaPath.fileSize(pa), let sb = MediaPath.fileSize(pb) else { return false }
+        return sa == sb
+    }
+
+    /// 去重用的身份。能读到大小就用「文件名|字节数」，读不到再退回规范路径
+    private static func localKey(_ item: PlaylistItem) -> String? {
+        guard let path = item.effectiveLocalPath else { return nil }
+        if let name = MediaPath.fileName(of: path), let size = MediaPath.fileSize(path) {
+            return "f:\(name)|\(size)"
+        }
+        return "p:" + MediaPath.canonical(path)
+    }
+
+    /// 同一个列表里，指向同一份本机文件的条目只留最早那一条，顺序不变。
+    /// 返回处理后的列表和被去掉的条数
+    private static func dedupingLocalItems(_ playlists: [Playlist]) -> ([Playlist], Int) {
+        var output = playlists
+        var removed = 0
+
+        for listIndex in output.indices {
+            var seen = Set<String>()
+            var kept: [PlaylistItem] = []
+            for item in output[listIndex].items {
+                guard let key = localKey(item) else {
+                    kept.append(item)
+                    continue
+                }
+                if seen.contains(key) {
+                    removed += 1
+                    continue
+                }
+                seen.insert(key)
+                kept.append(item)
+            }
+            output[listIndex].items = kept
+        }
+
+        return (output, removed)
     }
 
     static func save(_ playlists: [Playlist]) {
@@ -365,7 +424,9 @@ enum PlaylistStore {
     static func add(_ item: PlaylistItem, to playlistID: UUID) -> [Playlist] {
         var playlists = load()
         guard let index = playlists.firstIndex(where: { $0.id == playlistID }) else { return playlists }
-        if playlists[index].items.contains(where: { $0.url == item.url }) {
+        // 除了地址完全一样，本地文件还要按「同一份文件」再认一次：
+        // 覆盖安装后路径写法会变，只比字符串会把同一集重复加进列表
+        if playlists[index].items.contains(where: { $0.url == item.url || isSameLocalFile($0, item) }) {
             return playlists
         }
         playlists[index].items.append(item)
@@ -679,9 +740,15 @@ enum PlaylistStore {
         return changed
     }
 
+    /// 登记结果：落到哪个列表，以及这次是真加进去了、还是本来就有
+    struct AttachOutcome {
+        let list: Playlist
+        let added: Bool
+    }
+
     /// 下载完成后把本地文件登记进播放列表，返回落到了哪个列表
     @discardableResult
-    static func attachDownload(path: String, title: String) -> Playlist? {
+    static func attachDownload(path: String, title: String) -> AttachOutcome? {
         guard !path.isEmpty else { return nil }
         let item = PlaylistItem(
             url: URL(fileURLWithPath: path).absoluteString,
@@ -694,17 +761,24 @@ enum PlaylistStore {
             target = downloadListID()
         }
 
-        var lists = add(item, to: target)
+        // 先看这个列表里是不是本来就有这份文件，界面据此提示「已加入」还是「已经有了」
+        let existed = load().first(where: { $0.id == target })?
+            .items.contains(where: { $0.url == item.url || isSameLocalFile($0, item) }) ?? false
+
+        let lists = add(item, to: target)
         if let list = lists.first(where: { $0.id == target }),
-           list.items.contains(where: { $0.localPath == path }) {
-            return list
+           existed || list.items.contains(where: { $0.url == item.url || isSameLocalFile($0, item) }) {
+            return AttachOutcome(list: list, added: !existed)
         }
 
         // 目标列表写不进去（刚好被删、库异常），再兜一次内置「下载」列表
         let fallback = downloadListID()
         guard fallback != target else { return nil }
-        lists = add(item, to: fallback)
-        return lists.first { $0.id == fallback }
+        let existedInFallback = load().first(where: { $0.id == fallback })?
+            .items.contains(where: { $0.url == item.url || isSameLocalFile($0, item) }) ?? false
+        let fallbackLists = add(item, to: fallback)
+        guard let list = fallbackLists.first(where: { $0.id == fallback }) else { return nil }
+        return AttachOutcome(list: list, added: !existedInFallback)
     }
 
     /// 之前处理过的路径。补登记只做一次，用户之后手动删掉就不会被反复塞回来
@@ -718,15 +792,27 @@ enum PlaylistStore {
     static func reconcileDownloads(_ entries: [(path: String, title: String)]) -> Int {
         guard !entries.isEmpty else { return 0 }
 
-        var handled = Set(UserDefaults.standard.stringArray(forKey: reconciledKey) ?? [])
-        let candidates = entries.filter { !handled.contains($0.path) }
+        // 记录时统一用规范路径：同一份文件换个写法（/var 与 /private/var、
+        // 旧容器残留）也认得出补过没有，不会每装一次就再塞一条
+        var handled = Set(
+            (UserDefaults.standard.stringArray(forKey: reconciledKey) ?? [])
+                .map { MediaPath.canonical($0) }
+        )
+        let candidates = entries.filter { !handled.contains(MediaPath.canonical($0.path)) }
         guard !candidates.isEmpty else { return 0 }
 
         // 先确认真的有待补的条目再动列表，否则可能平白新建出一个空的「下载」列表
-        let allLocalPaths = Set(load().flatMap { $0.items.compactMap { $0.localPath } })
-        let pending = candidates.filter { !allLocalPaths.contains($0.path) }
+        let existingItems = load().flatMap { $0.items }
+        let pending = candidates.filter { entry in
+            let item = PlaylistItem(
+                url: URL(fileURLWithPath: entry.path).absoluteString,
+                title: entry.title,
+                localPath: entry.path
+            )
+            return !existingItems.contains { $0.url == item.url || isSameLocalFile($0, item) }
+        }
         guard !pending.isEmpty else {
-            handled.formUnion(candidates.map { $0.path })
+            handled.formUnion(candidates.map { MediaPath.canonical($0.path) })
             UserDefaults.standard.set(Array(handled), forKey: reconciledKey)
             return 0
         }
@@ -737,20 +823,21 @@ enum PlaylistStore {
         var playlists = load()
         guard let index = playlists.firstIndex(where: { $0.id == target }) else { return 0 }
 
-        var existing = Set(playlists[index].items.compactMap { $0.localPath })
+        var currentItems = playlists[index].items
         var added = 0
 
         for entry in pending {
-            handled.insert(entry.path)
-            guard !existing.contains(entry.path) else { continue }
-            playlists[index].items.append(
-                PlaylistItem(
-                    url: URL(fileURLWithPath: entry.path).absoluteString,
-                    title: entry.title,
-                    localPath: entry.path
-                )
+            handled.insert(MediaPath.canonical(entry.path))
+            let item = PlaylistItem(
+                url: URL(fileURLWithPath: entry.path).absoluteString,
+                title: entry.title,
+                localPath: entry.path
             )
-            existing.insert(entry.path)
+            guard !currentItems.contains(where: { $0.url == item.url || isSameLocalFile($0, item) }) else {
+                continue
+            }
+            playlists[index].items.append(item)
+            currentItems.append(item)
             added += 1
         }
 
@@ -760,7 +847,7 @@ enum PlaylistStore {
         if added > 0 {
             save(playlists)
         }
-        handled.formUnion(candidates.map { $0.path })
+        handled.formUnion(candidates.map { MediaPath.canonical($0.path) })
         UserDefaults.standard.set(Array(handled), forKey: reconciledKey)
         return added
     }
