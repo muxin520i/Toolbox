@@ -28,6 +28,9 @@ struct StorageManagerView: View {
     @State private var confirmDuplicates = false
     @State private var confirmWatched = false
     @State private var showDuplicateFinder = false
+    @State private var showTrash = false
+    @State private var trashCount = 0
+    @State private var trashSize: Int64 = 0
 
     private var duplicates: [StorageFile] {
         files.filter { $0.duplicateSize != nil }
@@ -153,6 +156,9 @@ struct StorageManagerView: View {
             }
             .sheet(isPresented: $showDuplicateFinder) {
                 DuplicateFinderView()
+            }
+            .sheet(isPresented: $showTrash, onDismiss: { reload() }) {
+                TrashView()
             }
         }
     }
@@ -335,6 +341,19 @@ struct StorageManagerView: View {
                 )
             }
             .buttonStyle(.plain)
+
+            Button {
+                showTrash = true
+            } label: {
+                actionRow(
+                    title: "回收站",
+                    detail: trashCount > 0
+                        ? "\(trashCount) 个 · \(Fmt.bytes(trashSize))，7 天内可还原"
+                        : "空的，删掉的文件会先放这儿",
+                    symbol: "trash"
+                )
+            }
+            .buttonStyle(.plain)
         }
     }
 
@@ -508,10 +527,15 @@ struct StorageManagerView: View {
             let total = mapped.reduce(Int64(0)) { $0 + $1.size }
             let free = Self.availableSpace()
 
+            TrashStore.cleanExpired()
+            let trash = TrashStore.entries()
+
             await MainActor.run {
                 files = mapped
                 totalSize = total
                 freeSpace = free
+                trashCount = trash.count
+                trashSize = trash.reduce(0) { $0 + $1.size }
                 loading = false
             }
         }
@@ -574,7 +598,7 @@ struct StorageManagerView: View {
         for path in paths {
             if let item = DownloadManager.shared.items.first(where: { $0.localPath == path }) {
                 DownloadManager.shared.remove(item)
-            } else {
+            } else if !TrashStore.moveToTrash(URL(fileURLWithPath: path)) {
                 try? FileManager.default.removeItem(atPath: path)
             }
         }

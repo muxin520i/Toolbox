@@ -28,6 +28,9 @@ struct SettingsView: View {
     @State private var showLANTransfer = false
     @State private var showStats = false
     @State private var showStorage = false
+    @State private var showUpdate = false
+
+    @ObservedObject private var updateChecker = UpdateChecker.shared
     @State private var showWebDAV = false
     @State private var showEndpoint = false
     @State private var showHeaders = false
@@ -89,6 +92,9 @@ struct SettingsView: View {
         .sheet(isPresented: $showLANTransfer) {
             LANTransferView()
         }
+        .sheet(isPresented: $showUpdate) {
+            UpdateSheet()
+        }
         .sheet(isPresented: $showStats) {
             WatchStatsView()
         }
@@ -128,7 +134,10 @@ struct SettingsView: View {
             }
             Button("取消", role: .cancel) {}
         }
-        .onAppear(perform: reloadDownloadTargets)
+        .onAppear {
+            reloadDownloadTargets()
+            updateChecker.checkIfNeeded()
+        }
         .alert("新建播放列表", isPresented: $showNewList) {
             TextField("列表名称", text: $newListName)
             Button("取消", role: .cancel) { newListName = "" }
@@ -573,6 +582,33 @@ struct SettingsView: View {
                         .font(.system(size: 13))
                         .foregroundStyle(theme.textSecondary)
                 }
+                Button {
+                    showUpdate = true
+                } label: {
+                    HStack(spacing: 8) {
+                        Text("检查更新")
+                            .font(.system(size: 14))
+                            .foregroundStyle(theme.text)
+
+                        Spacer()
+
+                        if updateChecker.hasUpdate {
+                            Text("有新版本")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 3)
+                                .background(theme.accent, in: Capsule())
+                        }
+
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(theme.textTertiary)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
                 HStack {
                     Text("作者")
                         .font(.system(size: 14))

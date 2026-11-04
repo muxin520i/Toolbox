@@ -367,6 +367,49 @@ enum BrowserInject {
         return false
     }
 
+    /// 清爽模式：把挡在正文上的固定浮层摘掉，并把被锁住的滚动还原
+    static let cleanPage = """
+    (function() {
+      try {
+        if (window.__vlCleanDone) { return; }
+        window.__vlCleanDone = true;
+
+        var vw = window.innerWidth || 0, vh = window.innerHeight || 0;
+        var badName = /(^|[-_])(mask|modal|overlay|popup|dialog|guide|advert|ads?|banner|float|toast)([-_]|$)/i;
+        var goodName = /(player|video|jwplayer|dplayer|artplayer|shaka|hls)/i;
+
+        function box(el) {
+          var r = el.getBoundingClientRect();
+          return r.width * r.height;
+        }
+
+        var nodes = document.querySelectorAll('body *');
+        for (var i = 0; i < nodes.length; i++) {
+          var el = nodes[i];
+          if (!(el instanceof HTMLElement)) { continue; }
+          if (el.tagName === 'VIDEO' || el.querySelector('video,audio')) { continue; }
+
+          var cs = window.getComputedStyle(el);
+          if (cs.position !== 'fixed' && cs.position !== 'sticky') { continue; }
+
+          var name = (el.className || '') + ' ' + (el.id || '');
+          if (goodName.test(name)) { continue; }
+
+          var z = parseInt(cs.zIndex, 10) || 0;
+          var big = box(el) > vw * vh * 0.22;
+          if (big && (badName.test(name) || z >= 90)) { el.remove(); }
+        }
+
+        if (!document.getElementById('__vl_clean_style')) {
+          var style = document.createElement('style');
+          style.id = '__vl_clean_style';
+          style.textContent = 'html,body{overflow:auto !important;position:static !important;touch-action:auto !important;}';
+          document.documentElement.appendChild(style);
+        }
+      } catch (e) {}
+    })();
+    """
+
     /// 兜底：页面自身写死了深色 class/样式时，再把主背景压白一遍
     static let forceLightSite = """
     (function() {

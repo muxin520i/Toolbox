@@ -185,6 +185,10 @@ struct BrowserMenuSheet: View {
                                 store.current?.reload()
                             }
                         }
+                        toggleRow("清爽模式", "sparkles", isOn: store.current?.cleanMode ?? false) {
+                            store.current?.toggleCleanMode()
+                            dismiss()
+                        }
                     }
 
                     group {

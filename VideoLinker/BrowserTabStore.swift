@@ -55,6 +55,8 @@ final class BrowserTab: ObservableObject, Identifiable {
     @Published var found: [SniffedVideo] = []
     @Published var images: [SniffedImage] = []
     @Published var errorText: String?
+    /// 清爽模式：手动去掉固定浮层、恢复页面滚动
+    @Published var cleanMode = false
 
     private var bag = Set<AnyCancellable>()
 
@@ -140,6 +142,17 @@ final class BrowserTab: ObservableObject, Identifiable {
         guard !images.contains(where: { $0.url == clean }) else { return }
         let host = URL(string: clean)?.host ?? ""
         images.append(SniffedImage(url: clean, host: host, width: width, height: height))
+    }
+
+    /// 清爽模式：一次性去掉挡在正文上的浮层，关掉时重载页面复原
+    func toggleCleanMode() {
+        cleanMode.toggle()
+        if cleanMode {
+            webView.evaluateJavaScript(BrowserInject.cleanPage, completionHandler: nil)
+        } else {
+            reload()
+        }
+        Haptics.light()
     }
 
     func reload() { webView.reload() }
@@ -476,6 +489,12 @@ final class TabCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScri
         if let store = store {
             let js = BrowserInject.appearanceJS(night: store.options.night, noImage: store.options.noImage)
             webView.evaluateJavaScript(js, completionHandler: nil)
+        }
+
+        if tab.cleanMode {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                webView.evaluateJavaScript(BrowserInject.cleanPage, completionHandler: nil)
+            }
         }
     }
 

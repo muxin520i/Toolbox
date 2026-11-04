@@ -50,6 +50,10 @@ final class DownloadItem: ObservableObject, Identifiable {
     var sources: [String] = []
     /// 当前在用第几个源（从 0 开始）
     @Published var sourceIndex = 0
+    /// 入队前是否已经 HEAD 检查过
+    var preflighted = false
+    /// 服务器是否支持 Range（决定能不能续传）
+    var supportsResume = true
 
     /// HLS 走自研分片下载，拿不到系统的 resumeData
     var isHLS = false
@@ -152,6 +156,8 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
     private var idleTicks: [UUID: Int] = [:]
     /// 解析好的 HLS 任务（含密钥与分片清单），继续和重启恢复都靠它
     private var hlsJobs: [UUID: HLSJob] = [:]
+    /// 正在 HEAD 检查的任务，避免 pump 反复触发
+    private var preflighting: Set<UUID> = []
     /// 正在拼文件的，避免重复进入
     private var hlsAssembling: Set<UUID> = []
     /// 速度采样：每秒算一次 received 的增量
@@ -345,6 +351,15 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
             let ordered = queued.filter { $0.isPinned } + queued.filter { !$0.isPinned }
             for item in ordered {
                 guard running < limit else { break }
+
+                // 新任务先探一下链接：403、网页地址、没有断点支持，入队前就说清楚，
+                // 别等下了半天才发现下不动
+                if !item.preflighted, item.resumeData == nil {
+                    guard preflighting.count < limit else { break }
+                    startPreflight(item)
+                    continue
+                }
+
                 if item.isHLS {
                     beginHLS(item)
                 } else {
@@ -357,6 +372,83 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
         refreshRunning()
         if items.contains(where: { $0.state == .running }) {
             startSpeedTimer()
+        }
+    }
+
+    // MARK: 入队前预检
+
+    private enum Probe {
+        case ok(size: Int64, ranges: Bool)
+        case failed(String)
+    }
+
+    private func startPreflight(_ item: DownloadItem) {
+        guard !preflighting.contains(item.id) else { return }
+        preflighting.insert(item.id)
+        item.note = "正在检查链接…"
+
+        let source = item.source
+        let isHLS = item.isHLS
+
+        Task.detached(priority: .utility) { [weak self] in
+            let result = await Self.probe(source, isHLS: isHLS)
+            await MainActor.run {
+                guard let self = self else { return }
+                self.preflighting.remove(item.id)
+                item.preflighted = true
+
+                switch result {
+                case .ok(let size, let ranges):
+                    if size > 0, item.expected == 0, !isHLS { item.expected = size }
+                    item.supportsResume = ranges
+                    item.note = ranges ? "" : "服务器不支持断点续传"
+                    self.pump()
+                case .failed(let reason):
+                    self.fail(item, reason)
+                }
+            }
+        }
+    }
+
+    /// 只发 HEAD，几秒就回；服务器不认 HEAD 或网络异常时一律放行，交给正式下载处理
+    private static func probe(_ source: String, isHLS: Bool) async -> Probe {
+        guard let url = URL(string: source) else { return .failed("链接格式不对") }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "HEAD"
+        request.timeoutInterval = 8
+        request.setValue(mobileUA, forHTTPHeaderField: "User-Agent")
+        if let referer = referer(for: url) {
+            request.setValue(referer, forHTTPHeaderField: "Referer")
+        }
+        HTTPHeaderStore.apply(to: &request, url: url)
+
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse else { return .ok(size: 0, ranges: true) }
+
+            // 有些服务器直接拒绝 HEAD，这种就别拦了
+            if http.statusCode == 405 || http.statusCode == 501 {
+                return .ok(size: 0, ranges: true)
+            }
+
+            if http.statusCode == 403 {
+                return .failed("链接返回 403，去「请求头」里补 Referer / Cookie 再试")
+            }
+            if http.statusCode >= 400 {
+                return .failed("链接返回 \(http.statusCode)，下不了")
+            }
+
+            let mime = (http.value(forHTTPHeaderField: "Content-Type") ?? "").lowercased()
+            if !isHLS, mime.contains("text/html") {
+                return .failed("这个地址返回的是网页，不是视频文件")
+            }
+
+            let size = (http.value(forHTTPHeaderField: "Content-Length")).flatMap { Int64($0) } ?? 0
+            let ranges = (http.value(forHTTPHeaderField: "Accept-Ranges") ?? "").lowercased().contains("bytes")
+            return .ok(size: size, ranges: ranges)
+        } catch {
+            return .ok(size: 0, ranges: true)
         }
     }
 
@@ -1379,6 +1471,7 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
         item.resumeData = nil
         item.note = ""
         item.speed = 0
+        item.preflighted = false
 
         // 旧源的解析任务先停掉，不然它一会儿又回来把新源的状态覆盖掉
         jobs[item.id]?.cancel()
@@ -1442,7 +1535,9 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
         save()
     }
 
-    func remove(_ item: DownloadItem) {
+    /// toTrash = true 时文件挪进回收站，用户手滑删了还能捞回来；
+    /// 合并重复文件这种批量清理传 false，直接删掉才真的腾出空间
+    func remove(_ item: DownloadItem, toTrash: Bool = true) {
         jobs[item.id]?.cancel()
         jobs.removeValue(forKey: item.id)
         stopTimer(item.id)
@@ -1461,7 +1556,11 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
 
         // 没有下载源的是导入记录：只删记录，不动文件
         if let url = item.fileURL, !item.source.isEmpty {
-            try? FileManager.default.removeItem(at: url)
+            if toTrash {
+                TrashStore.moveToTrash(url)
+            } else {
+                try? FileManager.default.removeItem(at: url)
+            }
         }
         items.removeAll { $0.id == item.id }
         save()

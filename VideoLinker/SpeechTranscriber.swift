@@ -150,52 +150,54 @@ final class SpeechTranscriber: ObservableObject {
 
         let onDevice = recognizer.supportsOnDeviceRecognition
 
-        let asset = AVURLAsset(url: video)
-        let duration: Double
-        do {
-            duration = try await asset.load(.duration).seconds
-        } catch {
-            throw SpeechError.exportFailed("视频读不出来")
+        let asset = AVURLAsset(
+            url: video,
+            options: [AVURLAssetPreferPreciseDurationAndTimingKey: true]
+        )
+
+        let tracks = (try? await asset.loadTracks(withMediaType: .audio)) ?? []
+        guard !tracks.isEmpty else { throw SpeechError.noAudio }
+
+        // 时长只用来算进度，读不到也照转（.ts 裸流常年没有时长）
+        var total: Double = 0
+        if let value = try? await asset.load(.duration).seconds, value.isFinite, value > 0.5 {
+            total = value
         }
-        guard duration.isFinite, duration > 0.6 else { throw SpeechError.noAudio }
 
-        let audioTracks = (try? await asset.loadTracks(withMediaType: .audio)) ?? []
-        guard !audioTracks.isEmpty else { throw SpeechError.noAudio }
+        await update(status: "正在准备音轨…", progress: 0)
 
-        await update(status: onDevice ? "正在本地识别…" : "正在识别（需要联网）…", progress: 0)
+        let reader = try await AudioChunkReader(asset: asset, chunkSeconds: chunkSeconds)
+        defer { reader.cancel() }
 
         var cues: [SpeechCue] = []
-        var start: Double = 0
+        var done: Double = 0
 
-        while start < duration - 0.05 {
+        while true {
             try checkCancelled()
-
-            let length = min(chunkSeconds, duration - start)
-            let range = CMTimeRange(
-                start: CMTime(seconds: start, preferredTimescale: 600),
-                duration: CMTime(seconds: length, preferredTimescale: 600)
-            )
-
-            let partURL = try await exportAudio(asset: asset, range: range)
+            guard let chunk = try reader.nextChunk() else { break }
 
             let segments: [SpeechSegment]
             do {
-                segments = try await recognize(url: partURL, recognizer: recognizer, onDevice: onDevice)
+                segments = try await recognize(url: chunk.url, recognizer: recognizer, onDevice: onDevice)
             } catch {
-                try? FileManager.default.removeItem(at: partURL)
+                try? FileManager.default.removeItem(at: chunk.url)
                 if isCancelled() { throw SpeechError.cancelled }
                 throw error
             }
-            try? FileManager.default.removeItem(at: partURL)
+            try? FileManager.default.removeItem(at: chunk.url)
 
-            cues.append(contentsOf: Self.makeCues(from: segments, offset: start))
+            cues.append(contentsOf: Self.makeCues(from: segments, offset: chunk.start))
+            done = chunk.start + chunk.seconds
 
-            start += length
-            let ratio = min(1, start / duration)
-            await update(
-                status: "已识别 \(Int(ratio * 100))%（\(Self.timeText(start)) / \(Self.timeText(duration))）",
-                progress: ratio
-            )
+            if total > 0 {
+                let ratio = min(1, done / total)
+                await update(
+                    status: "已识别 \(Int(ratio * 100))%（\(Self.timeText(done)) / \(Self.timeText(total))）",
+                    progress: ratio
+                )
+            } else {
+                await update(status: "已识别 \(Self.timeText(done))", progress: nil)
+            }
         }
 
         try checkCancelled()
@@ -204,39 +206,6 @@ final class SpeechTranscriber: ObservableObject {
         }
 
         return try Self.write(cues: cues, for: video)
-    }
-
-    // MARK: 导出音轨
-
-    private func exportAudio(asset: AVAsset, range: CMTimeRange) async throws -> URL {
-        let out = FileManager.default.temporaryDirectory
-            .appendingPathComponent("speech-\(UUID().uuidString).m4a")
-
-        guard let session = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetAppleM4A) else {
-            throw SpeechError.exportFailed("设备不支持导出这种音轨")
-        }
-
-        session.outputURL = out
-        session.outputFileType = .m4a
-        session.timeRange = range
-        session.shouldOptimizeForNetworkUse = false
-
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            session.exportAsynchronously {
-                switch session.status {
-                case .completed:
-                    continuation.resume()
-                case .cancelled:
-                    continuation.resume(throwing: SpeechError.cancelled)
-                default:
-                    continuation.resume(
-                        throwing: SpeechError.exportFailed(session.error?.localizedDescription ?? "")
-                    )
-                }
-            }
-        }
-
-        return out
     }
 
     // MARK: 识别一段
@@ -447,11 +416,13 @@ final class SpeechTranscriber: ObservableObject {
 
     // MARK: 状态
 
-    private func update(status: String, progress: Double) async {
+    private func update(status: String, progress: Double?) async {
         await MainActor.run {
             guard !self.isCancelled() else { return }
             self.statusText = status
-            self.progress = progress
+            if let progress = progress {
+                self.progress = progress
+            }
         }
     }
 

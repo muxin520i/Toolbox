@@ -82,7 +82,7 @@ final class DuplicateFinderModel: ObservableObject {
                 )
 
                 if let item = DownloadManager.shared.items.first(where: { $0.localPath == oldPath }) {
-                    DownloadManager.shared.remove(item)
+                    DownloadManager.shared.remove(item, toTrash: false)
                 } else {
                     try? FileManager.default.removeItem(atPath: oldPath)
                 }
