@@ -139,6 +139,7 @@ enum BrowserMenuAction {
     case find
     case settings
     case bookmark
+    case memo
     case reload
     case share
     case copyURL
@@ -196,6 +197,7 @@ struct BrowserMenuSheet: View {
                     group {
                         row(isBookmarked ? "取消收藏" : "收藏本页",
                             isBookmarked ? "heart.fill" : "heart") { onAction(.bookmark) }
+                        row("存到备忘录", "note.text") { onAction(.memo) }
                         row("分享", "square.and.arrow.up") { onAction(.share) }
                         row("复制链接", "link") { onAction(.copyURL) }
                         row("添加到主页", "plus.app") { onAction(.addShortcut) }

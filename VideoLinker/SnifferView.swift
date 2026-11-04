@@ -231,6 +231,9 @@ struct BrowserView: View {
         .onReceive(NotificationCenter.default.publisher(for: .browserAppearanceChanged)) { _ in
             syncStore()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .memoSavedFromWeb)) { _ in
+            showToast("已存进备忘录")
+        }
         .onReceive(NotificationCenter.default.publisher(for: .openInBrowser)) { note in
             guard let url = note.object as? String, !url.isEmpty else { return }
             openInBrowser(url)
@@ -725,6 +728,10 @@ struct BrowserView: View {
             sheet = nil
             toggleBookmark(tab)
 
+        case .memo:
+            sheet = nil
+            savePageToMemo(tab)
+
         case .reload:
             sheet = nil
             tab.reload()
@@ -801,6 +808,27 @@ struct BrowserView: View {
             let title = tab.title.isEmpty ? tab.hostText : tab.title
             bookmarks.add(title: title, url: tab.urlString)
             showToast("已收藏")
+        }
+    }
+
+    /// 菜单里的兜底入口：优先存选中的文字，没选就存本页标题和地址
+    private func savePageToMemo(_ tab: BrowserTab) {
+        guard !tab.urlString.isEmpty else {
+            showToast("先打开一个网页")
+            return
+        }
+        tab.webView.evaluateJavaScript("window.getSelection ? window.getSelection().toString() : ''") { result, _ in
+            let selection = (result as? String) ?? ""
+            DispatchQueue.main.async {
+                let memo = MemoStore.shared.addFromWeb(selection: selection,
+                                                       pageTitle: tab.title,
+                                                       pageURL: tab.urlString)
+                if memo == nil {
+                    showToast("没有可保存的内容")
+                } else {
+                    showToast(selection.isEmpty ? "已把本页存进备忘" : "已存进备忘录")
+                }
+            }
         }
     }
 

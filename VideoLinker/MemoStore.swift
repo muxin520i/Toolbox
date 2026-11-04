@@ -146,6 +146,29 @@ final class MemoStore: ObservableObject {
         return memo
     }
 
+    /// 浏览器里选中一段字直接存进来。带上页面标题和地址，
+    /// 以后在备忘录里点链接就能回到原文，不用再搜一遍
+    @discardableResult
+    func addFromWeb(selection: String, pageTitle: String, pageURL: String) -> Memo? {
+        let quote = selection.trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = pageTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !quote.isEmpty || !pageURL.isEmpty else { return nil }
+
+        var lines: [String] = []
+        if quote.isEmpty {
+            lines.append(title.isEmpty ? "网页" : title)
+        } else {
+            // 给出处留出位置，别让长文把尾巴截掉
+            lines.append(String(quote.prefix(Self.maxLength - 500)))
+            lines.append("")
+            lines.append("来源：" + (title.isEmpty ? "网页" : title))
+        }
+        if !pageURL.isEmpty {
+            lines.append(pageURL)
+        }
+        return add(lines.joined(separator: "\n"))
+    }
+
     func update(_ memo: Memo, text: String) {
         guard let clean = Self.clean(text) else { return }
         var copy = items

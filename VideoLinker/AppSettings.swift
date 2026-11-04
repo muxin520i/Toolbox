@@ -112,6 +112,8 @@ extension EnvironmentValues {
 extension Notification.Name {
     /// 外观（夜间 / 无图 / 广告拦截）在设置页被改动，需要立刻应用到网页
     static let browserAppearanceChanged = Notification.Name("vl.browserAppearanceChanged")
+    /// 网页里选中文字存进备忘录，浏览器界面弹一句提示
+    static let memoSavedFromWeb = Notification.Name("vl.memoSavedFromWeb")
 }
 
 // MARK: - 设置项的键

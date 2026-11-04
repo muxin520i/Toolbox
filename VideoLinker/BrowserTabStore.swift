@@ -259,6 +259,7 @@ final class BrowserStore: ObservableObject {
         controller.add(coordinator, name: "imageSniffer")
         controller.add(coordinator, name: "vlGM")
         controller.add(coordinator, name: "vlScript")
+        controller.add(coordinator, name: "memoPick")
         BrowserInject.install(into: controller, adBlock: options.adBlock, userscripts: options.userscripts)
 
         tabs.append(tab)
@@ -280,6 +281,7 @@ final class BrowserStore: ObservableObject {
         controller.removeScriptMessageHandler(forName: "imageSniffer")
         controller.removeScriptMessageHandler(forName: "vlGM")
         controller.removeScriptMessageHandler(forName: "vlScript")
+        controller.removeScriptMessageHandler(forName: "memoPick")
         controller.removeAllUserScripts()
 
         tab.webView.removeFromSuperview()
@@ -419,6 +421,19 @@ final class TabCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScri
         if message.name == "vlScript" {
             guard let url = message.body as? String else { return }
             installScript(from: url, in: message.webView)
+            return
+        }
+        if message.name == "memoPick" {
+            guard let body = message.body as? [String: Any],
+                  let text = body["text"] as? String else { return }
+            let url = (body["url"] as? String) ?? ""
+            let title = (body["title"] as? String) ?? ""
+            DispatchQueue.main.async {
+                guard let memo = MemoStore.shared.addFromWeb(selection: text,
+                                                             pageTitle: title,
+                                                             pageURL: url) else { return }
+                NotificationCenter.default.post(name: .memoSavedFromWeb, object: memo)
+            }
             return
         }
         if message.name == "imageSniffer" {

@@ -356,6 +356,135 @@ enum BrowserInject {
     })();
     """
 
+    /// 选中文字后在选区下方浮一个「存备忘」，点一下把这段字连同出处交给原生。
+    /// 按钮放在选区下方是为了躲开系统划词菜单；点它时选区会被收起，
+    /// 所以 touchstart 先把文字抓在手里，不能等 touchend 再读。
+    static let memoPick = """
+    (function() {
+      if (window.__vlMemoPick) { return; }
+      window.__vlMemoPick = true;
+
+      var btn = null;
+      var timer = null;
+      var held = '';
+
+      function remove() {
+        if (btn && btn.parentNode) { btn.parentNode.removeChild(btn); }
+        btn = null;
+      }
+
+      function currentText() {
+        var sel = window.getSelection();
+        return sel ? sel.toString().trim() : '';
+      }
+
+      function send() {
+        var text = (held || currentText()).trim();
+        held = '';
+        if (!text) { return; }
+        try {
+          window.webkit.messageHandlers.memoPick.postMessage({
+            text: text,
+            url: location.href,
+            title: document.title || ''
+          });
+        } catch (e) {}
+        remove();
+        var sel = window.getSelection();
+        if (sel) { try { sel.removeAllRanges(); } catch (e) {} }
+      }
+
+      function ensure() {
+        if (btn) { return btn; }
+        btn = document.createElement('div');
+        btn.setAttribute('id', '__vl_memo_pick');
+        btn.textContent = '存备忘';
+        btn.style.cssText = [
+          'all:initial',
+          'position:fixed',
+          'display:block',
+          'z-index:2147483647',
+          'padding:7px 13px',
+          'border:0',
+          'border-radius:16px',
+          'background:rgba(28,30,36,0.94)',
+          'color:#ffffff',
+          'font:600 13px -apple-system,system-ui,sans-serif',
+          'line-height:1',
+          'white-space:nowrap',
+          'box-shadow:0 6px 18px rgba(0,0,0,0.28)',
+          'cursor:pointer',
+          'user-select:none',
+          '-webkit-user-select:none',
+          '-webkit-touch-callout:none',
+          'touch-action:manipulation'
+        ].join(';');
+
+        btn.addEventListener('touchstart', function(e) {
+          held = currentText();
+          e.stopPropagation();
+        }, { passive: true });
+
+        btn.addEventListener('touchend', function(e) {
+          e.preventDefault();
+          e.stopPropagation();
+          send();
+        }, { passive: false });
+
+        btn.addEventListener('click', function(e) {
+          e.preventDefault();
+          e.stopPropagation();
+          send();
+        });
+
+        (document.body || document.documentElement).appendChild(btn);
+        return btn;
+      }
+
+      function place() {
+        var sel = window.getSelection();
+        if (!sel || sel.isCollapsed || sel.rangeCount === 0) { return false; }
+        var text = sel.toString().trim();
+        if (text.length < 2) { return false; }
+
+        var active = document.activeElement;
+        if (active) {
+          var tag = (active.tagName || '').toUpperCase();
+          if (tag === 'INPUT' || tag === 'TEXTAREA' || active.isContentEditable) { return false; }
+        }
+
+        var range = sel.getRangeAt(0);
+        var rect = range.getBoundingClientRect();
+        if (!rect || (rect.width === 0 && rect.height === 0)) { return false; }
+
+        var el = ensure();
+        var top = rect.bottom + 10;
+        if (top + 36 > window.innerHeight) { top = Math.max(8, rect.top - 44); }
+        var left = rect.left + rect.width / 2 - 32;
+        left = Math.max(10, Math.min(left, window.innerWidth - 86));
+        el.style.top = Math.round(top) + 'px';
+        el.style.left = Math.round(left) + 'px';
+        return true;
+      }
+
+      function refresh() {
+        clearTimeout(timer);
+        timer = setTimeout(function() {
+          if (place()) { return; }
+          // 点浮层时系统会先收起选区，晚一点再撤按钮，别把点击吃掉
+          clearTimeout(timer);
+          timer = setTimeout(function() {
+            if (currentText().length < 2) { remove(); }
+          }, 320);
+        }, 140);
+      }
+
+      document.addEventListener('selectionchange', refresh, true);
+      document.addEventListener('scroll', function() { remove(); }, true);
+      window.addEventListener('resize', function() { remove(); });
+    })();
+    """
+
     static let readerRun = "window.__vlReader ? window.__vlReader() : false"
 
     /// 自动滚动收集：懒加载的图集 / 长页面，一行一行往下推，
@@ -529,6 +658,11 @@ enum BrowserInject {
                 WKUserScript(source: code, injectionTime: .atDocumentStart, forMainFrameOnly: false)
             )
         }
+
+        // 浮层只挂主文档，iframe 里选字也走主文档的通知，避免每个小窗都冒一个
+        controller.addUserScript(
+            WKUserScript(source: memoPick, injectionTime: .atDocumentStart, forMainFrameOnly: true)
+        )
 
         guard !userscripts.isEmpty else { return }
 
