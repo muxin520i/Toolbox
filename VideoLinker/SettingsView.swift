@@ -39,7 +39,10 @@ struct SettingsView: View {
     @State private var showAudioSync = false
     @State private var showDiagnostics = false
     @State private var showPrivateHelp = false
+    @State private var showMemos = false
     @State private var toast: String?
+
+    @ObservedObject private var memos = MemoStore.shared
 
     private let rates: [Double] = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
 
@@ -56,6 +59,7 @@ struct SettingsView: View {
                         networkCard
                         storageCard
                         privacyCard
+                        memoCard
                         dataCard
                         aboutCard
                     }
@@ -100,6 +104,9 @@ struct SettingsView: View {
         }
         .sheet(isPresented: $showStorage) {
             StorageManagerView()
+        }
+        .sheet(isPresented: $showMemos) {
+            MemoListView()
         }
         .sheet(isPresented: $showWebDAV) {
             WebDAVView()
@@ -524,6 +531,53 @@ struct SettingsView: View {
                 .buttonStyle(.plain)
             }
         }
+    }
+
+    // MARK: 备忘录
+
+    private var memoCard: some View {
+        card(title: "备忘", icon: "note.text") {
+            Button {
+                showMemos = true
+            } label: {
+                HStack(spacing: 10) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("备忘录")
+                            .font(.system(size: 14))
+                            .foregroundStyle(theme.text)
+                        Text(memoSummary)
+                            .font(.system(size: 11))
+                            .foregroundStyle(theme.textTertiary)
+                            .lineLimit(1)
+                    }
+
+                    Spacer(minLength: 8)
+
+                    if !memos.items.isEmpty {
+                        Text("\(memos.items.count) 条")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(theme.accent)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(theme.accent.opacity(0.12), in: Capsule())
+                    }
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(theme.textTertiary)
+                }
+                .padding(.vertical, 4)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private var memoSummary: String {
+        guard let latest = memos.items.first else {
+            return "把链接、账号、临时记的东西放这里，免得搞丢"
+        }
+        return "最近更新 \(latest.dateText)"
     }
 
     // MARK: 数据

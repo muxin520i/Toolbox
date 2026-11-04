@@ -88,6 +88,8 @@
 		1A00000000000000000003DF /* PhotoPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00000000000000000002DF /* PhotoPicker.swift */; };
 		1A00000000000000000003E0 /* UndoCenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00000000000000000002E0 /* UndoCenter.swift */; };
 		1A00000000000000000003E1 /* MediaPath.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00000000000000000002E1 /* MediaPath.swift */; };
+		1A00000000000000000003E2 /* MemoStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00000000000000000002E2 /* MemoStore.swift */; };
+		1A00000000000000000003E3 /* MemoView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00000000000000000002E3 /* MemoView.swift */; };
 		1A0000000000000000000361 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = 1A00000000000000000004A0 /* GRDB */; };
 /* End PBXBuildFile section */
 
@@ -201,6 +203,8 @@
 		1A00000000000000000002DF /* PhotoPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoPicker.swift; sourceTree = "<group>"; };
 		1A00000000000000000002E0 /* UndoCenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UndoCenter.swift; sourceTree = "<group>"; };
 		1A00000000000000000002E1 /* MediaPath.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaPath.swift; sourceTree = "<group>"; };
+		1A00000000000000000002E2 /* MemoStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoStore.swift; sourceTree = "<group>"; };
+		1A00000000000000000002E3 /* MemoView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -323,6 +327,8 @@
 				1A00000000000000000002DF /* PhotoPicker.swift */,
 				1A00000000000000000002E0 /* UndoCenter.swift */,
 				1A00000000000000000002E1 /* MediaPath.swift */,
+				1A00000000000000000002E2 /* MemoStore.swift */,
+				1A00000000000000000002E3 /* MemoView.swift */,
 			);
 			path = VideoLinker;
 			sourceTree = "<group>";
@@ -519,6 +525,8 @@
 				1A00000000000000000003DF /* PhotoPicker.swift in Sources */,
 				1A00000000000000000003E0 /* UndoCenter.swift in Sources */,
 				1A00000000000000000003E1 /* MediaPath.swift in Sources */,
+				1A00000000000000000003E2 /* MemoStore.swift in Sources */,
+				1A00000000000000000003E3 /* MemoView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -667,7 +675,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 4;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = VideoLinker/Info.plist;
@@ -675,7 +683,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.1.2;
+				MARKETING_VERSION = 1.2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.example.VideoLinker;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -690,7 +698,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 4;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = VideoLinker/Info.plist;
@@ -698,7 +706,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.1.2;
+				MARKETING_VERSION = 1.2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.example.VideoLinker;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -712,7 +720,7 @@
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 4;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = ShareExtension/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
@@ -721,7 +729,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.1.2;
+				MARKETING_VERSION = 1.2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.example.VideoLinker.ShareExtension;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -735,7 +743,7 @@
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 4;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = ShareExtension/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
@@ -744,7 +752,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.1.2;
+				MARKETING_VERSION = 1.2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.example.VideoLinker.ShareExtension;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;

@@ -5,7 +5,7 @@ import GRDB
 //
 // v2.7 起，原先散落在 UserDefaults 里的 JSON 全部搬进一个 SQLite 库：
 // 播放历史 / 观看进度 / 收藏 / 播放列表 / 用户脚本 / 脚本存储值 / 下载记录 /
-// 网页历史 / 书签 / 主页快捷方式。
+// 网页历史 / 书签 / 主页快捷方式 / 备忘录。
 //
 // 两个原则：
 // 1. 升级只搬一次（meta 表里打标记），且搬之前先把旧的 UserDefaults 整包备份成文件；
@@ -181,6 +181,21 @@ enum AppDB {
         migrator.registerMigration("v3") { db in
             try db.execute(sql: "ALTER TABLE playlist ADD COLUMN isPrivate INTEGER NOT NULL DEFAULT 0")
             try db.execute(sql: "INSERT OR REPLACE INTO meta (key, value) VALUES ('schema.version', 'v3')")
+        }
+
+        // v4：设置里的备忘录
+        migrator.registerMigration("v4") { db in
+            try db.execute(sql: """
+                CREATE TABLE IF NOT EXISTS memo (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    text TEXT NOT NULL,
+                    createdAt DOUBLE NOT NULL,
+                    updatedAt DOUBLE NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS memo_updated ON memo(updatedAt DESC);
+                """)
+
+            try db.execute(sql: "INSERT OR REPLACE INTO meta (key, value) VALUES ('schema.version', 'v4')")
         }
 
         return migrator
