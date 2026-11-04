@@ -109,7 +109,8 @@ enum TrashStore {
             return nil
         }
 
-        let original = URL(fileURLWithPath: entry.originalPath)
+        // 重装后旧容器路径已经失效，还原时挂回当前容器，别往不存在的目录里放
+        let original = URL(fileURLWithPath: MediaPath.rebase(entry.originalPath) ?? entry.originalPath)
         var target = original
         if fm.fileExists(atPath: target.path) {
             target = uniqueURL(for: original)

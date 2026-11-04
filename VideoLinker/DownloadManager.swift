@@ -2135,6 +2135,19 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
             records = legacy
         }
 
+        // 覆盖安装后数据容器 UUID 会变，记录里的绝对路径跟着换一份，
+        // 否则文件明明还在，「下载管理」却把它当成已删除直接丢掉
+        records = records.map { record in
+            guard let fixed = MediaPath.resolve(record.localPath),
+                  fixed != record.localPath else { return record }
+            return Record(
+                fileName: record.fileName,
+                source: record.source,
+                localPath: fixed,
+                date: record.date
+            )
+        }
+
         // 老版本把「本机视频」里导入的文件也写进了下载表（source 为空）。
         // 这些不是下载：先摘出来，下面把记录清掉，文件本身留着
         let importedCount = records.filter { $0.source.isEmpty }.count
@@ -2170,7 +2183,9 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
                 item.isHLS = record.isHLS
                 item.createdAt = record.createdAt
                 item.progress = record.progress
-                item.destURL = record.destPath.map { URL(fileURLWithPath: $0) }
+                // 没下完的临时文件也要落回当前容器，不然续传会往一个不存在的目录写
+                item.destURL = record.destPath.flatMap { MediaPath.rebase($0) }
+                    .map { URL(fileURLWithPath: $0) }
                 item.resumeData = record.resumeData.flatMap { Data(base64Encoded: $0) }
                 item.state = state == .paused ? .paused : .queued
                 item.isPinned = record.pinned ?? false
@@ -2178,8 +2193,8 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
                 item.variantURL = record.variant.flatMap { URL(string: $0) }
                 // 目标文件被删了就别认这些分段进度了，否则会从半截开始写，
                 // 前面缺的永远补不回来
-                let destExists = record.destPath.map {
-                    FileManager.default.fileExists(atPath: $0)
+                let destExists = item.destURL.map {
+                    FileManager.default.fileExists(atPath: $0.path)
                 } ?? false
                 if destExists, let total = record.chunkTotal, total > 0 {
                     item.chunkTotal = total

@@ -170,9 +170,76 @@ enum PlaylistStore {
             }
         }
 
-        let result = lists ?? legacyLoad()
+        // 数据库读不到时回落到旧版 JSON，两边都要过一遍路径修复
+        let (result, repairs) = repairingPaths(lists ?? legacyLoad())
         cache = result
+
+        if lists != nil, !repairs.isEmpty {
+            // 直接把新路径写回这两列。这里不能调 save()：save 会回头再 load，
+            // 而这时候缓存刚坐稳，容易绕成环
+            AppDB.write { db in
+                for fix in repairs {
+                    try db.execute(
+                        sql: "UPDATE playlistItem SET localPath = ?, url = ? WHERE id = ?",
+                        arguments: [fix.path, fix.url, fix.id.uuidString]
+                    )
+                }
+            }
+            // 续播进度是按 url 记的，url 换了要跟着搬，不然装完新版本进度全清零
+            for fix in repairs where fix.oldURL != fix.url {
+                ResumeStore.migrate(from: fix.oldURL, to: fix.url)
+            }
+        }
+
         return result
+    }
+
+    private struct PathRepair {
+        let id: UUID
+        let path: String
+        let url: String
+        let oldURL: String
+    }
+
+    /// 把条目里指向旧安装容器的路径换成本次安装的路径。
+    ///
+    /// 覆盖安装后数据容器的 UUID 会变，绝对路径不跟着换的话，
+    /// 「本机视频」里加进列表的文件会全部显示成「文件已删除」，
+    /// 用户只能重新加一遍。文件其实还在 Documents 里，改一下前缀就能找回。
+    private static func repairingPaths(_ playlists: [Playlist]) -> ([Playlist], [PathRepair]) {
+        var output: [Playlist] = []
+        var repairs: [PathRepair] = []
+
+        for list in playlists {
+            var copy = list
+            for index in copy.items.indices {
+                var item = copy.items[index]
+                guard item.isLocal else { continue }
+
+                let storedPath = item.localPath
+                let storedURL = item.url
+                guard let fixed = MediaPath.resolve(storedPath) ?? MediaPath.resolve(storedURL) else {
+                    continue
+                }
+
+                item.localPath = fixed
+                // file:// 地址里也带着旧容器，不换的话播放器还是打不开
+                if storedURL.lowercased().hasPrefix("file://"),
+                   URL(string: storedURL)?.path != fixed {
+                    item.url = URL(fileURLWithPath: fixed).absoluteString
+                }
+
+                if item.localPath != storedPath || item.url != storedURL {
+                    repairs.append(
+                        PathRepair(id: item.id, path: fixed, url: item.url, oldURL: storedURL)
+                    )
+                }
+                copy.items[index] = item
+            }
+            output.append(copy)
+        }
+
+        return (output, repairs)
     }
 
     static func save(_ playlists: [Playlist]) {
