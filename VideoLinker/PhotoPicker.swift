@@ -5,7 +5,8 @@ import UniformTypeIdentifiers
 /// 系统相册选择器。只挑视频，选完把文件拷到临时目录再交给导入流程。
 /// 用 PHPicker 不需要相册权限，也看不到照片以外的东西。
 struct PhotoPickerSheet: UIViewControllerRepresentable {
-    var selectionLimit: Int = 0
+    /// 一次最多挑 20 个，选太多拷贝会卡住主界面
+    var selectionLimit: Int = 20
     var onPick: ([URL]) -> Void
     var onCancel: () -> Void
 

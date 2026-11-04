@@ -771,7 +771,10 @@ struct BrowserView: View {
 
         case .autoScroll:
             sheet = nil
-            tab.toggleAutoScroll()
+            // 等菜单收完再执行，不然页面上的滚动会被转场打断
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.32) {
+                tab.toggleAutoScroll()
+            }
 
         case .scripts:
             openPanel(.scripts)

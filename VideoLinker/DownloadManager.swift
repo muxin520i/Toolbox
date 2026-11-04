@@ -636,7 +636,8 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
 
         DispatchQueue.main.async {
             guard let item = self.items.first(where: { $0.id == info.itemID }),
-                  var job = self.chunkJobs[info.itemID] else { return }
+                  var job = self.chunkJobs[info.itemID],
+                  info.index < job.parts.count else { return }
             guard ok else {
                 self.cancelChunks(of: info.itemID)
                 self.chunkJobs.removeValue(forKey: info.itemID)
@@ -1411,7 +1412,8 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
             DispatchQueue.main.async {
                 guard let item = self.items.first(where: { $0.id == info.itemID }),
                       var job = self.chunkJobs[info.itemID],
-                      item.state == .running else { return }
+                      item.state == .running,
+                      info.index < job.parts.count else { return }
                 let span = job.end(info.index) - job.start(info.index) + 1
                 job.parts[info.index] = min(span, info.base + written)
                 self.chunkJobs[info.itemID] = job
