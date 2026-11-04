@@ -209,6 +209,8 @@ enum PlaylistStore {
     private static func repairingPaths(_ playlists: [Playlist]) -> ([Playlist], [PathRepair]) {
         var output: [Playlist] = []
         var repairs: [PathRepair] = []
+        // 只有真碰到对不上的条目才去扫文档目录，平时不付这个代价
+        var nameIndex: [String: String]?
 
         for list in playlists {
             var copy = list
@@ -218,9 +220,17 @@ enum PlaylistStore {
 
                 let storedPath = item.localPath
                 let storedURL = item.url
-                guard let fixed = MediaPath.resolve(storedPath) ?? MediaPath.resolve(storedURL) else {
-                    continue
+
+                var fixed = MediaPath.resolve(storedPath) ?? MediaPath.resolve(storedURL)
+                if fixed == nil {
+                    // 容器没变但文件被挪到别的子目录（用「文件」App 拖过），
+                    // 按文件名再找一遍
+                    if nameIndex == nil { nameIndex = MediaPath.uniqueFileIndex() }
+                    if let name = MediaPath.fileName(of: storedPath) ?? MediaPath.fileName(of: storedURL) {
+                        fixed = nameIndex?[name]
+                    }
                 }
+                guard let fixed = fixed else { continue }
 
                 item.localPath = fixed
                 // file:// 地址里也带着旧容器，不换的话播放器还是打不开

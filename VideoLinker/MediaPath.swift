@@ -60,4 +60,53 @@ enum MediaPath {
         guard let candidate = rebase(stored) else { return nil }
         return FileManager.default.fileExists(atPath: candidate) ? candidate : nil
     }
+
+    /// 从存下来的路径里取文件名，file:// 也能认
+    static func fileName(of stored: String?) -> String? {
+        guard var raw = stored?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
+            return nil
+        }
+        if raw.lowercased().hasPrefix("file://") {
+            let path = String(raw.dropFirst("file://".count))
+            raw = path.removingPercentEncoding ?? path
+        }
+        let name = (raw as NSString).lastPathComponent
+        return name.isEmpty ? nil : name
+    }
+
+    /// 在文档目录里按文件名建一份索引，给「路径对不上但文件还在」兜底用。
+    /// 同名不止一个的直接丢掉——宁可让用户自己处理，也别指到错的片子上。
+    static func uniqueFileIndex() -> [String: String] {
+        var index: [String: String] = [:]
+        var duplicated = Set<String>()
+
+        let root = URL(fileURLWithPath: documentsPath)
+        guard let enumerator = FileManager.default.enumerator(
+            at: root,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        ) else { return index }
+
+        var scanned = 0
+        for case let url as URL in enumerator {
+            scanned += 1
+            if scanned > 5000 { break }
+            // 回收站里的文件带时间戳前缀，正常撞不上；真撞上也不能拿来复活条目
+            if url.path.contains("/回收站/") { continue }
+            guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey]),
+                  values.isRegularFile == true else { continue }
+
+            let name = url.lastPathComponent
+            if index[name] != nil {
+                duplicated.insert(name)
+            } else {
+                index[name] = url.path
+            }
+        }
+
+        for name in duplicated {
+            index.removeValue(forKey: name)
+        }
+        return index
+    }
 }
