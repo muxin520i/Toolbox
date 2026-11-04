@@ -22,6 +22,9 @@ struct LocalMediaView: View {
     /// 已经在某个播放列表里的文件路径。只认播放列表，不认下载记录——
     /// 下载记录里有、列表里没有的那些，必须还能点「+」加进去，否则会卡成死结
     @State private var known: Set<String> = []
+    /// 文件名 + 字节数。路径写法不同（旧容器残留、被挪过目录）时按它认同一份文件，
+    /// 免得同一条视频反复让人加进列表
+    @State private var knownKeys: Set<String> = []
     @State private var scanning = true
     @State private var importing = false
     @State private var importNote: String?
@@ -30,11 +33,16 @@ struct LocalMediaView: View {
     @State private var importSource: ImportSource?
 
     private var freshFiles: [LocalMediaFile] {
-        files.filter { !known.contains($0.path) }
+        files.filter { !isKnown($0) }
     }
 
     private var addedFiles: [LocalMediaFile] {
-        files.filter { known.contains($0.path) }
+        files.filter { isKnown($0) }
+    }
+
+    private func isKnown(_ file: LocalMediaFile) -> Bool {
+        if known.contains(MediaPath.canonical(file.path)) { return true }
+        return knownKeys.contains("\(file.name)|\(file.size)")
     }
 
     var body: some View {
@@ -393,11 +401,27 @@ struct LocalMediaView: View {
             }
             let repaired = PlaylistStore.reconcileDownloads(orphans)
 
+            // 条目还指着旧容器里的副本时，改到当前扫到的这一份，
+            // 否则「已在列表」判断不上，界面会一直提示加入
+            _ = PlaylistStore.relinkLocalItems(
+                to: list.map { (path: $0.path, name: $0.name, size: $0.size) }
+            )
+
             // 只认播放列表：下载记录里有的、列表里没有的，还得能加
-            let inLists = Set(PlaylistStore.load().flatMap { $0.items.compactMap { $0.localPath } })
+            var paths = Set<String>()
+            var keys = Set<String>()
+            for item in PlaylistStore.load().flatMap({ $0.items }) {
+                guard let path = item.effectiveLocalPath else { continue }
+                paths.insert(MediaPath.canonical(path))
+                if let name = MediaPath.fileName(of: path),
+                   let size = MediaPath.fileSize(path) {
+                    keys.insert("\(name)|\(size)")
+                }
+            }
 
             withAnimation(.easeInOut(duration: 0.18)) { files = list }
-            known = inLists
+            known = paths
+            knownKeys = keys
             scanning = false
             if repaired > 0 {
                 showToast("已把 \(repaired) 个已下载的视频补回「下载」列表")
@@ -418,7 +442,10 @@ struct LocalMediaView: View {
         } else {
             showToast("已加入播放列表")
         }
-        withAnimation(.easeInOut(duration: 0.18)) { known.insert(file.path) }
+        withAnimation(.easeInOut(duration: 0.18)) {
+            known.insert(MediaPath.canonical(file.path))
+            knownKeys.insert("\(file.name)|\(file.size)")
+        }
     }
 
     private func addAll() {
@@ -427,7 +454,8 @@ struct LocalMediaView: View {
         importing = true
         for file in targets {
             PlaylistStore.attachDownload(path: file.path, title: file.title)
-            known.insert(file.path)
+            known.insert(MediaPath.canonical(file.path))
+            knownKeys.insert("\(file.name)|\(file.size)")
         }
         importing = false
         showToast("已加入 \(targets.count) 个视频")

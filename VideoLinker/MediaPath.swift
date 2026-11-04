@@ -55,10 +55,43 @@ enum MediaPath {
         return raw
     }
 
-    /// 换成当前容器下的路径，并且确认文件真的在。找不到返回 nil
+    /// 不管存的是绝对路径、相对路径还是 file://，都换成绝对路径（不检查存在）
+    static func absolutePath(_ stored: String?) -> String? {
+        guard var raw = stored?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
+            return nil
+        }
+        if raw.lowercased().hasPrefix("file://") {
+            let path = String(raw.dropFirst("file://".count))
+            raw = path.removingPercentEncoding ?? path
+        }
+        if raw.hasPrefix("/") { return raw }
+        return documentsPath + "/" + raw
+    }
+
+    /// 换成当前容器下的路径，并且确认文件真的在。找不到返回 nil。
+    /// 优先当前容器：老容器里残留的那份虽然是同一个文件，但路径写法不一样，
+    /// 拿去和「本机视频」扫描出来的路径比会对不上，界面上就会又提示加入列表。
     static func resolve(_ stored: String?) -> String? {
-        guard let candidate = rebase(stored) else { return nil }
-        return FileManager.default.fileExists(atPath: candidate) ? candidate : nil
+        let fm = FileManager.default
+        let rebased = rebase(stored)
+        if let rebased = rebased, fm.fileExists(atPath: rebased) { return rebased }
+        if let raw = absolutePath(stored), raw != rebased, fm.fileExists(atPath: raw) {
+            return raw
+        }
+        return nil
+    }
+
+    /// 比较路径时用的规范形式：解析符号链接、去掉 `..`。
+    /// `/var` 和 `/private/var` 会归一到同一个写法
+    static func canonical(_ path: String) -> String {
+        URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL.path
+    }
+
+    /// 文件大小，读不到返回 nil
+    static func fileSize(_ path: String) -> Int64? {
+        guard let attr = try? FileManager.default.attributesOfItem(atPath: path),
+              let size = attr[.size] as? NSNumber else { return nil }
+        return size.int64Value
     }
 
     /// 从存下来的路径里取文件名，file:// 也能认

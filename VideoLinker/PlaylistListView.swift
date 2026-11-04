@@ -1301,8 +1301,7 @@ struct PlaylistDetailView: View {
     }
 
     private func localFilePath(_ item: PlaylistItem) -> String {
-        if let path = item.localPath, !path.isEmpty { return path }
-        return URL(string: item.url)?.path ?? ""
+        item.effectiveLocalPath ?? URL(string: item.url)?.path ?? ""
     }
 
     private func deleteSelected() {

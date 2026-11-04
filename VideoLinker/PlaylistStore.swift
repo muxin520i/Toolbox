@@ -14,11 +14,18 @@ struct PlaylistItem: Codable, Identifiable, Hashable {
         return url.lowercased().hasPrefix("file://")
     }
 
+    /// 条目实际指向的本机文件：localPath 优先，其次 file:// 的 url。
+    /// 老数据里有些条目只有 url 没有 localPath，别因为它空着就当成在线视频
+    var effectiveLocalPath: String? {
+        if let path = localPath, !path.isEmpty { return path }
+        guard url.lowercased().hasPrefix("file://") else { return nil }
+        return MediaPath.absolutePath(url)
+    }
+
     /// 本地条目的文件是否还在（在线条目恒为 true）
     var localFileExists: Bool {
         guard isLocal else { return true }
-        let path = localPath ?? (URL(string: url)?.path ?? "")
-        guard !path.isEmpty else { return false }
+        guard let path = effectiveLocalPath, !path.isEmpty else { return false }
         return FileManager.default.fileExists(atPath: path)
     }
 
@@ -36,8 +43,9 @@ struct PlaylistItem: Codable, Identifiable, Hashable {
 
     var subtitle: String {
         if isLocal {
-            guard localFileExists else { return "文件已删除，可在下载管理里重新下载" }
-            let path = localPath ?? (URL(string: url)?.path ?? "")
+            guard localFileExists, let path = effectiveLocalPath else {
+                return "文件已删除，可在下载管理里重新下载"
+            }
             if let attr = try? FileManager.default.attributesOfItem(atPath: path),
                let size = attr[.size] as? Int64 {
                 return "已下载 · " + ByteCountFormatter.string(fromByteCount: size, countStyle: .file)
@@ -516,6 +524,46 @@ enum PlaylistStore {
         playlists[s].items.removeAll { itemIDs.contains($0.id) }
         save(playlists)
         return moving.count
+    }
+
+    /// 把列表里指向旧副本的条目改到「本机视频」实际扫到的那一份。
+    ///
+    /// 覆盖安装后老容器可能还残留着同一个文件：路径能读、大小也对，但写法和
+    /// 扫描出来的不一样，「本机视频」就会以为没加过、又让用户加一遍。
+    /// 按文件名 + 字节数认一次，认准了把路径写回当前这一份。
+    @discardableResult
+    static func relinkLocalItems(to files: [(path: String, name: String, size: Int64)]) -> Int {
+        guard !files.isEmpty else { return 0 }
+
+        let paths = Set(files.map { MediaPath.canonical($0.path) })
+        var byKey: [String: [String]] = [:]
+        for file in files {
+            byKey["\(file.name)|\(file.size)", default: []].append(file.path)
+        }
+
+        var lists = load()
+        var changed = 0
+
+        for listIndex in lists.indices {
+            for itemIndex in lists[listIndex].items.indices {
+                var item = lists[listIndex].items[itemIndex]
+                guard let current = item.effectiveLocalPath,
+                      !paths.contains(MediaPath.canonical(current)),
+                      let name = MediaPath.fileName(of: current),
+                      let size = MediaPath.fileSize(current),
+                      let matches = byKey["\(name)|\(size)"],
+                      matches.count == 1 else { continue }
+
+                let target = matches[0]
+                item.localPath = target
+                item.url = URL(fileURLWithPath: target).absoluteString
+                lists[listIndex].items[itemIndex] = item
+                changed += 1
+            }
+        }
+
+        if changed > 0 { save(lists) }
+        return changed
     }
 
     /// 文件被删掉后清理列表里的死条目（本地条目且文件已不存在）
