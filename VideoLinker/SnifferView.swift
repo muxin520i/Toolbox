@@ -75,6 +75,85 @@ struct SniffedVideo: Identifiable, Hashable {
     }
 }
 
+// MARK: - 同片多清晰度归组
+
+extension SniffedVideo {
+    /// 同一部片的不同清晰度：同域名，文件名去掉 1080p / 720p 这类标记后一致。
+    /// 名字太通用（index、master 之类）就不合并，宁可多显示几条，也别把不同片子揉一起。
+    var groupKey: String? {
+        guard let link = URL(string: url) else { return nil }
+        var name = link.deletingPathExtension().lastPathComponent
+        if let decoded = name.removingPercentEncoding { name = decoded }
+
+        let tokens = ["2160p", "1440p", "1080p", "720p", "480p", "360p", "240p",
+                      "8k", "4k", "2k", "uhd", "fhd", "qhd", "hd", "sd",
+                      "hevc", "h264", "h265", "av1", "bluray", "webrip", "hdr"]
+        for token in tokens {
+            name = name.replacingOccurrences(of: token, with: "", options: .caseInsensitive)
+        }
+        name = name.replacingOccurrences(of: "[^a-zA-Z0-9\\p{Han}]+", with: "", options: .regularExpression)
+
+        guard name.count >= 4 else { return nil }
+        let generic: Set<String> = ["index", "master", "playlist", "video", "media",
+                                    "main", "output", "hls", "stream", "manifest", "movie"]
+        guard !generic.contains(name.lowercased()) else { return nil }
+        return (link.host ?? "") + "|" + name.lowercased()
+    }
+}
+
+/// 嗅探结果里的一组：可能只有一条，也可能把同片的 1080p / 720p 收在一起
+struct SniffGroup: Identifiable {
+    let key: String
+    let videos: [SniffedVideo]
+
+    var id: String { key }
+    var primary: SniffedVideo { videos[0] }
+    var isMerged: Bool { videos.count > 1 }
+
+    /// 组里最清晰的一条，点播放和「加入列表」默认用它
+    var best: SniffedVideo {
+        videos.max { qualityRank($0.url) < qualityRank($1.url) } ?? videos[0]
+    }
+
+    /// 按清晰度从高到低排，给选择清晰度的弹窗用
+    var sorted: [SniffedVideo] {
+        videos.sorted { qualityRank($0.url) > qualityRank($1.url) }
+    }
+
+    private func qualityRank(_ url: String) -> Int {
+        if let height = MediaProbeStore.shared.info(for: url)?.height, height > 0 {
+            return height
+        }
+        let lower = url.lowercased()
+        for (token, rank) in [("2160", 2160), ("4k", 2160), ("1440", 1440),
+                              ("1080", 1080), ("720", 720), ("480", 480), ("360", 360)] {
+            if lower.contains(token) { return rank }
+        }
+        return 0
+    }
+
+    static func build(from list: [SniffedVideo]) -> [SniffGroup] {
+        var order: [String] = []
+        var buckets: [String: [SniffedVideo]] = [:]
+
+        for video in list {
+            let key = video.groupKey ?? "single:\(video.url)"
+            if buckets[key] == nil {
+                buckets[key] = []
+                order.append(key)
+            }
+            if buckets[key]?.contains(where: { $0.url == video.url }) == false {
+                buckets[key]?.append(video)
+            }
+        }
+
+        return order.compactMap { key in
+            guard let videos = buckets[key], !videos.isEmpty else { return nil }
+            return SniffGroup(key: key, videos: videos)
+        }
+    }
+}
+
 // MARK: - 面板
 
 private enum BrowserSheet: String, Identifiable {

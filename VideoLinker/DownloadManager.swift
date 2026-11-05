@@ -2,6 +2,7 @@ import Foundation
 import Combine
 import GRDB
 import WebKit
+import AVFoundation
 
 // MARK: - 一条下载
 
@@ -62,6 +63,8 @@ final class DownloadItem: ObservableObject, Identifiable {
     var chunkTotal: Int64 = 0
     /// 服务器不认 Range 时置为 true，这条以后就走单线程，不再试分段
     var chunkDisabled = false
+    /// 下完自检没过、自动重下的次数，只给一次机会
+    var verifyRetry = 0
 
     /// HLS 走自研分片下载，拿不到系统的 resumeData
     var isHLS = false
@@ -1685,11 +1688,87 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate, URL
             return
         }
 
-        item.note = ""
-        item.progress = 1
-        item.state = .finished
+        item.note = "正在校验文件…"
         save()
-        archive(item)
+        verify(item) { [weak self] ok in
+            guard let self else { return }
+            if ok {
+                item.note = ""
+                item.progress = 1
+                item.state = .finished
+                self.save()
+                self.archive(item)
+                self.pump()
+            } else {
+                self.reject(item)
+            }
+        }
+    }
+
+    /// 下完先自己检查一遍：服务器提前断流时进度也能走到 100%，
+    /// 文件却少了半截，等进了列表点开才发现放不了。
+    /// 直链比字节数，MP4 再读一次时长。
+    private func verify(_ item: DownloadItem, completion: @escaping (Bool) -> Void) {
+        guard let path = item.localPath.isEmpty ? item.destURL?.path : item.localPath,
+              let size = MediaPath.fileSize(path), size > 0 else {
+            completion(true)
+            return
+        }
+
+        if !item.isHLS, item.expected > 0 {
+            let missing = item.expected - size
+            // 留 1% 或 64 KB 的余量，个别服务器报的长度本身就不准
+            let tolerance = max(Int64(64 * 1024), item.expected / 100)
+            if missing > tolerance {
+                completion(false)
+                return
+            }
+        }
+
+        let url = URL(fileURLWithPath: path)
+        guard ["mp4", "m4v", "mov"].contains(url.pathExtension.lowercased()) else {
+            completion(true)
+            return
+        }
+
+        Task {
+            let asset = AVURLAsset(url: url)
+            let duration = try? await asset.load(.duration)
+            let seconds = duration.map { CMTimeGetSeconds($0) } ?? 0
+            let readable = seconds.isFinite && seconds > 0
+            await MainActor.run {
+                // 小文件可能本来就没写时长信息，别误杀
+                completion(readable || size < 512 * 1024)
+            }
+        }
+    }
+
+    /// 校验没过：删掉半截文件重下一次。只自动重试一次，
+    /// 第二次还坏就停下来，让用户看清是哪条源的问题
+    private func reject(_ item: DownloadItem) {
+        if item.verifyRetry < 1 {
+            item.verifyRetry += 1
+            if let path = item.localPath.isEmpty ? item.destURL?.path : item.localPath {
+                try? FileManager.default.removeItem(atPath: path)
+            }
+            item.localPath = ""
+            item.resumeData = nil
+            item.baseOffset = 0
+            item.received = 0
+            item.expected = 0
+            item.progress = 0
+            item.state = .failed
+            item.failReason = "文件不完整，已自动重下"
+            save()
+            retry(item)
+            return
+        }
+
+        item.note = ""
+        item.speed = 0
+        item.state = .failed
+        item.failReason = "文件校验没通过，这条源可能有问题"
+        save()
         pump()
     }
 

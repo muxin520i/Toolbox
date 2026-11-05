@@ -166,28 +166,54 @@ struct PlayerScreen: View {
         return min(screen.width / shownHeight, screen.height / shownWidth)
     }
 
-    /// 画面层单独抽出来：先按视频比例排好，再做旋转 / 镜像 / 缩放，
+    /// 画面层单独抽出来：先按显示比例排好，再做旋转 / 镜像 / 缩放，
     /// 这样转动后的缩放是对着画面本身算的，不会把黑边也一起算进去
     private var videoSurface: some View {
-        ZStack {
-            PlayerLayerView(player: model.player) { layer in
-                setupPictureInPicture(layer)
-            }
-            .aspectRatio(videoAspect, contentMode: .fit)
+        GeometryReader { geo in
+            let size = surfaceSize(in: geo.size)
+            ZStack {
+                PlayerLayerView(player: model.player, gravity: adjust.aspect.gravity) { layer in
+                    setupPictureInPicture(layer)
+                }
 
-            // VLC 兜底时用它的画面层盖住 AVPlayerLayer
-            if let engine = model.vlcEngine {
-                VLCVideoView(engine: engine)
-                    .aspectRatio(videoAspect, contentMode: .fit)
+                // VLC 兜底时用它的画面层盖住 AVPlayerLayer
+                if let engine = model.vlcEngine {
+                    VLCVideoView(engine: engine)
+                }
             }
+            .frame(width: size.width, height: size.height)
+            .rotationEffect(.degrees(Double(adjust.rotation)))
+            .scaleEffect(
+                x: (adjust.flipH ? -1 : 1) * fitScale * CGFloat(adjust.zoom),
+                y: (adjust.flipV ? -1 : 1) * fitScale * CGFloat(adjust.zoom)
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .ignoresSafeArea()
-        .rotationEffect(.degrees(Double(adjust.rotation)))
-        .scaleEffect(
-            x: (adjust.flipH ? -1 : 1) * fitScale * CGFloat(adjust.zoom),
-            y: (adjust.flipV ? -1 : 1) * fitScale * CGFloat(adjust.zoom)
-        )
+    }
+
+    /// 画面框多大：适应按视频比例，填充 / 拉伸铺满整块屏幕，
+    /// 16:9 和 4:3 按固定比例居中，剩下的交给黑边
+    private func surfaceSize(in container: CGSize) -> CGSize {
+        let ratio: CGFloat?
+        switch adjust.aspect {
+        case .fit:
+            ratio = videoAspect
+        case .fill, .stretch:
+            ratio = nil
+        case .ratio16x9:
+            ratio = 16.0 / 9.0
+        case .ratio4x3:
+            ratio = 4.0 / 3.0
+        }
+
+        guard let ratio, ratio > 0, container.width > 0, container.height > 0 else {
+            return container
+        }
+        if container.width / container.height > ratio {
+            return CGSize(width: container.height * ratio, height: container.height)
+        }
+        return CGSize(width: container.width, height: container.width / ratio)
     }
 
     var body: some View {
@@ -1443,13 +1469,14 @@ struct PlayerScreen: View {
 /// 直接用 AVPlayerLayer，才能拿到画中画控制器并叠自己的手势
 struct PlayerLayerView: UIViewRepresentable {
     let player: AVPlayer
+    var gravity: AVLayerVideoGravity = .resizeAspect
     var onLayerReady: (AVPlayerLayer) -> Void = { _ in }
 
     func makeUIView(context: Context) -> PlayerHostView {
         let view = PlayerHostView()
         view.backgroundColor = .black
         view.playerLayer.player = player
-        view.playerLayer.videoGravity = .resizeAspect
+        view.playerLayer.videoGravity = gravity
         DispatchQueue.main.async { onLayerReady(view.playerLayer) }
         return view
     }
@@ -1457,6 +1484,9 @@ struct PlayerLayerView: UIViewRepresentable {
     func updateUIView(_ uiView: PlayerHostView, context: Context) {
         if uiView.playerLayer.player !== player {
             uiView.playerLayer.player = player
+        }
+        if uiView.playerLayer.videoGravity != gravity {
+            uiView.playerLayer.videoGravity = gravity
         }
     }
 }
@@ -2316,14 +2346,58 @@ final class ScrubThumbnailer: ObservableObject {
 // 这里只改显示层，不碰解码，转多少度都不掉画质。
 // 配置按视频地址存，同一部片子下次打开还是上次的角度。
 
+/// 画面怎么落在屏幕上：适应留黑边，填充裁掉多余部分，拉伸铺满但会变形，
+/// 16:9 / 4:3 用来把宽银幕或老片的黑边压掉
+enum VideoAspectMode: String, Codable, CaseIterable, Identifiable {
+    case fit
+    case fill
+    case stretch
+    case ratio16x9
+    case ratio4x3
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .fit: return "适应"
+        case .fill: return "填充"
+        case .stretch: return "拉伸"
+        case .ratio16x9: return "16:9"
+        case .ratio4x3: return "4:3"
+        }
+    }
+
+    var gravity: AVLayerVideoGravity {
+        switch self {
+        case .fill: return .resizeAspectFill
+        case .stretch: return .resize
+        default: return .resizeAspect
+        }
+    }
+}
+
 struct VideoAdjust: Codable, Equatable {
     var rotation: Int = 0
     var flipH: Bool = false
     var flipV: Bool = false
     var zoom: Double = 1
+    var aspect: VideoAspectMode = .fit
+
+    init() {}
+
+    /// 老版本只存了旋转 / 镜像 / 缩放，新字段缺省按「适应」，
+    /// 不能让一条旧记录整个解码失败、把之前调好的角度也一起丢掉
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        rotation = try container.decodeIfPresent(Int.self, forKey: .rotation) ?? 0
+        flipH = try container.decodeIfPresent(Bool.self, forKey: .flipH) ?? false
+        flipV = try container.decodeIfPresent(Bool.self, forKey: .flipV) ?? false
+        zoom = try container.decodeIfPresent(Double.self, forKey: .zoom) ?? 1
+        aspect = try container.decodeIfPresent(VideoAspectMode.self, forKey: .aspect) ?? .fit
+    }
 
     var isDefault: Bool {
-        rotation % 360 == 0 && !flipH && !flipV && abs(zoom - 1) < 0.001
+        rotation % 360 == 0 && !flipH && !flipV && abs(zoom - 1) < 0.001 && aspect == .fit
     }
 }
 
@@ -2368,6 +2442,34 @@ struct VideoAdjustSheet: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 62), spacing: 8)], spacing: 8) {
+                        ForEach(VideoAspectMode.allCases) { mode in
+                            Button {
+                                adjust.aspect = mode
+                            } label: {
+                                Text(mode.title)
+                                    .font(.system(size: 14, weight: adjust.aspect == mode ? .semibold : .regular))
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 9)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                            .fill(adjust.aspect == mode
+                                                  ? Color.accentColor.opacity(0.18)
+                                                  : Color.primary.opacity(0.05))
+                                    )
+                                    .foregroundStyle(adjust.aspect == mode ? Color.accentColor : .primary)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                } header: {
+                    Text("画面比例")
+                } footer: {
+                    Text("「填充」铺满屏幕、裁掉多余部分；「拉伸」会把画面拉变形，适合校正非方形像素；16:9 / 4:3 用来消掉宽银幕或老片的黑边。")
+                }
+
                 Section {
                     HStack(spacing: 12) {
                         action("左转 90°", symbol: "rotate.left") {

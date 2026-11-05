@@ -431,6 +431,9 @@ struct SniffResultsPanel: View {
     /// 下载前的清晰度选择
     @State private var qualityChoice: DownloadManager.QualityChoice?
     @State private var showQuality = false
+    /// 合并后的多清晰度组，点「N 档」时选
+    @State private var groupChoice: SniffGroup?
+    @State private var showGroupChoice = false
 
     private enum Mode: Hashable {
         case video, image
@@ -449,6 +452,17 @@ struct SniffResultsPanel: View {
         default:
             return tab.found
         }
+    }
+
+    /// 同一部片的多清晰度收成一组；已知只有几十秒的广告 / 预告挪到最后
+    private var groups: [SniffGroup] {
+        let built = SniffGroup.build(from: filtered)
+        return built.enumerated().sorted { a, b in
+            let da = probe.info(for: a.element.primary.url)?.duration ?? .greatestFiniteMagnitude
+            let db = probe.info(for: b.element.primary.url)?.duration ?? .greatestFiniteMagnitude
+            if (da < 25) != (db < 25) { return db < 25 }
+            return a.offset < b.offset
+        }.map { $0.element }
     }
 
     var body: some View {
@@ -561,6 +575,18 @@ struct SniffResultsPanel: View {
         } message: {
             Text("下载的是 \(qualityChoice?.title ?? "这个视频")，挑一档占地方合适的")
         }
+        .confirmationDialog("选择清晰度", isPresented: $showGroupChoice, titleVisibility: .visible) {
+            if let group = groupChoice {
+                ForEach(group.sorted) { video in
+                    Button(qualityLabel(video)) {
+                        download(video)
+                    }
+                }
+            }
+            Button("取消", role: .cancel) { }
+        } message: {
+            Text(groupChoice?.primary.displayName ?? "")
+        }
         .overlay(alignment: .bottom) {
             if let hint = hint {
                 Text(hint)
@@ -601,41 +627,78 @@ struct SniffResultsPanel: View {
 
             List {
                 Section {
-                    ForEach(filtered) { video in
-                        row(video)
-                            .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                                Button {
-                                    UIPasteboard.general.string = video.url
-                                    showHint("链接已复制")
-                                } label: {
-                                    Label("复制", systemImage: "doc.on.doc")
-                                }
-                                .tint(.gray)
+                    if selecting {
+                        ForEach(filtered) { video in
+                            row(video)
+                                .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                                    Button {
+                                        UIPasteboard.general.string = video.url
+                                        showHint("链接已复制")
+                                    } label: {
+                                        Label("复制", systemImage: "doc.on.doc")
+                                    }
+                                    .tint(.gray)
 
-                                Button {
-                                    onAddToPlaylist(video)
-                                } label: {
-                                    Label("加入列表", systemImage: "text.badge.plus")
+                                    Button {
+                                        onAddToPlaylist(video)
+                                    } label: {
+                                        Label("加入列表", systemImage: "text.badge.plus")
+                                    }
+                                    .tint(.blue)
                                 }
-                                .tint(.blue)
-                            }
-                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                Button(role: .destructive) {
-                                    tab.found.removeAll { $0.url == video.url }
-                                    selected.remove(video.url)
-                                } label: {
-                                    Label("移除", systemImage: "trash")
+                                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                    Button(role: .destructive) {
+                                        tab.found.removeAll { $0.url == video.url }
+                                        selected.remove(video.url)
+                                    } label: {
+                                        Label("移除", systemImage: "trash")
+                                    }
                                 }
-                            }
+                        }
+                    } else {
+                        ForEach(groups) { group in
+                            groupRow(group)
+                                .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                                    Button {
+                                        UIPasteboard.general.string = group.videos.map(\.url).joined(separator: "\n")
+                                        showHint(group.isMerged ? "已复制 \(group.videos.count) 条链接" : "链接已复制")
+                                    } label: {
+                                        Label(group.isMerged ? "复制全部" : "复制", systemImage: "doc.on.doc")
+                                    }
+                                    .tint(.gray)
+
+                                    Button {
+                                        onAddToPlaylist(group.best)
+                                    } label: {
+                                        Label("加入列表", systemImage: "text.badge.plus")
+                                    }
+                                    .tint(.blue)
+                                }
+                                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                    Button(role: .destructive) {
+                                        let urls = Set(group.videos.map(\.url))
+                                        tab.found.removeAll { urls.contains($0.url) }
+                                        selected.subtract(urls)
+                                    } label: {
+                                        Label("移除", systemImage: "trash")
+                                    }
+                                }
+                        }
                     }
                 } header: {
-                    Text(selecting
-                         ? "已选 \(selected.count) 个"
-                         : "共 \(filtered.count) 个，点一下播放，右边可下载")
+                    Text(headerText)
                 }
             }
             .listStyle(.plain)
         }
+    }
+
+    private var headerText: String {
+        if selecting { return "已选 \(selected.count) 个" }
+        if groups.count < filtered.count {
+            return "共 \(filtered.count) 个，合并为 \(groups.count) 组，点一下播放"
+        }
+        return "共 \(filtered.count) 个，点一下播放，右边可下载"
     }
 
     // MARK: 图片
@@ -960,6 +1023,103 @@ struct SniffResultsPanel: View {
                 withAnimation(.easeIn(duration: 0.2)) { hint = nil }
             }
         }
+    }
+
+    @ViewBuilder
+    private func groupRow(_ group: SniffGroup) -> some View {
+        if group.isMerged {
+            mergedRow(group)
+        } else {
+            row(group.primary)
+        }
+    }
+
+    /// 合并后的一行：一条片子只占一行，右边标出有几档，点开再挑
+    private func mergedRow(_ group: SniffGroup) -> some View {
+        HStack(spacing: 8) {
+            Text(group.primary.kind)
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(Capsule().fill(Color(red: 1.0, green: 0.42, blue: 0.31).opacity(0.9)))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(group.primary.displayName)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                Text("\(group.primary.host) · \(group.videos.count) 个清晰度")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 6)
+
+            Button {
+                groupChoice = group
+                showGroupChoice = true
+            } label: {
+                Text("\(group.videos.count) 档")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Color(red: 1.0, green: 0.5, blue: 0.4))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(Capsule().fill(Color(red: 1.0, green: 0.5, blue: 0.4).opacity(0.12)))
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                download(group.best)
+            } label: {
+                Image(systemName: "arrow.down.circle")
+                    .font(.system(size: 19, weight: .regular))
+                    .foregroundStyle(Color(red: 1.0, green: 0.5, blue: 0.4))
+                    .frame(width: 30, height: 34)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                onPlay(group.best)
+            } label: {
+                Image(systemName: "play.circle.fill")
+                    .font(.system(size: 20))
+                    .foregroundStyle(Color(red: 1.0, green: 0.5, blue: 0.4))
+                    .frame(width: 30, height: 34)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.vertical, 3)
+        .contentShape(Rectangle())
+        .onTapGesture { onPlay(group.best) }
+        .task(id: group.key) {
+            for video in group.videos.prefix(4) {
+                probe.request(video.url)
+            }
+        }
+    }
+
+    private func qualityLabel(_ video: SniffedVideo) -> String {
+        var parts: [String] = []
+        if let summary = probe.info(for: video.url)?.summary, !summary.isEmpty {
+            parts.append(summary)
+        } else {
+            let token = qualityToken(video.url)
+            if !token.isEmpty { parts.append(token) }
+        }
+        parts.append(video.kind)
+        return parts.joined(separator: " · ")
+    }
+
+    private func qualityToken(_ url: String) -> String {
+        let lower = url.lowercased()
+        for token in ["2160p", "4k", "1440p", "1080p", "720p", "480p", "360p", "240p"] {
+            if lower.contains(token) { return token.uppercased() }
+        }
+        return ""
     }
 
     private func row(_ video: SniffedVideo) -> some View {
