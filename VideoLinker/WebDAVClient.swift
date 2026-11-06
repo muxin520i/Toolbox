@@ -237,6 +237,75 @@ final class WebDAVClient {
         }
     }
 
+    // MARK: 上传 / 下载 / 建目录
+
+    private func send(_ request: URLRequest) async throws -> (Data, URLResponse) {
+        do {
+            return try await Self.session.data(for: request)
+        } catch {
+            throw WebDAVError.network(error.localizedDescription)
+        }
+    }
+
+    /// PUT 一个文件
+    func put(path: String, data: Data, contentType: String = "application/octet-stream") async throws {
+        var request = URLRequest(url: try url(for: path))
+        request.httpMethod = "PUT"
+        request.httpBody = data
+        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        if let auth = authorization {
+            request.setValue(auth, forHTTPHeaderField: "Authorization")
+        }
+
+        let (_, response) = try await send(request)
+        guard let http = response as? HTTPURLResponse else {
+            throw WebDAVError.network("服务器没有返回状态")
+        }
+        switch http.statusCode {
+        case 200, 201, 204: return
+        case 401, 403: throw WebDAVError.unauthorized
+        case 404: throw WebDAVError.notFound
+        default: throw WebDAVError.server(http.statusCode)
+        }
+    }
+
+    /// GET 一个文件
+    func get(path: String) async throws -> Data {
+        var request = URLRequest(url: try url(for: path))
+        request.httpMethod = "GET"
+        if let auth = authorization {
+            request.setValue(auth, forHTTPHeaderField: "Authorization")
+        }
+
+        let (data, response) = try await send(request)
+        guard let http = response as? HTTPURLResponse else {
+            throw WebDAVError.network("服务器没有返回状态")
+        }
+        switch http.statusCode {
+        case 200: return data
+        case 401, 403: throw WebDAVError.unauthorized
+        case 404: throw WebDAVError.notFound
+        default: throw WebDAVError.server(http.statusCode)
+        }
+    }
+
+    /// 建目录。已经存在（405）也算成功
+    func makeDirectory(path: String) async throws {
+        var request = URLRequest(url: try url(for: path, directory: true))
+        request.httpMethod = "MKCOL"
+        if let auth = authorization {
+            request.setValue(auth, forHTTPHeaderField: "Authorization")
+        }
+
+        let (_, response) = try await send(request)
+        guard let http = response as? HTTPURLResponse else { return }
+        switch http.statusCode {
+        case 200, 201, 204, 405: return
+        case 401, 403: throw WebDAVError.unauthorized
+        default: throw WebDAVError.server(http.statusCode)
+        }
+    }
+
     /// href 可能是绝对路径 /dav/a.mp4，也可能是完整 URL，统一裁成相对 base 的路径
     private static func relativePath(from href: String, basePath: String) -> String? {
         var text = href

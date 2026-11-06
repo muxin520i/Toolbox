@@ -44,6 +44,7 @@ struct RootView: View {
     @Environment(\.colorScheme) private var systemScheme
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage(SettingsKey.theme) private var themeRaw = AppTheme.system.rawValue
+    @AppStorage(SettingsKey.tint) private var tintRaw = AppTint.coral.rawValue
     /// 上次处理过的剪贴板版本号，避免同一条链接反复弹提示
     @AppStorage("share.clipboardChangeCount") private var handledClipboardCount = -1
     @AppStorage(SettingsKey.motion) private var motion = true
@@ -63,7 +64,7 @@ struct RootView: View {
     }
 
     private var theme: Theme {
-        Theme(resolvedScheme)
+        Theme(resolvedScheme, tint: AppTint(rawValue: tintRaw) ?? .coral)
     }
 
     var body: some View {
@@ -109,6 +110,9 @@ struct RootView: View {
         .preferredColorScheme(appTheme.colorScheme)
         .onAppear { Self.configureTabBar(theme: theme) }
         .onChange(of: themeRaw) { _ in
+            Self.configureTabBar(theme: theme)
+        }
+        .onChange(of: tintRaw) { _ in
             Self.configureTabBar(theme: theme)
         }
         .task {

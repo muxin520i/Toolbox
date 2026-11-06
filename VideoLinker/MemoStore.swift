@@ -138,6 +138,26 @@ final class MemoStore: ObservableObject {
         }
     }
 
+    /// 同步用：按 id 合并远端条目，同一条取更新时间更晚的
+    func merge(_ remote: [Memo]) {
+        guard !remote.isEmpty else { return }
+        var table = Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0) })
+        for memo in remote {
+            if let local = table[memo.id] {
+                if memo.updatedAt > local.updatedAt {
+                    table[memo.id] = memo
+                }
+            } else {
+                table[memo.id] = memo
+            }
+        }
+        let merged = table.values.sorted { $0.updatedAt > $1.updatedAt }
+        guard merged.count != items.count || merged.first?.id != items.first?.id
+                || zip(merged, items).contains(where: { $0.id != $1.id || $0.updatedAt != $1.updatedAt })
+        else { return }
+        commit(merged)
+    }
+
     @discardableResult
     func add(_ text: String) -> Memo? {
         guard let clean = Self.clean(text) else { return nil }

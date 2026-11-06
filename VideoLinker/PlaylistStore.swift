@@ -319,6 +319,32 @@ enum PlaylistStore {
         return (output, removed)
     }
 
+    /// 同步用：按列表 id 合并，同列表内按条目 id 和地址双重去重。
+    /// 名字冲突时保留本机的，远端列表只在本地完全没有时才新建。
+    @discardableResult
+    static func merge(_ remote: [Playlist]) -> [Playlist] {
+        guard !remote.isEmpty else { return load() }
+        var local = load()
+
+        for incoming in remote {
+            if let index = local.firstIndex(where: { $0.id == incoming.id }) {
+                var urls = Set(local[index].items.map { $0.url })
+                var ids = Set(local[index].items.map { $0.id })
+                for item in incoming.items {
+                    guard !ids.contains(item.id), !urls.contains(item.url) else { continue }
+                    local[index].items.append(item)
+                    ids.insert(item.id)
+                    urls.insert(item.url)
+                }
+            } else {
+                local.append(incoming)
+            }
+        }
+
+        save(local)
+        return local
+    }
+
     static func save(_ playlists: [Playlist]) {
         let limited = Array(playlists.prefix(maxPlaylists)).map { list -> Playlist in
             var copy = list

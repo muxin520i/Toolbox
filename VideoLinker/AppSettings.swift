@@ -33,12 +33,69 @@ enum AppTheme: String, CaseIterable, Identifiable {
     }
 }
 
+/// 主题色：只换强调色和渐变，深浅底子不受影响
+enum AppTint: String, CaseIterable, Identifiable {
+    case coral, ocean, mint, violet, bloom, graphite
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .coral: return "珊瑚"
+        case .ocean: return "海蓝"
+        case .mint: return "薄荷"
+        case .violet: return "紫罗兰"
+        case .bloom: return "樱粉"
+        case .graphite: return "石墨"
+        }
+    }
+
+    /// 图标资源名，nil 表示用默认图标
+    var iconName: String? {
+        switch self {
+        case .coral: return nil
+        case .ocean: return "AppIcon-Ocean"
+        case .mint: return "AppIcon-Mint"
+        case .violet: return "AppIcon-Violet"
+        case .bloom: return "AppIcon-Bloom"
+        case .graphite: return "AppIcon-Graphite"
+        }
+    }
+
+    var accent: Color { colors[0] }
+
+    var colors: [Color] {
+        switch self {
+        case .coral:
+            return [Color(red: 1.00, green: 0.42, blue: 0.31),
+                    Color(red: 0.72, green: 0.20, blue: 0.85)]
+        case .ocean:
+            return [Color(red: 0.18, green: 0.55, blue: 0.98),
+                    Color(red: 0.28, green: 0.20, blue: 0.86)]
+        case .mint:
+            return [Color(red: 0.10, green: 0.72, blue: 0.62),
+                    Color(red: 0.09, green: 0.42, blue: 0.72)]
+        case .violet:
+            return [Color(red: 0.55, green: 0.32, blue: 0.96),
+                    Color(red: 0.85, green: 0.24, blue: 0.72)]
+        case .bloom:
+            return [Color(red: 0.98, green: 0.36, blue: 0.56),
+                    Color(red: 0.95, green: 0.55, blue: 0.36)]
+        case .graphite:
+            return [Color(red: 0.38, green: 0.41, blue: 0.48),
+                    Color(red: 0.16, green: 0.17, blue: 0.22)]
+        }
+    }
+}
+
 /// 一套随深浅色切换的语义化配色
 struct Theme {
     let isDark: Bool
+    let tint: AppTint
 
-    init(_ scheme: ColorScheme) {
+    init(_ scheme: ColorScheme, tint: AppTint = .coral) {
         isDark = scheme == .dark
+        self.tint = tint
     }
 
     var bg: Color {
@@ -75,29 +132,19 @@ struct Theme {
                : Color(red: 0.97, green: 0.97, blue: 0.98)
     }
 
-    var accent: Color { Color(red: 1.0, green: 0.55, blue: 0.45) }
+    var accent: Color { tint.accent }
 
     var gradient: LinearGradient {
-        LinearGradient(
-            colors: [Color(red: 1.00, green: 0.42, blue: 0.31),
-                     Color(red: 0.72, green: 0.20, blue: 0.85)],
-            startPoint: .leading,
-            endPoint: .trailing
-        )
+        LinearGradient(colors: tint.colors, startPoint: .leading, endPoint: .trailing)
     }
 
     var gradientTopLeft: LinearGradient {
-        LinearGradient(
-            colors: [Color(red: 1.00, green: 0.42, blue: 0.31),
-                     Color(red: 0.72, green: 0.20, blue: 0.85)],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
+        LinearGradient(colors: tint.colors, startPoint: .topLeading, endPoint: .bottomTrailing)
     }
 }
 
 private struct ThemeKey: EnvironmentKey {
-    static let defaultValue = Theme(.dark)
+    static let defaultValue = Theme(.dark, tint: .coral)
 }
 
 extension EnvironmentValues {
@@ -120,6 +167,7 @@ extension Notification.Name {
 
 enum SettingsKey {
     static let theme = "settings.theme"
+    static let tint = "settings.tint"
     static let rate = "settings.rate"
     static let gestures = "settings.gestures"
     static let autoResume = "settings.autoResume"

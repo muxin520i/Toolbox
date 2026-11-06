@@ -90,6 +90,17 @@ enum ResumeStore {
 
     /// 重复文件合并：把旧路径的观看进度挪到保留下来的文件上，
     /// 保留文件本身已经有更靠后的进度就不动它。
+    /// 同步用：同一个地址取更新更晚的进度
+    static func merge(_ remote: [String: ResumeEntry]) {
+        guard !remote.isEmpty else { return }
+        var table = all()
+        for (url, entry) in remote {
+            if let local = table[url], local.updated > entry.updated { continue }
+            table[url] = entry
+        }
+        persist(table)
+    }
+
     static func migrate(from oldURL: String, to newURL: String) {
         guard oldURL != newURL, let entry = all()[oldURL] else { return }
         if let existing = all()[newURL], existing.position >= entry.position {

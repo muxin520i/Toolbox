@@ -5,6 +5,13 @@ import UIKit
 final class AppDelegate: NSObject, UIApplicationDelegate {
     static var orientationLock: UIInterfaceOrientationMask = .portrait
 
+    /// 后台巡检必须在启动完成前注册，晚于启动会直接崩
+    func application(_ application: UIApplication,
+                     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        PatrolStore.registerBackgroundTask()
+        return true
+    }
+
     func application(
         _ application: UIApplication,
         supportedInterfaceOrientationsFor window: UIWindow?

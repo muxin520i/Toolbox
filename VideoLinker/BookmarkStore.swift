@@ -98,6 +98,20 @@ final class BookmarkLibrary: ObservableObject {
         commit(Array(copy.prefix(40)))
     }
 
+    /// 同步用：按地址去重合并，远端独有的追加进来
+    func merge(_ remote: [Bookmark]) {
+        guard !remote.isEmpty else { return }
+        var seen = Set(items.map { $0.url })
+        var next = items
+        for bookmark in remote.sorted(by: { $0.addedAt > $1.addedAt }) {
+            guard !bookmark.url.isEmpty, !seen.contains(bookmark.url) else { continue }
+            next.append(bookmark)
+            seen.insert(bookmark.url)
+        }
+        next.sort { $0.addedAt > $1.addedAt }
+        commit(Array(next.prefix(40)))
+    }
+
     func remove(_ bookmark: Bookmark) {
         commit(items.filter { $0.id != bookmark.id })
     }

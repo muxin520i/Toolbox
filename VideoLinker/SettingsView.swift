@@ -5,6 +5,8 @@ struct SettingsView: View {
     @Environment(\.theme) private var theme
 
     @AppStorage(SettingsKey.theme) private var themeRaw = AppTheme.system.rawValue
+    @AppStorage(SettingsKey.tint) private var tintRaw = AppTint.coral.rawValue
+    @State private var iconBusy = false
     @AppStorage(SettingsKey.rate) private var rate = 1.0
     @AppStorage(SettingsKey.downloadConcurrency) private var concurrency = 3
     @AppStorage(SettingsKey.subtitleSize) private var subtitleSize = 17.0
@@ -28,6 +30,10 @@ struct SettingsView: View {
     @State private var showLANTransfer = false
     @State private var showStats = false
     @State private var showStorage = false
+    @State private var showSiteData = false
+    @State private var showTransfer = false
+    @State private var showPatrol = false
+    @State private var showSync = false
     @State private var showUpdate = false
 
     @ObservedObject private var updateChecker = UpdateChecker.shared
@@ -104,6 +110,18 @@ struct SettingsView: View {
         }
         .sheet(isPresented: $showStorage) {
             StorageManagerView()
+        }
+        .sheet(isPresented: $showSiteData) {
+            SiteDataView()
+        }
+        .sheet(isPresented: $showTransfer) {
+            TransferView()
+        }
+        .sheet(isPresented: $showSync) {
+            SyncView()
+        }
+        .sheet(isPresented: $showPatrol) {
+            PatrolView()
         }
         .sheet(isPresented: $showMemos) {
             MemoListView()
@@ -203,6 +221,107 @@ struct SettingsView: View {
                         }
                         .buttonStyle(.plain)
                     }
+                }
+
+                Divider().overlay(theme.cardStroke)
+
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("主题色")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(theme.textSecondary)
+
+                    HStack(spacing: 10) {
+                        ForEach(AppTint.allCases) { item in
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.2)) {
+                                    tintRaw = item.rawValue
+                                }
+                            } label: {
+                                Circle()
+                                    .fill(LinearGradient(colors: item.colors,
+                                                         startPoint: .topLeading,
+                                                         endPoint: .bottomTrailing))
+                                    .frame(width: 32, height: 32)
+                                    .overlay(
+                                        Circle()
+                                            .strokeBorder(.white.opacity(tintRaw == item.rawValue ? 0.95 : 0),
+                                                          lineWidth: 2.5)
+                                    )
+                                    .overlay(
+                                        Circle()
+                                            .strokeBorder(theme.cardStroke, lineWidth: 1)
+                                    )
+                                    .shadow(color: item.accent.opacity(tintRaw == item.rawValue ? 0.5 : 0),
+                                            radius: 6, y: 2)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(item.title)
+                        }
+
+                        Spacer(minLength: 0)
+
+                        Text(AppTint(rawValue: tintRaw)?.title ?? "")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(theme.textTertiary)
+                    }
+                }
+
+                Divider().overlay(theme.cardStroke)
+
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("App 图标")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(theme.text)
+                        Text("换成对应配色的桌面图标")
+                            .font(.system(size: 12))
+                            .foregroundStyle(theme.textTertiary)
+                    }
+
+                    Spacer(minLength: 0)
+
+                    HStack(spacing: 8) {
+                        ForEach(AppTint.allCases.prefix(4)) { item in
+                            Button {
+                                applyIcon(item)
+                            } label: {
+                                IconPreview(colors: item.colors)
+                                    .frame(width: 34, height: 34)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                            .strokeBorder(theme.accent.opacity(0.9),
+                                                          lineWidth: currentIconName == item.iconName ? 2 : 0)
+                                    )
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(iconBusy)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// 当前使用的桌面图标名，nil 是默认图标
+    private var currentIconName: String? {
+        UIApplication.shared.alternateIconName
+    }
+
+    private func applyIcon(_ tint: AppTint) {
+        guard UIApplication.shared.supportsAlternateIcons else {
+            showToast("这台设备不支持换图标")
+            return
+        }
+        guard UIApplication.shared.alternateIconName != tint.iconName else { return }
+
+        iconBusy = true
+        UIApplication.shared.setAlternateIconName(tint.iconName) { error in
+            DispatchQueue.main.async {
+                iconBusy = false
+                if error != nil {
+                    showToast("换图标失败，稍后再试")
+                } else {
+                    showToast("图标已换成「\(tint.title)」")
                 }
             }
         }
@@ -350,6 +469,15 @@ struct SettingsView: View {
                     }
                 }
                 .padding(.vertical, 6)
+
+                Divider().overlay(theme.cardStroke)
+
+                Button {
+                    showPatrol = true
+                } label: {
+                    actionRow("定时巡检", symbol: "clock.arrow.circlepath")
+                }
+                .buttonStyle(.plain)
 
                 Divider().overlay(theme.cardStroke)
 
@@ -598,6 +726,33 @@ struct SettingsView: View {
                     showStorage = true
                 } label: {
                     actionRow("存储管理", symbol: "internaldrive")
+                }
+                .buttonStyle(.plain)
+
+                Divider().overlay(theme.cardStroke)
+
+                Button {
+                    showSiteData = true
+                } label: {
+                    actionRow("网站数据", symbol: "globe")
+                }
+                .buttonStyle(.plain)
+
+                Divider().overlay(theme.cardStroke)
+
+                Button {
+                    showTransfer = true
+                } label: {
+                    actionRow("换机搬家", symbol: "shippingbox")
+                }
+                .buttonStyle(.plain)
+
+                Divider().overlay(theme.cardStroke)
+
+                Button {
+                    showSync = true
+                } label: {
+                    actionRow("多设备同步", symbol: "arrow.triangle.2.circlepath")
                 }
                 .buttonStyle(.plain)
 
@@ -1021,5 +1176,28 @@ struct WBEndpointSheet: View {
 struct SettingsView_Previews: PreviewProvider {
     static var previews: some View {
         SettingsView()
+    }
+}
+
+/// 图标预览：渐变底 + 白色播放三角，和桌面图标同一套构图
+private struct IconPreview: View {
+    let colors: [Color]
+
+    var body: some View {
+        GeometryReader { geo in
+            let w = geo.size.width
+            let h = geo.size.height
+            ZStack {
+                LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing)
+                Path { path in
+                    path.move(to: CGPoint(x: w * 0.38, y: h * 0.26))
+                    path.addLine(to: CGPoint(x: w * 0.74, y: h * 0.50))
+                    path.addLine(to: CGPoint(x: w * 0.38, y: h * 0.74))
+                    path.closeSubpath()
+                }
+                .fill(.white)
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
