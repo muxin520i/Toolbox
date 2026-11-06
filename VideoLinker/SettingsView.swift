@@ -268,25 +268,23 @@ struct SettingsView: View {
 
                 Divider().overlay(theme.cardStroke)
 
-                HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 10) {
                     VStack(alignment: .leading, spacing: 3) {
                         Text("App 图标")
                             .font(.system(size: 14, weight: .medium))
                             .foregroundStyle(theme.text)
-                        Text("换成对应配色的桌面图标")
+                        Text("换成对应配色的桌面图标，第一颗是默认")
                             .font(.system(size: 12))
                             .foregroundStyle(theme.textTertiary)
                     }
 
-                    Spacer(minLength: 0)
-
                     HStack(spacing: 8) {
-                        ForEach(AppTint.allCases.prefix(4)) { item in
+                        ForEach(AppTint.allCases) { item in
                             Button {
                                 applyIcon(item)
                             } label: {
                                 IconPreview(colors: item.colors)
-                                    .frame(width: 34, height: 34)
+                                    .frame(width: 32, height: 32)
                                     .overlay(
                                         RoundedRectangle(cornerRadius: 8, style: .continuous)
                                             .strokeBorder(theme.accent.opacity(0.9),
@@ -296,6 +294,8 @@ struct SettingsView: View {
                             .buttonStyle(.plain)
                             .disabled(iconBusy)
                         }
+
+                        Spacer(minLength: 0)
                     }
                 }
             }

@@ -98,6 +98,26 @@
 		1A0000000000000000003E9 /* PatrolStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000002E9 /* PatrolStore.swift */; };
 		1A0000000000000000003EA /* PatrolView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000002EA /* PatrolView.swift */; };
 		1A0000000000000000000361 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = 1A00000000000000000004A0 /* GRDB */; };
+		1A0000000000000000004B01 /* AltIcon-Ocean@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000004A01 /* AltIcon-Ocean@2x.png */; };
+		1A0000000000000000004B02 /* AltIcon-Ocean@3x.png in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000004A02 /* AltIcon-Ocean@3x.png */; };
+		1A0000000000000000004B03 /* AltIcon-Ocean-76.png in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000004A03 /* AltIcon-Ocean-76.png */; };
+		1A0000000000000000004B04 /* AltIcon-Ocean-76@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000004A04 /* AltIcon-Ocean-76@2x.png */; };
+		1A0000000000000000004B05 /* AltIcon-Mint@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000004A05 /* AltIcon-Mint@2x.png */; };
+		1A0000000000000000004B06 /* AltIcon-Mint@3x.png in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000004A06 /* AltIcon-Mint@3x.png */; };
+		1A0000000000000000004B07 /* AltIcon-Mint-76.png in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000004A07 /* AltIcon-Mint-76.png */; };
+		1A0000000000000000004B08 /* AltIcon-Mint-76@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000004A08 /* AltIcon-Mint-76@2x.png */; };
+		1A0000000000000000004B09 /* AltIcon-Violet@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000004A09 /* AltIcon-Violet@2x.png */; };
+		1A0000000000000000004B0A /* AltIcon-Violet@3x.png in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000004A0A /* AltIcon-Violet@3x.png */; };
+		1A0000000000000000004B0B /* AltIcon-Violet-76.png in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000004A0B /* AltIcon-Violet-76.png */; };
+		1A0000000000000000004B0C /* AltIcon-Violet-76@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000004A0C /* AltIcon-Violet-76@2x.png */; };
+		1A0000000000000000004B0D /* AltIcon-Bloom@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000004A0D /* AltIcon-Bloom@2x.png */; };
+		1A0000000000000000004B0E /* AltIcon-Bloom@3x.png in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000004A0E /* AltIcon-Bloom@3x.png */; };
+		1A0000000000000000004B0F /* AltIcon-Bloom-76.png in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000004A0F /* AltIcon-Bloom-76.png */; };
+		1A0000000000000000004B10 /* AltIcon-Bloom-76@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000004A10 /* AltIcon-Bloom-76@2x.png */; };
+		1A0000000000000000004B11 /* AltIcon-Graphite@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000004A11 /* AltIcon-Graphite@2x.png */; };
+		1A0000000000000000004B12 /* AltIcon-Graphite@3x.png in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000004A12 /* AltIcon-Graphite@3x.png */; };
+		1A0000000000000000004B13 /* AltIcon-Graphite-76.png in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000004A13 /* AltIcon-Graphite-76.png */; };
+		1A0000000000000000004B14 /* AltIcon-Graphite-76@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000004A14 /* AltIcon-Graphite-76@2x.png */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -219,6 +239,26 @@
 		1A0000000000000000002E8 /* SyncView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncView.swift; sourceTree = "<group>"; };
 		1A0000000000000000002E9 /* PatrolStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PatrolStore.swift; sourceTree = "<group>"; };
 		1A0000000000000000002EA /* PatrolView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PatrolView.swift; sourceTree = "<group>"; };
+		1A0000000000000000004A01 /* AltIcon-Ocean@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "AltIcon-Ocean@2x.png"; sourceTree = "<group>"; };
+		1A0000000000000000004A02 /* AltIcon-Ocean@3x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "AltIcon-Ocean@3x.png"; sourceTree = "<group>"; };
+		1A0000000000000000004A03 /* AltIcon-Ocean-76.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "AltIcon-Ocean-76.png"; sourceTree = "<group>"; };
+		1A0000000000000000004A04 /* AltIcon-Ocean-76@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "AltIcon-Ocean-76@2x.png"; sourceTree = "<group>"; };
+		1A0000000000000000004A05 /* AltIcon-Mint@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "AltIcon-Mint@2x.png"; sourceTree = "<group>"; };
+		1A0000000000000000004A06 /* AltIcon-Mint@3x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "AltIcon-Mint@3x.png"; sourceTree = "<group>"; };
+		1A0000000000000000004A07 /* AltIcon-Mint-76.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "AltIcon-Mint-76.png"; sourceTree = "<group>"; };
+		1A0000000000000000004A08 /* AltIcon-Mint-76@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "AltIcon-Mint-76@2x.png"; sourceTree = "<group>"; };
+		1A0000000000000000004A09 /* AltIcon-Violet@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "AltIcon-Violet@2x.png"; sourceTree = "<group>"; };
+		1A0000000000000000004A0A /* AltIcon-Violet@3x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "AltIcon-Violet@3x.png"; sourceTree = "<group>"; };
+		1A0000000000000000004A0B /* AltIcon-Violet-76.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "AltIcon-Violet-76.png"; sourceTree = "<group>"; };
+		1A0000000000000000004A0C /* AltIcon-Violet-76@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "AltIcon-Violet-76@2x.png"; sourceTree = "<group>"; };
+		1A0000000000000000004A0D /* AltIcon-Bloom@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "AltIcon-Bloom@2x.png"; sourceTree = "<group>"; };
+		1A0000000000000000004A0E /* AltIcon-Bloom@3x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "AltIcon-Bloom@3x.png"; sourceTree = "<group>"; };
+		1A0000000000000000004A0F /* AltIcon-Bloom-76.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "AltIcon-Bloom-76.png"; sourceTree = "<group>"; };
+		1A0000000000000000004A10 /* AltIcon-Bloom-76@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "AltIcon-Bloom-76@2x.png"; sourceTree = "<group>"; };
+		1A0000000000000000004A11 /* AltIcon-Graphite@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "AltIcon-Graphite@2x.png"; sourceTree = "<group>"; };
+		1A0000000000000000004A12 /* AltIcon-Graphite@3x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "AltIcon-Graphite@3x.png"; sourceTree = "<group>"; };
+		1A0000000000000000004A13 /* AltIcon-Graphite-76.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "AltIcon-Graphite-76.png"; sourceTree = "<group>"; };
+		1A0000000000000000004A14 /* AltIcon-Graphite-76@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "AltIcon-Graphite-76@2x.png"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -270,6 +310,7 @@
 				1A00000000000000000002C3 /* NetworkDiagnostics.swift */,
 				1A0000000000000000000204 /* HistoryStore.swift */,
 				1A0000000000000000000205 /* Assets.xcassets */,
+				1A0000000000000000004A00 /* AlternateIcons */,
 				1A000000000000000000020B /* OrientationLock.swift */,
 				1A0000000000000000000206 /* Info.plist */,
 				1A0000000000000000000207 /* RootView.swift */,
@@ -363,6 +404,33 @@
 			path = ShareExtension;
 			sourceTree = "<group>";
 		};
+		1A0000000000000000004A00 /* AlternateIcons */ = {
+			isa = PBXGroup;
+			children = (
+				1A0000000000000000004A01 /* AltIcon-Ocean@2x.png */,
+				1A0000000000000000004A02 /* AltIcon-Ocean@3x.png */,
+				1A0000000000000000004A03 /* AltIcon-Ocean-76.png */,
+				1A0000000000000000004A04 /* AltIcon-Ocean-76@2x.png */,
+				1A0000000000000000004A05 /* AltIcon-Mint@2x.png */,
+				1A0000000000000000004A06 /* AltIcon-Mint@3x.png */,
+				1A0000000000000000004A07 /* AltIcon-Mint-76.png */,
+				1A0000000000000000004A08 /* AltIcon-Mint-76@2x.png */,
+				1A0000000000000000004A09 /* AltIcon-Violet@2x.png */,
+				1A0000000000000000004A0A /* AltIcon-Violet@3x.png */,
+				1A0000000000000000004A0B /* AltIcon-Violet-76.png */,
+				1A0000000000000000004A0C /* AltIcon-Violet-76@2x.png */,
+				1A0000000000000000004A0D /* AltIcon-Bloom@2x.png */,
+				1A0000000000000000004A0E /* AltIcon-Bloom@3x.png */,
+				1A0000000000000000004A0F /* AltIcon-Bloom-76.png */,
+				1A0000000000000000004A10 /* AltIcon-Bloom-76@2x.png */,
+				1A0000000000000000004A11 /* AltIcon-Graphite@2x.png */,
+				1A0000000000000000004A12 /* AltIcon-Graphite@3x.png */,
+				1A0000000000000000004A13 /* AltIcon-Graphite-76.png */,
+				1A0000000000000000004A14 /* AltIcon-Graphite-76@2x.png */,
+			);
+			path = AlternateIcons;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -451,6 +519,26 @@
 			buildActionMask = 2147483647;
 			files = (
 				1A0000000000000000000305 /* Assets.xcassets in Resources */,
+				1A0000000000000000004B01 /* AltIcon-Ocean@2x.png in Resources */,
+				1A0000000000000000004B02 /* AltIcon-Ocean@3x.png in Resources */,
+				1A0000000000000000004B03 /* AltIcon-Ocean-76.png in Resources */,
+				1A0000000000000000004B04 /* AltIcon-Ocean-76@2x.png in Resources */,
+				1A0000000000000000004B05 /* AltIcon-Mint@2x.png in Resources */,
+				1A0000000000000000004B06 /* AltIcon-Mint@3x.png in Resources */,
+				1A0000000000000000004B07 /* AltIcon-Mint-76.png in Resources */,
+				1A0000000000000000004B08 /* AltIcon-Mint-76@2x.png in Resources */,
+				1A0000000000000000004B09 /* AltIcon-Violet@2x.png in Resources */,
+				1A0000000000000000004B0A /* AltIcon-Violet@3x.png in Resources */,
+				1A0000000000000000004B0B /* AltIcon-Violet-76.png in Resources */,
+				1A0000000000000000004B0C /* AltIcon-Violet-76@2x.png in Resources */,
+				1A0000000000000000004B0D /* AltIcon-Bloom@2x.png in Resources */,
+				1A0000000000000000004B0E /* AltIcon-Bloom@3x.png in Resources */,
+				1A0000000000000000004B0F /* AltIcon-Bloom-76.png in Resources */,
+				1A0000000000000000004B10 /* AltIcon-Bloom-76@2x.png in Resources */,
+				1A0000000000000000004B11 /* AltIcon-Graphite@2x.png in Resources */,
+				1A0000000000000000004B12 /* AltIcon-Graphite@3x.png in Resources */,
+				1A0000000000000000004B13 /* AltIcon-Graphite-76.png in Resources */,
+				1A0000000000000000004B14 /* AltIcon-Graphite-76@2x.png in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -703,7 +791,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 7;
+				CURRENT_PROJECT_VERSION = 8;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = VideoLinker/Info.plist;
@@ -711,7 +799,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.5.0;
+				MARKETING_VERSION = 1.5.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.example.VideoLinker;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -726,7 +814,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 7;
+				CURRENT_PROJECT_VERSION = 8;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = VideoLinker/Info.plist;
@@ -734,7 +822,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.5.0;
+				MARKETING_VERSION = 1.5.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.example.VideoLinker;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -748,7 +836,7 @@
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 7;
+				CURRENT_PROJECT_VERSION = 8;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = ShareExtension/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
@@ -757,7 +845,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.5.0;
+				MARKETING_VERSION = 1.5.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.example.VideoLinker.ShareExtension;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -771,7 +859,7 @@
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 7;
+				CURRENT_PROJECT_VERSION = 8;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = ShareExtension/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
@@ -780,7 +868,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.5.0;
+				MARKETING_VERSION = 1.5.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.example.VideoLinker.ShareExtension;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;

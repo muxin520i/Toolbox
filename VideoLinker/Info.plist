@@ -23,39 +23,49 @@
 		</dict>
 		<key>CFBundleAlternateIcons</key>
 		<dict>
-			<key>AppIcon-Ocean</key>
+			<key>AltIcon-Ocean</key>
 			<dict>
 				<key>CFBundleIconFiles</key>
 				<array>
-					<string>AppIcon-Ocean</string>
+					<string>AltIcon-Ocean</string>
+					<string>AltIcon-Ocean-76</string>
+					<string>AltIcon-Ocean-76@2x</string>
 				</array>
 			</dict>
-			<key>AppIcon-Mint</key>
+			<key>AltIcon-Mint</key>
 			<dict>
 				<key>CFBundleIconFiles</key>
 				<array>
-					<string>AppIcon-Mint</string>
+					<string>AltIcon-Mint</string>
+					<string>AltIcon-Mint-76</string>
+					<string>AltIcon-Mint-76@2x</string>
 				</array>
 			</dict>
-			<key>AppIcon-Violet</key>
+			<key>AltIcon-Violet</key>
 			<dict>
 				<key>CFBundleIconFiles</key>
 				<array>
-					<string>AppIcon-Violet</string>
+					<string>AltIcon-Violet</string>
+					<string>AltIcon-Violet-76</string>
+					<string>AltIcon-Violet-76@2x</string>
 				</array>
 			</dict>
-			<key>AppIcon-Bloom</key>
+			<key>AltIcon-Bloom</key>
 			<dict>
 				<key>CFBundleIconFiles</key>
 				<array>
-					<string>AppIcon-Bloom</string>
+					<string>AltIcon-Bloom</string>
+					<string>AltIcon-Bloom-76</string>
+					<string>AltIcon-Bloom-76@2x</string>
 				</array>
 			</dict>
-			<key>AppIcon-Graphite</key>
+			<key>AltIcon-Graphite</key>
 			<dict>
 				<key>CFBundleIconFiles</key>
 				<array>
-					<string>AppIcon-Graphite</string>
+					<string>AltIcon-Graphite</string>
+					<string>AltIcon-Graphite-76</string>
+					<string>AltIcon-Graphite-76@2x</string>
 				</array>
 			</dict>
 		</dict>

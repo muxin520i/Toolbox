@@ -54,11 +54,11 @@ enum AppTint: String, CaseIterable, Identifiable {
     var iconName: String? {
         switch self {
         case .coral: return nil
-        case .ocean: return "AppIcon-Ocean"
-        case .mint: return "AppIcon-Mint"
-        case .violet: return "AppIcon-Violet"
-        case .bloom: return "AppIcon-Bloom"
-        case .graphite: return "AppIcon-Graphite"
+        case .ocean: return "AltIcon-Ocean"
+        case .mint: return "AltIcon-Mint"
+        case .violet: return "AltIcon-Violet"
+        case .bloom: return "AltIcon-Bloom"
+        case .graphite: return "AltIcon-Graphite"
         }
     }
 
