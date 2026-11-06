@@ -255,6 +255,12 @@ struct SiteDataView: View {
     // MARK: 类型名
 
     static func label(for type: String) -> String {
+        // 这两个常量 iOS 17 才公开，老系统上直接跳过
+        if #available(iOS 17.0, *) {
+            if type == WKWebsiteDataTypeMediaKeys { return "媒体密钥" }
+            if type == WKWebsiteDataTypeHashSalt { return "哈希盐" }
+        }
+
         switch type {
         case WKWebsiteDataTypeCookies: return "Cookie"
         case WKWebsiteDataTypeDiskCache, WKWebsiteDataTypeMemoryCache: return "缓存"
@@ -266,8 +272,6 @@ struct SiteDataView: View {
         case WKWebsiteDataTypeFetchCache: return "Fetch 缓存"
         case WKWebsiteDataTypeServiceWorkerRegistrations: return "Service Worker"
         case WKWebsiteDataTypeFileSystem: return "文件系统"
-        case WKWebsiteDataTypeMediaKeys: return "媒体密钥"
-        case WKWebsiteDataTypeHashSalt: return "哈希盐"
         default: return "其它"
         }
     }
