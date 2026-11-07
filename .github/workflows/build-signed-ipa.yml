@@ -66,6 +66,7 @@ jobs:
             (cd "$PKG" && git submodule update --init --recursive)
           fi
           test -f "$HDR"
+          chmod u+w "$HDR"
           python3 - "$HDR" <<'PY'
           import sys
           p = sys.argv[1]
