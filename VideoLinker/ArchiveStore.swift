@@ -326,7 +326,7 @@ final class ArchiveStore {
         var outBuf = [UInt8](repeating: 0, count: chunk)
 
         stream.src_size = 0
-        stream.dst_ptr = outBuf.withUnsafeMutableBufferPointer { $0.baseAddress }
+        stream.dst_ptr = outBuf.withUnsafeMutableBufferPointer { $0.baseAddress }!
         stream.dst_size = chunk
 
         while true {
@@ -334,7 +334,7 @@ final class ArchiveStore {
                 let n = input.read(&inBuf, maxLength: chunk)
                 guard n > 0 else { break }
                 inBuf.withUnsafeMutableBufferPointer { buf in
-                    stream.src_ptr = buf.baseAddress
+                    stream.src_ptr = UnsafePointer(buf.baseAddress!)
                 }
                 stream.src_size = n
             }
@@ -347,7 +347,7 @@ final class ArchiveStore {
                     output.write(buf.baseAddress!, maxLength: chunk)
                 }
                 outBuf.withUnsafeMutableBufferPointer { buf in
-                    stream.dst_ptr = buf.baseAddress
+                    stream.dst_ptr = buf.baseAddress!
                 }
                 stream.dst_size = chunk
             }
