@@ -314,7 +314,8 @@ final class ArchiveStore {
         output.open()
         defer { input.close(); output.close() }
 
-        var stream = compression_stream(dst_ptr: nil, dst_size: 0, src_ptr: nil, src_size: 0, state: nil)
+        var scratch = UInt8(0)
+        var stream = compression_stream(dst_ptr: &scratch, dst_size: 0, src_ptr: &scratch, src_size: 0, state: nil)
         guard compression_stream_init(&stream, COMPRESSION_STREAM_DECODE, COMPRESSION_ZLIB) == COMPRESSION_STATUS_OK else {
             throw NSError(domain: "Archive", code: 3, userInfo: [NSLocalizedDescriptionKey: "解压引擎初始化失败"])
         }
