@@ -51,6 +51,22 @@ jobs:
           echo "$PROFILE_BASE64" | base64 --decode \
             > ~/Library/MobileDevice/Provisioning\ Profiles/profile.mobileprovision
 
+      # AMSMB2 3.2.3 附带的 libsmb2 在 iOS SDK 下 HAVE_TIME_H 宏没生效，
+      # 给 smb2.h 补一行 include（同 unsigned 流程）。
+      - name: Patch libsmb2 for iOS
+        run: |
+          set -euo pipefail
+          xcodebuild -project VideoLinker.xcodeproj \
+            -scheme VideoLinker \
+            -derivedDataPath build \
+            -resolvePackageDependencies >/dev/null 2>&1 || true
+          HDR="build/SourcePackages/checkouts/AMSMB2/Dependencies/libsmb2/include/smb2/smb2.h"
+          test -f "$HDR"
+          if ! grep -q '^#include <time.h>' "$HDR"; then
+            sed -i '' 's/#ifdef HAVE_TIME_H/#include <time.h>\n#ifdef HAVE_TIME_H/' "$HDR"
+          fi
+          grep -n 'include <time.h>' "$HDR"
+
       - name: Archive
         env:
           TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
@@ -64,6 +80,7 @@ jobs:
             -configuration Release \
             -sdk iphoneos \
             -archivePath build/VideoLinker.xcarchive \
+            -derivedDataPath build \
             OTHER_CFLAGS="\$(inherited) -DHAVE_TIME_H=1 -DHAVE_STDINT_H=1 -DHAVE_SYS_TYPES_H=1" \
             DEVELOPMENT_TEAM="$TEAM_ID" \
             PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
