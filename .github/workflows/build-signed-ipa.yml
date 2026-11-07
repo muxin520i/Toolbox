@@ -72,7 +72,11 @@ jobs:
           p = sys.argv[1]
           s = open(p).read()
           if "#include <time.h>" not in s:
-              s = s.replace("#ifdef HAVE_TIME_H", "#include <time.h>\n#ifdef HAVE_TIME_H", 1)
+              idx = s.find("#include")
+              if idx >= 0:
+                  s = s[:idx] + "#include <time.h>\n#include <sys/types.h>\n" + s[idx:]
+              else:
+                  s = "#include <time.h>\n#include <sys/types.h>\n" + s
               open(p, "w").write(s)
           print("patched:", "#include <time.h>" in open(p).read())
           PY
