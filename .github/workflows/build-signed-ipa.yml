@@ -60,7 +60,12 @@ jobs:
             -scheme VideoLinker \
             -derivedDataPath build \
             -resolvePackageDependencies >/dev/null 2>&1 || true
-          HDR="build/SourcePackages/checkouts/AMSMB2/Dependencies/libsmb2/include/smb2/smb2.h"
+          PKG="build/SourcePackages/checkouts/AMSMB2"
+          HDR="$PKG/Dependencies/libsmb2/include/smb2/smb2.h"
+          if [ ! -f "$HDR" ]; then
+            cd "$PKG"
+            git submodule update --init --recursive
+          fi
           test -f "$HDR"
           if ! grep -q '^#include <time.h>' "$HDR"; then
             sed -i '' 's/#ifdef HAVE_TIME_H/#include <time.h>\n#ifdef HAVE_TIME_H/' "$HDR"

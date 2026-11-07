@@ -79,11 +79,16 @@ jobs:
 
       # AMSMB2 3.2.3 附带的 libsmb2 在 iOS SDK 下 HAVE_TIME_H 宏没生效，
       # smb2.h 里的 time_t 解析不出来。SPM 包的 cSettings 外部改不了，
-      # 这里直接给头文件补一行 include。
+      # 这里先确保 submodule 已初始化，再给头文件补一行 include。
       - name: Patch libsmb2 for iOS
         run: |
           set -euo pipefail
-          HDR="build/SourcePackages/checkouts/AMSMB2/Dependencies/libsmb2/include/smb2/smb2.h"
+          PKG="build/SourcePackages/checkouts/AMSMB2"
+          HDR="$PKG/Dependencies/libsmb2/include/smb2/smb2.h"
+          if [ ! -f "$HDR" ]; then
+            cd "$PKG"
+            git submodule update --init --recursive
+          fi
           test -f "$HDR"
           if ! grep -q '^#include <time.h>' "$HDR"; then
             sed -i '' 's/#ifdef HAVE_TIME_H/#include <time.h>\n#ifdef HAVE_TIME_H/' "$HDR"
