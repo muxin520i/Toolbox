@@ -46,6 +46,8 @@ struct SettingsView: View {
     @State private var showDiagnostics = false
     @State private var showPrivateHelp = false
     @State private var showMemos = false
+    @State private var showArchive = false
+    @State private var showLanLibrary = false
     @State private var toast: String?
 
     @ObservedObject private var memos = MemoStore.shared
@@ -66,6 +68,7 @@ struct SettingsView: View {
                         storageCard
                         privacyCard
                         memoCard
+                        archiveCard
                         dataCard
                         aboutCard
                     }
@@ -125,6 +128,12 @@ struct SettingsView: View {
         }
         .sheet(isPresented: $showMemos) {
             MemoListView()
+        }
+        .sheet(isPresented: $showArchive) {
+            ArchiveView()
+        }
+        .sheet(isPresented: $showLanLibrary) {
+            LanLibraryView()
         }
         .sheet(isPresented: $showWebDAV) {
             WebDAVView()
@@ -590,6 +599,31 @@ struct SettingsView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+
+                Divider().overlay(theme.cardStroke)
+
+                Button {
+                    showLanLibrary = true
+                } label: {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("局域网影库")
+                                .font(.system(size: 14))
+                                .foregroundStyle(theme.text)
+                            Text("直接播家里 NAS 里的电影（DLNA / SMB）")
+                                .font(.system(size: 11))
+                                .foregroundStyle(theme.textTertiary)
+                                .lineLimit(1)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 12))
+                            .foregroundStyle(theme.textTertiary)
+                    }
+                    .padding(.vertical, 12)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
             }
         }
     }
@@ -706,6 +740,37 @@ struct SettingsView: View {
             return "把链接、账号、临时记的东西放这里，免得搞丢"
         }
         return "最近更新 \(latest.dateText)"
+    }
+
+    // MARK: 压缩包
+
+    private var archiveCard: some View {
+        card(title: "文件", icon: "doc.zipper") {
+            Button {
+                showArchive = true
+            } label: {
+                HStack(spacing: 10) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("压缩包")
+                            .font(.system(size: 14))
+                            .foregroundStyle(theme.text)
+                        Text("解开下载的 zip、tar、tar.gz")
+                            .font(.system(size: 11))
+                            .foregroundStyle(theme.textTertiary)
+                            .lineLimit(1)
+                    }
+
+                    Spacer(minLength: 8)
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(theme.textTertiary)
+                }
+                .padding(.vertical, 4)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
     }
 
     // MARK: 数据

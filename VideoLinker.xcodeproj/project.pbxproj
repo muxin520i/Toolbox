@@ -118,6 +118,12 @@
 		1A0000000000000000004B12 /* AltIcon-Graphite@3x.png in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000004A12 /* AltIcon-Graphite@3x.png */; };
 		1A0000000000000000004B13 /* AltIcon-Graphite-76.png in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000004A13 /* AltIcon-Graphite-76.png */; };
 		1A0000000000000000004B14 /* AltIcon-Graphite-76@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000004A14 /* AltIcon-Graphite-76@2x.png */; };
+		1A0000000000000000003EB /* ArchiveStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000002EB /* ArchiveStore.swift */; };
+		1A0000000000000000003EC /* ArchiveView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000002EC /* ArchiveView.swift */; };
+		1A0000000000000000003ED /* MediaServerBrowser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000002ED /* MediaServerBrowser.swift */; };
+		1A0000000000000000003EE /* SMBBrowser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000002EE /* SMBBrowser.swift */; };
+		1A0000000000000000003EF /* SMBStreamServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000002EF /* SMBStreamServer.swift */; };
+		1A0000000000000000003F0 /* LanLibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000002F0 /* LanLibraryView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -259,6 +265,12 @@
 		1A0000000000000000004A12 /* AltIcon-Graphite@3x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "AltIcon-Graphite@3x.png"; sourceTree = "<group>"; };
 		1A0000000000000000004A13 /* AltIcon-Graphite-76.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "AltIcon-Graphite-76.png"; sourceTree = "<group>"; };
 		1A0000000000000000004A14 /* AltIcon-Graphite-76@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "AltIcon-Graphite-76@2x.png"; sourceTree = "<group>"; };
+		1A0000000000000000002EB /* ArchiveStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArchiveStore.swift; sourceTree = "<group>"; };
+		1A0000000000000000002EC /* ArchiveView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArchiveView.swift; sourceTree = "<group>"; };
+		1A0000000000000000002ED /* MediaServerBrowser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaServerBrowser.swift; sourceTree = "<group>"; };
+		1A0000000000000000002EE /* SMBBrowser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SMBBrowser.swift; sourceTree = "<group>"; };
+		1A0000000000000000002EF /* SMBStreamServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SMBStreamServer.swift; sourceTree = "<group>"; };
+		1A0000000000000000002F0 /* LanLibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LanLibraryView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -451,6 +463,8 @@
 			name = VideoLinker;
 			packageProductDependencies = (
 				1A00000000000000000004A0 /* GRDB */,
+				1A00000000000000000004B1 /* ZIPFoundation */,
+				1A00000000000000000004B2 /* AMSMB2 */,
 			);
 			productName = VideoLinker;
 			productReference = 1A0000000000000000000104 /* VideoLinker.app */;
@@ -502,6 +516,8 @@
 			mainGroup = 1A0000000000000000000101;
 			packageReferences = (
 				1A0000000000000000000490 /* XCRemoteSwiftPackageReference "GRDB.swift" */,
+				1A00000000000000000004A1 /* XCRemoteSwiftPackageReference "ZIPFoundation" */,
+				1A00000000000000000004A2 /* XCRemoteSwiftPackageReference "AMSMB2" */,
 			);
 			productRefGroup = 1A0000000000000000000102 /* Products */;
 			projectDirPath = "";
@@ -791,7 +807,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 8;
+				CURRENT_PROJECT_VERSION = 9;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = VideoLinker/Info.plist;
@@ -799,7 +815,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.5.1;
+				MARKETING_VERSION = 1.6.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.example.VideoLinker;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -814,7 +830,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 8;
+				CURRENT_PROJECT_VERSION = 9;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = VideoLinker/Info.plist;
@@ -822,7 +838,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.5.1;
+				MARKETING_VERSION = 1.6.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.example.VideoLinker;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -836,7 +852,7 @@
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 8;
+				CURRENT_PROJECT_VERSION = 9;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = ShareExtension/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
@@ -845,7 +861,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.5.1;
+				MARKETING_VERSION = 1.6.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.example.VideoLinker.ShareExtension;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -859,7 +875,7 @@
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 8;
+				CURRENT_PROJECT_VERSION = 9;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = ShareExtension/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
@@ -868,7 +884,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.5.1;
+				MARKETING_VERSION = 1.6.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.example.VideoLinker.ShareExtension;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -880,6 +896,22 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		1A00000000000000000004A1 /* XCRemoteSwiftPackageReference "ZIPFoundation" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/weichsel/ZIPFoundation";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.0.0;
+			};
+		};
+		1A00000000000000000004A2 /* XCRemoteSwiftPackageReference "AMSMB2" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/amosavian/AMSMB2";
+			requirement = {
+				kind = upToNextMinorVersion;
+				minimumVersion = 3.2.3;
+			};
+		};
 		1A0000000000000000000490 /* XCRemoteSwiftPackageReference "GRDB.swift" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/groue/GRDB.swift.git";
@@ -891,6 +923,16 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		1A00000000000000000004B1 /* ZIPFoundation */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1A00000000000000000004A1 /* XCRemoteSwiftPackageReference "ZIPFoundation" */;
+			productName = ZIPFoundation;
+		};
+		1A00000000000000000004B2 /* AMSMB2 */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1A00000000000000000004A2 /* XCRemoteSwiftPackageReference "AMSMB2" */;
+			productName = AMSMB2;
+		};
 		1A00000000000000000004A0 /* GRDB */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 1A0000000000000000000490 /* XCRemoteSwiftPackageReference "GRDB.swift" */;
