@@ -116,9 +116,9 @@ final class SMBShareClient {
     func fileSize(path: String) async throws -> UInt64 {
         let manager = try await connect()
         let attrs = try await manager.attributesOfItem(atPath: path)
-        return attrs[URLResourceKey.fileSizeKey] as? UInt64
-            ?? attrs[URLResourceKey.fileSizeKey] as? Int64.map { UInt64($0) }
-            ?? 0
+        if let v = attrs[URLResourceKey.fileSizeKey] as? UInt64 { return v }
+        if let v = attrs[URLResourceKey.fileSizeKey] as? Int64 { return UInt64(v) }
+        return 0
     }
 
     private func joinPath(_ base: String, _ name: String) -> String {

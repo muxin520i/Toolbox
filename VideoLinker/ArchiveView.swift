@@ -6,12 +6,18 @@ import UniformTypeIdentifiers
 // 第一屏：App 下载目录里已有的压缩包 + 「从文件 App 选一个」
 // 第二屏：包内容列表，顶部「全部解压」，解压到 Documents/Downloads/解压/<包名>
 
+/// sheet(item:) 要求 Identifiable，URL 不满足，包一层
+struct PickedArchive: Identifiable {
+    let id = UUID()
+    let url: URL
+}
+
 struct ArchiveView: View {
     @Environment(\.theme) private var theme
 
     @State private var archives: [URL] = ArchiveStore.archivesInApp()
     @State private var showPicker = false
-    @State private var pickedURL: URL?
+    @State private var picked: PickedArchive?
     @State private var toast: String?
 
     var body: some View {
@@ -80,7 +86,7 @@ struct ArchiveView: View {
             DocumentPickerSheet(contentTypes: Self.archiveTypes, allowsMultiple: false) { urls in
                 showPicker = false
                 guard let url = urls.first else { return }
-                pickedURL = url
+                picked = PickedArchive(url: url)
             } onCancel: { failed in
                 showPicker = false
                 if failed {
@@ -88,9 +94,9 @@ struct ArchiveView: View {
                 }
             }
         }
-        .sheet(item: $pickedURL) { url in
+        .sheet(item: $picked) { picked in
             NavigationStack {
-                ArchiveDetailView(archive: url)
+                ArchiveDetailView(archive: picked.url)
             }
         }
         .onAppear {
