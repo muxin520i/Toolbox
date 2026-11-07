@@ -28,6 +28,7 @@ xcodebuild \
   CODE_SIGN_IDENTITY="" \
   CODE_SIGNING_REQUIRED=NO \
   CODE_SIGNING_ALLOWED=NO \
+  OTHER_CFLAGS="$(inherited) -DHAVE_TIME_H=1 -DHAVE_STDINT_H=1 -DHAVE_SYS_TYPES_H=1" \
   build
 
 APP_PATH="$BUILD_DIR/Build/Products/Release-iphoneos/$SCHEME.app"
