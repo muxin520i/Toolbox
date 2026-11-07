@@ -403,6 +403,12 @@
 				1A0000000000000000002E8 /* SyncView.swift */,
 				1A0000000000000000002E9 /* PatrolStore.swift */,
 				1A0000000000000000002EA /* PatrolView.swift */,
+				1A0000000000000000002EB /* ArchiveStore.swift */,
+				1A0000000000000000002EC /* ArchiveView.swift */,
+				1A0000000000000000002ED /* MediaServerBrowser.swift */,
+				1A0000000000000000002EE /* SMBBrowser.swift */,
+				1A0000000000000000002EF /* SMBStreamServer.swift */,
+				1A0000000000000000002F0 /* LanLibraryView.swift */,
 			);
 			path = VideoLinker;
 			sourceTree = "<group>";
