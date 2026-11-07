@@ -148,10 +148,15 @@ jobs:
             du -sh Payload/VideoLinker.app/Frameworks/*
           fi
           # AMSMB2：SPM 动态框架，Xcode 在关闭签名时不会自动嵌入，这里手动补
-          SPM_FW="build/Build/Products/Release-iphoneos/AMSMB2.framework"
-          if [ -d "$SPM_FW" ]; then
+          SPM_FW=""
+          for CAND in \
+            "build/Build/Products/Release-iphoneos/PackageFrameworks/AMSMB2.framework" \
+            "build/Build/Products/Release-iphoneos/AMSMB2.framework"; do
+            if [ -d "$CAND" ]; then SPM_FW="$CAND"; break; fi
+          done
+          if [ -n "$SPM_FW" ]; then
             cp -R "$SPM_FW" Payload/VideoLinker.app/Frameworks/
-            echo "embedded AMSMB2.framework"
+            echo "embedded $SPM_FW"
           else
             echo "::error::AMSMB2.framework not found, app would crash at launch"
             exit 1
