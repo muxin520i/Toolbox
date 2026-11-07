@@ -60,16 +60,21 @@ jobs:
             -scheme VideoLinker \
             -derivedDataPath build \
             -resolvePackageDependencies >/dev/null 2>&1 || true
-          PKG="build/SourcePackages/checkouts/AMSMB2"
+          PKG="$GITHUB_WORKSPACE/build/SourcePackages/checkouts/AMSMB2"
           HDR="$PKG/Dependencies/libsmb2/include/smb2/smb2.h"
           if [ ! -f "$HDR" ]; then
-            cd "$PKG"
-            git submodule update --init --recursive
+            (cd "$PKG" && git submodule update --init --recursive)
           fi
           test -f "$HDR"
-          if ! grep -q '^#include <time.h>' "$HDR"; then
-            sed -i '' 's/#ifdef HAVE_TIME_H/#include <time.h>\n#ifdef HAVE_TIME_H/' "$HDR"
-          fi
+          python3 - "$HDR" <<'PY'
+          import sys
+          p = sys.argv[1]
+          s = open(p).read()
+          if "#include <time.h>" not in s:
+              s = s.replace("#ifdef HAVE_TIME_H", "#include <time.h>\n#ifdef HAVE_TIME_H", 1)
+              open(p, "w").write(s)
+          print("patched:", "#include <time.h>" in open(p).read())
+          PY
           grep -n 'include <time.h>' "$HDR"
 
       - name: Archive
