@@ -140,12 +140,23 @@ jobs:
           rm -rf Payload VideoLinker-unsigned.ipa
           mkdir -p Payload
           cp -R "$APP_PATH" Payload/
+          mkdir -p Payload/VideoLinker.app/Frameworks
+          # VLCKit：官方二进制包
           if ls Vendor/*.framework >/dev/null 2>&1; then
-            mkdir -p Payload/VideoLinker.app/Frameworks
             cp -R Vendor/*.framework Payload/VideoLinker.app/Frameworks/
             echo "embedded frameworks:"
             du -sh Payload/VideoLinker.app/Frameworks/*
           fi
+          # AMSMB2：SPM 动态框架，Xcode 在关闭签名时不会自动嵌入，这里手动补
+          SPM_FW="build/Build/Products/Release-iphoneos/AMSMB2.framework"
+          if [ -d "$SPM_FW" ]; then
+            cp -R "$SPM_FW" Payload/VideoLinker.app/Frameworks/
+            echo "embedded AMSMB2.framework"
+          else
+            echo "::error::AMSMB2.framework not found, app would crash at launch"
+            exit 1
+          fi
+          du -sh Payload/VideoLinker.app/Frameworks/*
           # 只留 arm64：armv7/armv7s 对现在的设备没用，去掉能省一半体积
           for FW in Payload/VideoLinker.app/Frameworks/*.framework; do
             [ -d "$FW" ] || continue
