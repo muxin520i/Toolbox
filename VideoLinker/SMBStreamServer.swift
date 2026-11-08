@@ -61,7 +61,7 @@ final class SMBStreamServer {
     func streamURL(for path: String) -> URL? {
         guard let base = baseURL() else { return nil }
         let encoded = path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? path
-        return URL(string: "\(base.absoluteString)stream?p=\(encoded)")
+        return URL(string: "\(base.absoluteString)/stream?p=\(encoded)")
     }
 
     // MARK: 监听

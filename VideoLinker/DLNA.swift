@@ -994,7 +994,12 @@ final class DLNAReceiver: ObservableObject {
             guard text.hasPrefix("M-SEARCH") else { continue }
 
             let st = Self.header("ST", in: text) ?? "ssdp:all"
-            guard matches(st) else { continue }
+            if !matches(st) {
+                // 媒体服务器和接收端都想绑 1900，内核只会把每个包分给其中一个 socket。
+                // 收到不归自己的搜索就转给 MediaLibraryServer，避免电视漏掉媒体服务器。
+                _ = MediaLibraryServer.shared.handleForwardedSearch(text, from: from, sock: sock)
+                continue
+            }
             reply(to: from, requestST: st, sock: sock)
         }
     }

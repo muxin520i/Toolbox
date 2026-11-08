@@ -48,6 +48,8 @@ struct SettingsView: View {
     @State private var showMemos = false
     @State private var showArchive = false
     @State private var showLanLibrary = false
+    @State private var showMediaServer = false
+    @State private var showRemote = false
     @State private var toast: String?
 
     @ObservedObject private var memos = MemoStore.shared
@@ -134,6 +136,12 @@ struct SettingsView: View {
         }
         .sheet(isPresented: $showLanLibrary) {
             LanLibraryView()
+        }
+        .sheet(isPresented: $showMediaServer) {
+            MediaServerView()
+        }
+        .sheet(isPresented: $showRemote) {
+            RemoteLibraryView()
         }
         .sheet(isPresented: $showWebDAV) {
             WebDAVView()
@@ -624,12 +632,69 @@ struct SettingsView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+
+                Divider().overlay(theme.cardStroke)
+
+                Button {
+                    showMediaServer = true
+                } label: {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("媒体服务器")
+                                .font(.system(size: 14))
+                                .foregroundStyle(theme.text)
+                            Text("手机变片源，电视来拉本机视频（DLNA）")
+                                .font(.system(size: 11))
+                                .foregroundStyle(theme.textTertiary)
+                                .lineLimit(1)
+                        }
+                        Spacer()
+                        if MediaLibraryServer.shared.running {
+                            Text("运行中")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.green.opacity(0.75), in: Capsule())
+                        }
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 12))
+                            .foregroundStyle(theme.textTertiary)
+                    }
+                    .padding(.vertical, 12)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                Divider().overlay(theme.cardStroke)
+
+                Button {
+                    showRemote = true
+                } label: {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("FTP / SFTP")
+                                .font(.system(size: 14))
+                                .foregroundStyle(theme.text)
+                            Text("连老 NAS、服务器，浏览目录直接播")
+                                .font(.system(size: 11))
+                                .foregroundStyle(theme.textTertiary)
+                                .lineLimit(1)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 12))
+                            .foregroundStyle(theme.textTertiary)
+                    }
+                    .padding(.vertical, 12)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
             }
         }
     }
 
-    private var webdavSubtitle: String {
-        let config = WebDAVConfig.load()
+    private var webdavSubtitle: String {        let config = WebDAVConfig.load()
         guard config.isUsable, let host = URL(string: config.baseURL)?.host else {
             return "未连接 · 点这里挂载 NAS 或网盘"
         }
