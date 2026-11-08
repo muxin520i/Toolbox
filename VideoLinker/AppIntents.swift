@@ -68,38 +68,64 @@ struct ResumeLastVideoIntent: AppIntent {
     }
 }
 
-/// 「播放某某」：在本机视频里按名字找
+// MARK: - 本机视频实体（给 Siri 选片用）
+
+/// App Shortcuts 的语音参数只认 AppEntity / AppEnum，
+/// 所以把本机视频包成实体，Siri 才能把「播放 老友记」对上具体文件。
+struct LocalVideoEntity: AppEntity {
+    static var typeDisplayRepresentation = TypeDisplayRepresentation(name: "本机视频")
+    static var defaultQuery = LocalVideoQuery()
+
+    var id: String
+    var title: String
+    var path: String
+
+    var displayRepresentation: DisplayRepresentation {
+        DisplayRepresentation(title: "\(title)")
+    }
+}
+
+struct LocalVideoQuery: EntityQuery {
+    func entities(for identifiers: [LocalVideoEntity.ID]) async throws -> [LocalVideoEntity] {
+        let files = await LocalMedia.scan(limit: 400, probeDuration: false)
+        let map = Dictionary(uniqueKeysWithValues: files.map { ($0.path, $0) })
+        return identifiers.compactMap { map[$0] }.map {
+            LocalVideoEntity(id: $0.path, title: $0.title, path: $0.path)
+        }
+    }
+
+    func suggestedEntities() async throws -> [LocalVideoEntity] {
+        let files = await LocalMedia.scan(limit: 400, probeDuration: false)
+        return files.prefix(30).map {
+            LocalVideoEntity(id: $0.path, title: $0.title, path: $0.path)
+        }
+    }
+
+    func defaultResult() async -> LocalVideoEntity? {
+        let files = await LocalMedia.scan(limit: 20, probeDuration: false)
+        guard let first = files.first else { return nil }
+        return LocalVideoEntity(id: first.path, title: first.title, path: first.path)
+    }
+}
+
+/// 「播放某某」：从本机视频里挑一部
 struct PlayNamedVideoIntent: AppIntent {
     static var title: LocalizedStringResource = "播放指定视频"
-    static var description = IntentDescription("按名字在工具箱的本机视频里找一部并播放。")
+    static var description = IntentDescription("从工具箱的本机视频里挑一部播放。")
     static var openAppWhenRun: Bool = true
 
-    @Parameter(title: "视频名字", description: "片子名字的一部分就行")
-    var keyword: String
+    @Parameter(title: "视频", description: "从本机视频里选一部")
+    var video: LocalVideoEntity
 
     static var parameterSummary: some ParameterSummary {
-        Summary("播放 \(\.$keyword)")
+        Summary("播放 \(\.$video)")
     }
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        let key = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !key.isEmpty else {
-            return .result(dialog: "没听清要看哪一部。")
-        }
-
-        let files = await LocalMedia.scan(limit: 400, probeDuration: false)
-        let matches = files.filter { $0.title.localizedCaseInsensitiveContains(key) }
-        guard let first = matches.first else {
-            return .result(dialog: "本机视频里没找到「\(key)」。")
-        }
-
         await MainActor.run {
-            Router.shared.pending = PlayRequest(url: first.url)
+            Router.shared.pending = PlayRequest(url: URL(fileURLWithPath: video.path))
         }
-        if matches.count > 1 {
-            return .result(dialog: "找到 \(matches.count) 部，先播《\(first.title)》。")
-        }
-        return .result(dialog: "正在播放《\(first.title)》。")
+        return .result(dialog: "正在播放《\(video.title)》。")
     }
 }
 
@@ -126,7 +152,7 @@ struct VideoLinkerShortcuts: AppShortcutsProvider {
         AppShortcut(
             intent: PlayNamedVideoIntent(),
             phrases: [
-                "用 \(.applicationName) 播放 \(\.$keyword)"
+                "用 \(.applicationName) 播放 \(\.$video)"
             ],
             shortTitle: "播放视频",
             systemImageName: "text.magnifyingglass"
