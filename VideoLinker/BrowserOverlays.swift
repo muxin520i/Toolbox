@@ -336,7 +336,10 @@ struct ScriptMenuItem: Identifiable, Equatable {
 
 struct ScriptMenuSheet: View {
     let items: [ScriptMenuItem]
+    /// 当前已启用的脚本数量，空了能帮用户判断是脚本没跑还是没注册
+    var enabledCount: Int = 0
     var onRun: (ScriptMenuItem) -> Void
+    var onReload: () -> Void = {}
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var scheme
@@ -344,37 +347,157 @@ struct ScriptMenuSheet: View {
     private var isDark: Bool { scheme == .dark }
 
     var body: some View {
-        NavigationStack {
-            List {
-                ForEach(groups) { group in
-                    Section(group.script) {
-                        ForEach(group.items) { item in
-                            Button {
-                                onRun(item)
-                            } label: {
-                                HStack(spacing: 10) {
-                                    Text(item.title)
-                                        .font(.system(size: 15))
-                                        .foregroundStyle(FirefoxStyle.text(isDark))
-                                    Spacer(minLength: 6)
-                                    Image(systemName: "play.circle")
-                                        .font(.system(size: 16))
-                                        .foregroundStyle(FirefoxStyle.sub(isDark))
-                                }
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
+        VStack(spacing: 0) {
+            header
+            Rectangle()
+                .fill(FirefoxStyle.line(isDark))
+                .frame(height: 0.5)
+
+            if groups.isEmpty {
+                emptyState
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 16) {
+                        ForEach(groups) { group in
+                            section(group)
                         }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 16)
+                    .padding(.bottom, 28)
+                }
+            }
+        }
+        .background(FirefoxStyle.bg(isDark).ignoresSafeArea())
+    }
+
+    private var header: some View {
+        HStack(spacing: 8) {
+            Text("脚本菜单")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(FirefoxStyle.text(isDark))
+
+            if !items.isEmpty {
+                Text("\(items.count)")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(FirefoxStyle.sub(isDark))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(FirefoxStyle.field(isDark)))
+            }
+
+            Spacer(minLength: 6)
+
+            Button {
+                onReload()
+            } label: {
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(FirefoxStyle.accent)
+                    .frame(width: 34, height: 34)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(FirefoxStyle.sub(isDark))
+                    .frame(width: 34, height: 34)
+                    .background(Circle().fill(FirefoxStyle.field(isDark)))
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.leading, 16)
+        .padding(.trailing, 12)
+        .padding(.top, 14)
+        .padding(.bottom, 12)
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "list.bullet.rectangle")
+                .font(.system(size: 32, weight: .light))
+                .foregroundStyle(FirefoxStyle.sub(isDark))
+
+            Text("这个页面没有脚本菜单")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(FirefoxStyle.text(isDark))
+
+            Text("只有脚本用 GM_registerMenuCommand 注册过命令，\n才会出现在这里。确认脚本已开启、页面已刷新。")
+                .font(.system(size: 12))
+                .foregroundStyle(FirefoxStyle.sub(isDark))
+                .multilineTextAlignment(.center)
+                .lineSpacing(3)
+
+            Text(enabledCount > 0
+                 ? "当前已启用 \(enabledCount) 个脚本"
+                 : "当前没有启用的脚本，先去「油猴脚本」打开开关")
+                .font(.system(size: 11))
+                .foregroundStyle(enabledCount > 0 ? FirefoxStyle.sub(isDark) : FirefoxStyle.accent)
+                .padding(.top, 2)
+
+            Button {
+                onReload()
+            } label: {
+                Text("重新获取")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 8)
+                    .background(Capsule().fill(FirefoxStyle.accent))
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 4)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.horizontal, 28)
+    }
+
+    private func section(_ group: Group) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(group.script)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(FirefoxStyle.sub(isDark))
+                .padding(.leading, 4)
+                .lineLimit(1)
+
+            VStack(spacing: 0) {
+                ForEach(Array(group.items.enumerated()), id: \.element.id) { index, item in
+                    Button {
+                        onRun(item)
+                    } label: {
+                        HStack(spacing: 10) {
+                            Text(item.title)
+                                .font(.system(size: 15))
+                                .foregroundStyle(FirefoxStyle.text(isDark))
+                                .multilineTextAlignment(.leading)
+                            Spacer(minLength: 6)
+                            Image(systemName: "play.circle")
+                                .font(.system(size: 17))
+                                .foregroundStyle(FirefoxStyle.accent)
+                        }
+                        .padding(.horizontal, 14)
+                        .frame(minHeight: 46)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+
+                    if index < group.items.count - 1 {
+                        Rectangle()
+                            .fill(FirefoxStyle.line(isDark))
+                            .frame(height: 0.5)
+                            .padding(.leading, 14)
                     }
                 }
             }
-            .navigationTitle("脚本菜单")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("关闭") { dismiss() }
-                }
-            }
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(FirefoxStyle.card(isDark))
+            )
         }
     }
 

@@ -341,7 +341,9 @@ enum UserscriptEngine {
         "GM_unregisterMenuCommand",
         "GM_openInTab",
         "GM_getResourceText",
-        "GM_download"
+        "GM_download",
+        // GM3/GM4 命名空间：现代脚本写 GM.registerMenuCommand 时靠这个参数
+        "GM"
     ]
 
     /// 把一条脚本编译成可以交给 WKUserScript 的 JS。

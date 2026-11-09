@@ -288,7 +288,7 @@ enum GMShim {
         var values = initialValues || {};
         var label = scriptName || scope;
 
-        return {
+        var api = {
           GM_info: {
             scriptHandler: 'VideoLinker',
             version: '1.4',
@@ -391,6 +391,25 @@ enum GMShim {
             try { if (url) { window.location.href = url; } } catch (e) {}
           }
         };
+
+        // GM3/GM4（Violentmonkey、Tampermonkey 新版）写法：脚本里是
+        // GM.registerMenuCommand / GM.getValue，这里让 GM 指向同一组方法。
+        // 少了这层，用新写法的脚本在注册菜单时会直接抛错，面板自然就是空的。
+        api.GM = api;
+        api.GM.info = api.GM_info;
+        api.GM.getValue = api.GM_getValue;
+        api.GM.setValue = api.GM_setValue;
+        api.GM.deleteValue = api.GM_deleteValue;
+        api.GM.listValues = api.GM_listValues;
+        api.GM.registerMenuCommand = api.GM_registerMenuCommand;
+        api.GM.unregisterMenuCommand = api.GM_unregisterMenuCommand;
+        api.GM.notification = api.GM_notification;
+        api.GM.xmlHttpRequest = api.GM_xmlhttpRequest;
+        api.GM.openInTab = api.GM_openInTab;
+        api.GM.addStyle = api.GM_addStyle;
+        api.GM.download = api.GM_download;
+
+        return api;
       };
     })();
     """#

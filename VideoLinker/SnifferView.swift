@@ -323,7 +323,9 @@ struct BrowserView: View {
             PlayerScreen(request: req)
         }
         .sheet(isPresented: sheetPresented, onDismiss: handleDismiss) {
-            if let item = renderedSheet {
+            // 用 renderedSheet ?? sheet 兜底：切面板时 onDismiss 偶尔晚于新面板设置，
+            // 只清了 renderedSheet，sheet 还开着，就会渲染出空白页
+            if let item = renderedSheet ?? sheet {
                 if item == .menu {
                     sheetContent(item)
                         .id(item.rawValue)
@@ -708,9 +710,14 @@ struct BrowserView: View {
         case .scripts:
             UserscriptListView(library: library)
         case .scriptMenu:
-            ScriptMenuSheet(items: scriptMenuItems) { item in
-                runScriptMenu(item)
-            }
+            ScriptMenuSheet(
+                items: scriptMenuItems,
+                enabledCount: library.scripts.filter { $0.enabled }.count,
+                onRun: { item in runScriptMenu(item) },
+                onReload: {
+                    if let tab = tab { loadScriptMenu(tab) }
+                }
+            )
         }
     }
 
@@ -811,15 +818,23 @@ struct BrowserView: View {
     private func loadScriptMenu(_ tab: BrowserTab) {
         tab.webView.evaluateJavaScript("window.__vlMenuList ? window.__vlMenuList() : '[]'") { result, _ in
             DispatchQueue.main.async {
-                let items = ScriptMenuItem.parse((result as? String) ?? "[]")
-                guard !items.isEmpty else {
-                    showToast("当前页面没有可用的脚本菜单")
-                    return
+                let payload: String
+                if let text = result as? String {
+                    payload = text
+                } else if let array = result as? [[String: Any]],
+                          let data = try? JSONSerialization.data(withJSONObject: array),
+                          let text = String(data: data, encoding: .utf8) {
+                    // 个别系统版本会把 JS 的字符串直接桥接成数组
+                    payload = text
+                } else {
+                    payload = "[]"
                 }
+
+                let items = ScriptMenuItem.parse(payload)
                 scriptMenuItems = items
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-                    present(.scriptMenu)
-                }
+                // 空列表也进面板：面板里会显示「这个页面没有脚本菜单」和重新获取按钮，
+                // 比一个静默的 toast 更容易判断是没注册还是脚本没跑
+                present(.scriptMenu)
             }
         }
     }
@@ -913,7 +928,8 @@ struct BrowserView: View {
             openPanel(.scripts)
 
         case .scriptMenu:
-            sheet = nil
+            // 取菜单只是读一下页面变量，不用先关菜单；
+            // 先关再弹会撞上 onDismiss 的时序，出现过整页空白
             loadScriptMenu(tab)
 
         case .sniff:
