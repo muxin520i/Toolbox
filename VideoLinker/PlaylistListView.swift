@@ -636,6 +636,8 @@ struct PlaylistDetailView: View {
     @State private var bulkText = ""
     @State private var editMode: EditMode = .inactive
     @State private var selection = Set<UUID>()
+    @State private var deleteCandidates: [PlaylistItem] = []
+    @State private var confirmDeleteFiles = false
     @State private var toast: String?
     @State private var showMoveSheet = false
     @State private var pendingMoveIDs = Set<UUID>()
@@ -789,6 +791,19 @@ struct PlaylistDetailView: View {
             .presentationDetents([.height(230)])
             .presentationDragIndicator(.visible)
         }
+        .confirmationDialog(deleteDialogTitle, isPresented: $confirmDeleteFiles, titleVisibility: .visible) {
+            Button("仅从列表移除") {
+                performDelete(deleteCandidates, deleteFiles: false)
+            }
+            Button("同时删除源文件", role: .destructive) {
+                performDelete(deleteCandidates, deleteFiles: true)
+            }
+            Button("取消", role: .cancel) {
+                deleteCandidates = []
+            }
+        } message: {
+            Text(deleteDialogMessage)
+        }
         .fullScreenCover(item: $request) { req in
             PlayerScreen(request: req)
         }
@@ -828,7 +843,7 @@ struct PlaylistDetailView: View {
                     .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 4, trailing: 20))
                     .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                         Button(role: .destructive) {
-                            removeWithUndo([item])
+                            requestDelete([item])
                         } label: {
                             Label("删除", systemImage: "trash")
                         }
@@ -1142,7 +1157,7 @@ struct PlaylistDetailView: View {
             Label("清除观看进度", systemImage: "arrow.counterclockwise")
         }
         Button(role: .destructive) {
-            removeWithUndo([item])
+            requestDelete([item])
         } label: {
             Label("从列表移除", systemImage: "minus.circle")
         }
@@ -1307,9 +1322,98 @@ struct PlaylistDetailView: View {
     private func deleteSelected() {
         guard !selection.isEmpty, let list = playlist else { return }
         let targets = list.items.filter { selection.contains($0.id) }
-        removeWithUndo(targets)
+        requestDelete(targets)
+    }
+
+    private var deleteDialogTitle: String {
+        deleteCandidates.count == 1 ? "删除这个视频？" : "删除 \(deleteCandidates.count) 个视频？"
+    }
+
+    private var deleteDialogMessage: String {
+        let localCount = deleteCandidates.filter { $0.isLocal && $0.localFileExists }.count
+        if localCount == 0 {
+            return "只会从列表里移除，不会影响手机里的文件。"
+        }
+        return "其中 \(localCount) 个是手机里的视频。「仅从列表移除」会保留文件；「同时删除源文件」会把它们从本机删掉，空间立刻释放，且不能撤销。"
+    }
+
+    /// 有本地文件时先问一句要不要连源文件一起删，纯在线条目照旧直接移除
+    private func requestDelete(_ targets: [PlaylistItem]) {
+        guard !targets.isEmpty else { return }
+        deleteCandidates = targets
+        if targets.contains(where: { $0.isLocal && $0.localFileExists }) {
+            confirmDeleteFiles = true
+        } else {
+            performDelete(targets, deleteFiles: false)
+        }
+    }
+
+    private func performDelete(_ targets: [PlaylistItem], deleteFiles: Bool) {
+        guard !targets.isEmpty else { return }
+        if deleteFiles {
+            deleteWithSourceFiles(targets)
+        } else {
+            removeWithUndo(targets)
+        }
+        deleteCandidates = []
         selection.removeAll()
         editMode = .inactive
+    }
+
+    /// 连源文件一起删：只动 App 容器里的文件；同一个文件还在别的列表里用时保留
+    private func deleteWithSourceFiles(_ targets: [PlaylistItem]) {
+        let manager = FileManager.default
+        let home = MediaPath.canonical(NSHomeDirectory())
+        let targetIDs = Set(targets.map { $0.id })
+        let otherItems = PlaylistStore.load().flatMap { $0.items }
+        let otherPaths = Set(otherItems
+            .filter { !targetIDs.contains($0.id) && $0.isLocal }
+            .compactMap { $0.effectiveLocalPath }
+            .map { MediaPath.canonical($0) })
+        var deletedFiles = 0
+        var freed: Int64 = 0
+        var kept = 0
+
+        for item in targets where item.isLocal {
+            guard let path = item.effectiveLocalPath, !path.isEmpty else { continue }
+            let realPath = MediaPath.canonical(path)
+            // 容器外的路径（旧书签、外部目录）一律不动，免得误删用户别的文件
+            guard realPath.hasPrefix(home) else {
+                kept += 1
+                continue
+            }
+            guard manager.fileExists(atPath: realPath) else { continue }
+
+            if otherPaths.contains(realPath) {
+                kept += 1
+                continue
+            }
+
+            let attributes = try? manager.attributesOfItem(atPath: realPath)
+            let size = (attributes?[.size] as? NSNumber)?.int64Value ?? 0
+            if (try? manager.removeItem(atPath: realPath)) != nil {
+                deletedFiles += 1
+                freed += size
+            } else {
+                kept += 1
+            }
+        }
+
+        for item in targets {
+            PlaylistStore.removeItem(item.id, from: playlistID)
+            ResumeStore.remove(url: item.url)
+        }
+        reload()
+
+        var text = "已删除 \(targets.count) 条"
+        if deletedFiles > 0 {
+            text += "，清掉 \(deletedFiles) 个文件（\(ByteCountFormatter.string(fromByteCount: freed, countStyle: .file))）"
+        }
+        if kept > 0 {
+            text += "，\(kept) 个文件还在别处用，已保留"
+        }
+        toast = text
+        hideToastSoon()
     }
 
     /// 删除并留一条撤销。按删除前的位置记下来，撤销时才能插回原处

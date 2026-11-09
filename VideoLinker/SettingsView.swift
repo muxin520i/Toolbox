@@ -62,16 +62,14 @@ struct SettingsView: View {
                 BackgroundView()
 
                 ScrollView {
-                    VStack(spacing: 16) {
+                    VStack(spacing: 14) {
                         themeCard
                         playbackCard
                         downloadCard
-                        networkCard
-                        storageCard
-                        privacyCard
-                        memoCard
-                        archiveCard
+                        networkShareCard
                         dataCard
+                        privacyCard
+                        toolsCard
                         aboutCard
                     }
                     .padding(.horizontal, 20)
@@ -151,6 +149,9 @@ struct SettingsView: View {
         }
         .sheet(isPresented: $showReceiver) {
             DLNAReceiverView()
+        }
+        .sheet(isPresented: $showDiagnostics) {
+            NetworkDiagnosticsView()
         }
         .alert("私密保险箱", isPresented: $showPrivateHelp) {
             Button("知道了", role: .cancel) {}
@@ -433,7 +434,7 @@ struct SettingsView: View {
     // MARK: 下载
 
     private var downloadCard: some View {
-        card(title: "下载", icon: "arrow.down.circle.fill") {
+        card(title: "下载", icon: "arrow.down.circle.fill", summary: "保存位置 · 并发 · 巡检") {
             VStack(spacing: 0) {
                 HStack {
                     VStack(alignment: .leading, spacing: 3) {
@@ -499,32 +500,6 @@ struct SettingsView: View {
                 Divider().overlay(theme.cardStroke)
 
                 Button {
-                    showInbox = true
-                } label: {
-                    actionRow("局域网收件箱", symbol: "antenna.radiowaves.left.and.right")
-                }
-
-                Divider().overlay(theme.cardStroke)
-
-                Button {
-                    showLANShare = true
-                } label: {
-                    actionRow("局域网投屏（电脑浏览器看）", symbol: "airplayvideo")
-                }
-                .buttonStyle(.plain)
-
-                Divider().overlay(theme.cardStroke)
-
-                Button {
-                    showLANTransfer = true
-                } label: {
-                    actionRow("局域网互传（手机对手机）", symbol: "arrow.left.arrow.right")
-                }
-                .buttonStyle(.plain)
-
-                Divider().overlay(theme.cardStroke)
-
-                Button {
                     newListName = ""
                     showNewList = true
                 } label: {
@@ -535,166 +510,81 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: 数据
-    // MARK: 网络存储
+    // MARK: 网络与共享
 
-    // MARK: 网络
-
-    private var networkCard: some View {
-        card(title: "网络与请求", icon: "network") {
+    private var networkShareCard: some View {
+        card(title: "网络与共享",
+             icon: "network",
+             summary: "网盘 · 影库 · 投屏 · 互传",
+             expanded: false) {
             VStack(spacing: 0) {
-                Button {
-                    showHeaders = true
-                } label: {
-                    actionRow("请求头（Referer / Cookie / UA）", symbol: "chevron.right")
-                }
-                .buttonStyle(.plain)
+                groupLabel("存储与网盘")
 
-                Divider().overlay(theme.cardStroke)
-
-                Text("有些站点直接播只给 403，加一条对应域名的规则就能放；下载和嗅探也会用同一套规则。")
-                    .font(.system(size: 11))
-                    .foregroundStyle(theme.textTertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 10)
-
-                Divider().overlay(theme.cardStroke)
-
-                Button {
-                    showReceiver = true
-                } label: {
-                    actionRow("接收投屏（手机当电视）", symbol: "tv.badge.wifi")
-                }
-                .buttonStyle(.plain)
-
-                Divider().overlay(theme.cardStroke)
-
-                Button {
-                    showDiagnostics = true
-                } label: {
-                    actionRow("网络诊断（IP / 延迟 / 测速）", symbol: "waveform.path.ecg")
-                }
-                .buttonStyle(.plain)
-                .sheet(isPresented: $showDiagnostics) {
-                    NetworkDiagnosticsView()
-                }
-            }
-        }
-    }
-
-    private var storageCard: some View {
-        card(title: "网络存储", icon: "externaldrive.connected.to.line.below") {
-            VStack(spacing: 0) {
-                Button {
+                navRow("WebDAV", subtitle: webdavSubtitle) {
                     showWebDAV = true
-                } label: {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("WebDAV")
-                                .font(.system(size: 14))
-                                .foregroundStyle(theme.text)
-                            Text(webdavSubtitle)
-                                .font(.system(size: 11))
-                                .foregroundStyle(theme.textTertiary)
-                                .lineLimit(1)
-                        }
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 12))
-                            .foregroundStyle(theme.textTertiary)
-                    }
-                    .padding(.vertical, 12)
-                    .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
 
-                Divider().overlay(theme.cardStroke)
+                rowDivider
 
-                Button {
+                navRow("局域网影库", subtitle: "直接播家里 NAS 里的电影（DLNA / SMB）") {
                     showLanLibrary = true
-                } label: {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("局域网影库")
-                                .font(.system(size: 14))
-                                .foregroundStyle(theme.text)
-                            Text("直接播家里 NAS 里的电影（DLNA / SMB）")
-                                .font(.system(size: 11))
-                                .foregroundStyle(theme.textTertiary)
-                                .lineLimit(1)
-                        }
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 12))
-                            .foregroundStyle(theme.textTertiary)
-                    }
-                    .padding(.vertical, 12)
-                    .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
 
-                Divider().overlay(theme.cardStroke)
+                rowDivider
 
-                Button {
+                navRow("媒体服务器",
+                       subtitle: "手机变片源，电视来拉本机视频（DLNA）",
+                       badge: MediaLibraryServer.shared.running ? "运行中" : nil) {
                     showMediaServer = true
-                } label: {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("媒体服务器")
-                                .font(.system(size: 14))
-                                .foregroundStyle(theme.text)
-                            Text("手机变片源，电视来拉本机视频（DLNA）")
-                                .font(.system(size: 11))
-                                .foregroundStyle(theme.textTertiary)
-                                .lineLimit(1)
-                        }
-                        Spacer()
-                        if MediaLibraryServer.shared.running {
-                            Text("运行中")
-                                .font(.system(size: 10, weight: .semibold))
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(Color.green.opacity(0.75), in: Capsule())
-                        }
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 12))
-                            .foregroundStyle(theme.textTertiary)
-                    }
-                    .padding(.vertical, 12)
-                    .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
 
-                Divider().overlay(theme.cardStroke)
+                rowDivider
 
-                Button {
+                navRow("FTP / SFTP", subtitle: "连老 NAS、服务器，浏览目录直接播") {
                     showRemote = true
-                } label: {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("FTP / SFTP")
-                                .font(.system(size: 14))
-                                .foregroundStyle(theme.text)
-                            Text("连老 NAS、服务器，浏览目录直接播")
-                                .font(.system(size: 11))
-                                .foregroundStyle(theme.textTertiary)
-                                .lineLimit(1)
-                        }
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 12))
-                            .foregroundStyle(theme.textTertiary)
-                    }
-                    .padding(.vertical, 12)
-                    .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+
+                groupLabel("投屏与互传")
+
+                navRow("局域网收件箱", subtitle: "电脑浏览器把文件传进手机") {
+                    showInbox = true
+                }
+
+                rowDivider
+
+                navRow("局域网投屏", subtitle: "电脑浏览器看手机里的视频") {
+                    showLANShare = true
+                }
+
+                rowDivider
+
+                navRow("局域网互传", subtitle: "手机对手机直接传，不耗流量") {
+                    showLANTransfer = true
+                }
+
+                groupLabel("请求与诊断")
+
+                navRow("请求头（Referer / Cookie / UA）", subtitle: "解决 403，下载和嗅探共用一套规则") {
+                    showHeaders = true
+                }
+
+                rowDivider
+
+                navRow("接收投屏（手机当电视）", subtitle: "接收别的设备投过来的画面") {
+                    showReceiver = true
+                }
+
+                rowDivider
+
+                navRow("网络诊断", subtitle: "IP / 延迟 / 测速") {
+                    showDiagnostics = true
+                }
             }
         }
     }
 
-    private var webdavSubtitle: String {        let config = WebDAVConfig.load()
+    private var webdavSubtitle: String {
+        let config = WebDAVConfig.load()
         guard config.isUsable, let host = URL(string: config.baseURL)?.host else {
             return "未连接 · 点这里挂载 NAS 或网盘"
         }
@@ -704,7 +594,7 @@ struct SettingsView: View {
     // MARK: 隐私
 
     private var privacyCard: some View {
-        card(title: "隐私", icon: "lock.shield.fill") {
+        card(title: "隐私与安全", icon: "lock.shield.fill", summary: "App 锁 · 私密保险箱") {
             VStack(spacing: 0) {
                 Toggle(isOn: $lockEnabled) {
                     VStack(alignment: .leading, spacing: 2) {
@@ -760,43 +650,32 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: 备忘录
+    // MARK: 工具
 
-    private var memoCard: some View {
-        card(title: "备忘", icon: "note.text") {
-            Button {
-                showMemos = true
-            } label: {
-                HStack(spacing: 10) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("备忘录")
-                            .font(.system(size: 14))
-                            .foregroundStyle(theme.text)
-                        Text(memoSummary)
-                            .font(.system(size: 11))
-                            .foregroundStyle(theme.textTertiary)
-                            .lineLimit(1)
-                    }
-
-                    Spacer(minLength: 8)
-
-                    if !memos.items.isEmpty {
-                        Text("\(memos.items.count) 条")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(theme.accent)
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 3)
-                            .background(theme.accent.opacity(0.12), in: Capsule())
-                    }
-
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(theme.textTertiary)
+    private var toolsCard: some View {
+        card(title: "实用工具",
+             icon: "wrench.and.screwdriver.fill",
+             summary: "备忘录 · 压缩包",
+             expanded: false) {
+            VStack(spacing: 0) {
+                Button {
+                    showMemos = true
+                } label: {
+                    toolRow("备忘录",
+                            subtitle: memoSummary,
+                            badge: memos.items.isEmpty ? nil : "\(memos.items.count) 条")
                 }
-                .padding(.vertical, 4)
-                .contentShape(Rectangle())
+                .buttonStyle(.plain)
+
+                rowDivider
+
+                Button {
+                    showArchive = true
+                } label: {
+                    toolRow("压缩包", subtitle: "解开下载的 zip、tar、tar.gz")
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         }
     }
 
@@ -807,41 +686,10 @@ struct SettingsView: View {
         return "最近更新 \(latest.dateText)"
     }
 
-    // MARK: 压缩包
-
-    private var archiveCard: some View {
-        card(title: "文件", icon: "doc.zipper") {
-            Button {
-                showArchive = true
-            } label: {
-                HStack(spacing: 10) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("压缩包")
-                            .font(.system(size: 14))
-                            .foregroundStyle(theme.text)
-                        Text("解开下载的 zip、tar、tar.gz")
-                            .font(.system(size: 11))
-                            .foregroundStyle(theme.textTertiary)
-                            .lineLimit(1)
-                    }
-
-                    Spacer(minLength: 8)
-
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(theme.textTertiary)
-                }
-                .padding(.vertical, 4)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-        }
-    }
-
     // MARK: 数据
 
     private var dataCard: some View {
-        card(title: "数据", icon: "internaldrive.fill") {
+        card(title: "数据", icon: "internaldrive.fill", summary: "统计 · 存储 · 搬家 · 清理", expanded: false) {
             VStack(spacing: 0) {
                 Button {
                     showStats = true
@@ -910,7 +758,7 @@ struct SettingsView: View {
     // MARK: 关于
 
     private var aboutCard: some View {
-        card(title: "关于", icon: "info.circle.fill") {
+        card(title: "关于", icon: "info.circle.fill", summary: "版本 \(appVersion) · 更新 · 存储") {
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Text("版本")
@@ -1005,26 +853,67 @@ struct SettingsView: View {
     private func card<Content: View>(
         title: String,
         icon: String,
-        @ViewBuilder content: () -> Content
+        summary: String? = nil,
+        expanded: Bool = true,
+        @ViewBuilder content: @escaping () -> Content
     ) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 7) {
-                Image(systemName: icon)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(theme.accent)
-                Text(title)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(theme.textSecondary)
+        SettingsCard(title: title,
+                     icon: icon,
+                     summary: summary,
+                     initiallyExpanded: expanded,
+                     content: content)
+    }
+
+    private var rowDivider: some View {
+        Divider().overlay(theme.cardStroke)
+    }
+
+    private func groupLabel(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(theme.textTertiary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 12)
+            .padding(.bottom, 2)
+    }
+
+    private func navRow(_ title: String,
+                        subtitle: String? = nil,
+                        badge: String? = nil,
+                        action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.system(size: 14))
+                        .foregroundStyle(theme.text)
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(.system(size: 11))
+                            .foregroundStyle(theme.textTertiary)
+                            .lineLimit(1)
+                    }
+                }
+
+                Spacer(minLength: 8)
+
+                if let badge {
+                    Text(badge)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.green.opacity(0.75), in: Capsule())
+                }
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12))
+                    .foregroundStyle(theme.textTertiary)
             }
-            content()
+            .padding(.vertical, 11)
+            .contentShape(Rectangle())
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(theme.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .strokeBorder(theme.cardStroke, lineWidth: 1)
-        )
+        .buttonStyle(.plain)
     }
 
     private func toggleRow(_ title: String, subtitle: String, isOn: Binding<Bool>) -> some View {
@@ -1056,6 +945,37 @@ struct SettingsView: View {
         .contentShape(Rectangle())
     }
 
+    private func toolRow(_ title: String, subtitle: String, badge: String? = nil) -> some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.system(size: 14))
+                    .foregroundStyle(theme.text)
+                Text(subtitle)
+                    .font(.system(size: 11))
+                    .foregroundStyle(theme.textTertiary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 8)
+
+            if let badge {
+                Text(badge)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(theme.accent)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(theme.accent.opacity(0.12), in: Capsule())
+            }
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(theme.textTertiary)
+        }
+        .padding(.vertical, 6)
+        .contentShape(Rectangle())
+    }
+
     private func rateText(_ value: Double) -> String {
         if abs(value.rounded() - value) < 0.001 { return "\(Int(value))x" }
         return String(format: "%.2gx", value)
@@ -1066,6 +986,79 @@ struct SettingsView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
             withAnimation(.easeIn(duration: 0.2)) { toast = nil }
         }
+    }
+}
+
+// MARK: - 可折叠设置卡片
+
+private struct SettingsCard<Content: View>: View {
+    @Environment(\.theme) private var theme
+
+    let title: String
+    let icon: String
+    let summary: String?
+    let content: () -> Content
+
+    @State private var expanded: Bool
+
+    init(title: String,
+         icon: String,
+         summary: String? = nil,
+         initiallyExpanded: Bool = true,
+         @ViewBuilder content: @escaping () -> Content) {
+        self.title = title
+        self.icon = icon
+        self.summary = summary
+        self.content = content
+        _expanded = State(initialValue: initiallyExpanded)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: expanded ? 12 : 0) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    expanded.toggle()
+                }
+            } label: {
+                HStack(spacing: 7) {
+                    Image(systemName: icon)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(theme.accent)
+
+                    Text(title)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(theme.textSecondary)
+
+                    Spacer(minLength: 8)
+
+                    if !expanded, let summary, !summary.isEmpty {
+                        Text(summary)
+                            .font(.system(size: 11))
+                            .foregroundStyle(theme.textTertiary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(theme.textTertiary)
+                        .rotationEffect(.degrees(expanded ? 0 : -90))
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if expanded {
+                content()
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(theme.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(theme.cardStroke, lineWidth: 1)
+        )
     }
 }
 
