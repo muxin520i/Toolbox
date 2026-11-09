@@ -223,7 +223,8 @@ enum GMShim {
       var menuItems = {};
       var menuOrder = [];
 
-      window.__vlMenuList = function () {
+      // 只取本 frame 的菜单
+      window.__vlMenuListLocal = function () {
         var list = [];
         for (var i = 0; i < menuOrder.length; i++) {
           var item = menuItems[menuOrder[i]];
@@ -234,7 +235,39 @@ enum GMShim {
         return JSON.stringify(list);
       };
 
-      window.__vlMenuRun = function (key) {
+      // 有些站点把播放器或正文放在同源 iframe 里，脚本就在 iframe 里注册菜单。
+      // 主页面下拉列表时把各层 iframe 的菜单一起收上来，跨域取不到就跳过。
+      window.__vlMenuList = function () {
+        var out = [];
+        var seen = {};
+        function push(arr) {
+          for (var i = 0; i < arr.length; i++) {
+            var key = arr[i] && arr[i].key;
+            if (!key || seen[key]) { continue; }
+            seen[key] = true;
+            out.push(arr[i]);
+          }
+        }
+        function walk(win, depth) {
+          if (!win || depth > 2) { return; }
+          try {
+            if (typeof win.__vlMenuListLocal === 'function') {
+              push(JSON.parse(win.__vlMenuListLocal()));
+            }
+          } catch (e) {}
+          try {
+            var frames = win.document.querySelectorAll('iframe');
+            for (var i = 0; i < frames.length; i++) {
+              try { walk(frames[i].contentWindow, depth + 1); } catch (e) {}
+            }
+          } catch (e) {}
+        }
+        walk(window, 0);
+        return JSON.stringify(out);
+      };
+
+      // 只在本 frame 执行
+      window.__vlMenuRunLocal = function (key) {
         var item = menuItems[key];
         if (!item) { return 'missing'; }
         try {
@@ -243,6 +276,32 @@ enum GMShim {
         } catch (e) {
           return 'error: ' + (e && e.message ? e.message : String(e));
         }
+      };
+
+      // 主页面找不到就往下层 iframe 找，找到谁执行谁
+      window.__vlMenuRun = function (key) {
+        var result = window.__vlMenuRunLocal(key);
+        if (result !== 'missing') { return result; }
+        function walk(win, depth) {
+          if (!win || depth > 2) { return 'missing'; }
+          try {
+            var frames = win.document.querySelectorAll('iframe');
+            for (var i = 0; i < frames.length; i++) {
+              try {
+                var child = frames[i].contentWindow;
+                if (!child) { continue; }
+                if (typeof child.__vlMenuRunLocal === 'function') {
+                  var hit = child.__vlMenuRunLocal(key);
+                  if (hit !== 'missing') { return hit; }
+                }
+                var deep = walk(child, depth + 1);
+                if (deep !== 'missing') { return deep; }
+              } catch (e) {}
+            }
+          } catch (e) {}
+          return 'missing';
+        }
+        return walk(window, 0);
       };
 
       function post(action, scope, payload) {
