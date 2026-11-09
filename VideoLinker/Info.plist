@@ -25,6 +25,8 @@
 		<dict>
 			<key>AltIcon-Ocean</key>
 			<dict>
+				<key>CFBundleIconName</key>
+				<string>AppIcon-Ocean</string>
 				<key>CFBundleIconFiles</key>
 				<array>
 					<string>AltIcon-Ocean</string>
@@ -34,6 +36,8 @@
 			</dict>
 			<key>AltIcon-Mint</key>
 			<dict>
+				<key>CFBundleIconName</key>
+				<string>AppIcon-Mint</string>
 				<key>CFBundleIconFiles</key>
 				<array>
 					<string>AltIcon-Mint</string>
@@ -43,6 +47,8 @@
 			</dict>
 			<key>AltIcon-Violet</key>
 			<dict>
+				<key>CFBundleIconName</key>
+				<string>AppIcon-Violet</string>
 				<key>CFBundleIconFiles</key>
 				<array>
 					<string>AltIcon-Violet</string>
@@ -52,6 +58,8 @@
 			</dict>
 			<key>AltIcon-Bloom</key>
 			<dict>
+				<key>CFBundleIconName</key>
+				<string>AppIcon-Bloom</string>
 				<key>CFBundleIconFiles</key>
 				<array>
 					<string>AltIcon-Bloom</string>
@@ -61,6 +69,8 @@
 			</dict>
 			<key>AltIcon-Graphite</key>
 			<dict>
+				<key>CFBundleIconName</key>
+				<string>AppIcon-Graphite</string>
 				<key>CFBundleIconFiles</key>
 				<array>
 					<string>AltIcon-Graphite</string>

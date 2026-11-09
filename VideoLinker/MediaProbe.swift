@@ -9,8 +9,16 @@ struct MediaInfo: Equatable, Sendable {
     var duration: Double?
     var width: Int?
     var height: Int?
+    var bytes: Int64?
 
-    var isEmpty: Bool { duration == nil && (width == nil || height == nil) }
+    var isEmpty: Bool {
+        duration == nil && (width == nil || height == nil) && bytes == nil
+    }
+
+    var bytesText: String? {
+        guard let bytes, bytes > 0 else { return nil }
+        return ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+    }
 
     var durationText: String? {
         guard let duration, duration.isFinite, duration >= 1 else { return nil }
@@ -38,13 +46,37 @@ enum MediaProbe {
               let scheme = url.scheme?.lowercased(),
               scheme == "http" || scheme == "https" else { return nil }
 
+        var result = MediaInfo()
         if let info = await withDeadline(9, { await probeAsset(url) }), !info.isEmpty {
-            return info
+            result = info
+        } else if raw.lowercased().contains(".m3u8"),
+                  let info = await probePlaylist(url) {
+            result = info
         }
-        if raw.lowercased().contains(".m3u8") {
-            return await probePlaylist(url)
+
+        // m3u8 的清单大小没有意义，只有普通直链才问体积
+        if !raw.lowercased().contains(".m3u8"), result.bytes == nil {
+            result.bytes = await probeSize(url)
         }
-        return nil
+
+        return result.isEmpty ? nil : result
+    }
+
+    /// HEAD 拿 Content-Length；有些站不给，拿不到就算了
+    private static func probeSize(_ url: URL) async -> Int64? {
+        var request = URLRequest(url: url)
+        request.httpMethod = "HEAD"
+        request.timeoutInterval = 5
+        for (key, value) in HTTPHeaderStore.headers(for: url) {
+            request.setValue(value, forHTTPHeaderField: key)
+        }
+        request.setValue(HLSDownloader.userAgent, forHTTPHeaderField: "User-Agent")
+
+        guard let (_, response) = try? await URLSession.shared.data(for: request),
+              let http = response as? HTTPURLResponse,
+              let text = http.value(forHTTPHeaderField: "Content-Length"),
+              let bytes = Int64(text), bytes > 0 else { return nil }
+        return bytes
     }
 
     // MARK: AVFoundation

@@ -28,6 +28,18 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
 }
 
 enum OrientationLock {
+    /// 当前界面方向对应的遮罩，用来「锁在当前方向」。
+    static var current: UIInterfaceOrientationMask {
+        guard let scene = activeScene() else { return .portrait }
+        switch scene.interfaceOrientation {
+        case .portrait: return .portrait
+        case .portraitUpsideDown: return .portraitUpsideDown
+        case .landscapeLeft: return .landscapeLeft
+        case .landscapeRight: return .landscapeRight
+        default: return .portrait
+        }
+    }
+
     /// 请求界面转向指定方向。
     /// iOS 16 起用 `requestGeometryUpdate` 这个公开接口，不需要私有 API。
     static func apply(_ mask: UIInterfaceOrientationMask) {

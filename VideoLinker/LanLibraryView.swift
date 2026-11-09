@@ -534,7 +534,8 @@ struct SMBAddShareSheet: View {
 
     var onSaved: (SMBShareConfig) -> Void
 
-    @State private var host = ""
+    @StateObject private var scanner = SMBDiscovery()
+    @State private var host: String
     @State private var share = ""
     @State private var username = ""
     @State private var password = ""
@@ -542,12 +543,73 @@ struct SMBAddShareSheet: View {
     @State private var errorText: String?
     @State private var hint: String?
 
+    init(initialHost: String = "", onSaved: @escaping (SMBShareConfig) -> Void) {
+        self.onSaved = onSaved
+        _host = State(initialValue: initialHost)
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
                 BackgroundView()
 
                 Form {
+                    Section {
+                        if scanner.scanning {
+                            HStack(spacing: 10) {
+                                ProgressView()
+                                Text("正在扫描同一 Wi-Fi 下的 SMB 设备…")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+
+                        ForEach(scanner.devices) { device in
+                            Button {
+                                host = device.host
+                                hint = "已填入 \(device.host)，再补上共享名"
+                            } label: {
+                                HStack(spacing: 10) {
+                                    Image(systemName: "externaldrive.connected.to.line.below")
+                                        .foregroundStyle(theme.accent)
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text(device.name)
+                                            .font(.system(size: 14))
+                                            .foregroundStyle(theme.text)
+                                        Text(device.host)
+                                            .font(.system(size: 11))
+                                            .foregroundStyle(theme.textTertiary)
+                                    }
+                                    Spacer()
+                                    if host == device.host {
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .foregroundStyle(theme.accent)
+                                    }
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
+
+                        if !scanner.hint.isEmpty {
+                            Text(scanner.hint)
+                                .font(.system(size: 11))
+                                .foregroundStyle(theme.textTertiary)
+                        }
+
+                        Button {
+                            scanner.start()
+                        } label: {
+                            Label(scanner.scanning ? "扫描中…" : "重新扫描",
+                                  systemImage: "arrow.clockwise")
+                                .font(.system(size: 12))
+                        }
+                        .disabled(scanner.scanning)
+                    } header: {
+                        Text("附近的设备")
+                    } footer: {
+                        Text("点一下自动填主机地址；共享名还是要手填（常见的 video、media、public）。")
+                    }
+
                     Section {
                         TextField("主机，如 192.168.1.5 或 nas.local", text: $host)
                             .textInputAutocapitalization(.never)
@@ -605,6 +667,8 @@ struct SMBAddShareSheet: View {
                 }
             }
         }
+        .onAppear { scanner.start() }
+        .onDisappear { scanner.stop() }
     }
 
     private func save() {

@@ -125,6 +125,9 @@ struct PlayerScreen: View {
     @AppStorage(SettingsKey.gestureDoubleTapSeconds) private var doubleTapSeconds = 10
     @AppStorage(SettingsKey.gestureLongPressRate) private var longPressRate = 2.0
 
+    /// 防误触：锁住后手势层不再响应，只留右上角一个小锁可以解开
+    @State private var controlsLocked = false
+
     private let rates: [Double] = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
 
     init(request: PlayRequest) {
@@ -280,6 +283,11 @@ struct PlayerScreen: View {
                 .frame(width: 1, height: 1)
                 .opacity(0.01)
                 .allowsHitTesting(false)
+
+            if controlsLocked {
+                lockBadge
+                    .transition(.opacity)
+            }
         }
         .statusBarHidden(true)
         .onAppear {
@@ -513,6 +521,30 @@ struct PlayerScreen: View {
                 },
                 perform: {}
             )
+            .allowsHitTesting(!controlsLocked)
+    }
+
+    /// 锁定后唯一能点的东西：右上角一个半透明小胶囊，点一下解开
+    private var lockBadge: some View {
+        Button {
+            unlockControls()
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "lock.fill")
+                    .font(.system(size: 11, weight: .bold))
+                Text("已锁定")
+                    .font(.system(size: 11, weight: .semibold))
+            }
+            .foregroundStyle(.white.opacity(0.85))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(.ultraThinMaterial, in: Capsule())
+            .overlay(Capsule().strokeBorder(.white.opacity(0.16), lineWidth: 0.8))
+        }
+        .buttonStyle(.plain)
+        .padding(.top, isTheater ? 14 : 10)
+        .padding(.trailing, isTheater ? 24 : 16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
     }
 
     /// 按住 0.45 秒后才进入 2 倍速，避免误触
@@ -817,6 +849,17 @@ struct PlayerScreen: View {
             .buttonStyle(.plain)
 
             Button {
+                lockControls()
+            } label: {
+                Image(systemName: "lock.open")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 38, height: 38)
+                    .background(.ultraThinMaterial, in: Circle())
+            }
+            .buttonStyle(.plain)
+
+            Button {
                 isTheater ? leaveTheater() : enterTheater()
             } label: {
                 Image(systemName: isTheater
@@ -837,7 +880,7 @@ struct PlayerScreen: View {
     private var centerPlayButton: some View {
         playPauseButton
             .opacity(model.isLoading ? 0 : (showControls || model.isStalling ? 1 : 0))
-            .allowsHitTesting(!model.isLoading && (showControls || model.isStalling))
+            .allowsHitTesting(!model.isLoading && !controlsLocked && (showControls || model.isStalling))
             .animation(.easeInOut(duration: 0.2), value: showControls)
             .animation(.easeInOut(duration: 0.2), value: model.isStalling)
     }
@@ -1378,6 +1421,30 @@ struct PlayerScreen: View {
         withAnimation(.easeInOut(duration: 0.2)) {
             showControls.toggle()
         }
+    }
+
+    private func lockControls() {
+        Haptics.medium()
+        withAnimation(.easeInOut(duration: 0.2)) {
+            controlsLocked = true
+            showControls = false
+        }
+        // 锁在当前方向：竖着拿就锁竖屏，横着看就锁横屏，翻身也不会转
+        OrientationLock.apply(OrientationLock.current)
+        showHint("已锁定画面，点右上角小锁解开")
+        hideHintSoon()
+    }
+
+    private func unlockControls() {
+        Haptics.light()
+        withAnimation(.easeInOut(duration: 0.2)) {
+            controlsLocked = false
+            showControls = true
+        }
+        // 恢复播放页原本的规则：全屏横屏，其余竖屏
+        OrientationLock.apply(isTheater ? .landscape : .portrait)
+        showHint("已解锁")
+        hideHintSoon()
     }
 
 

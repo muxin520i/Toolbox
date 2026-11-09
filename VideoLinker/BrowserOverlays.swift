@@ -638,6 +638,7 @@ struct SniffResultsPanel: View {
     @ObservedObject private var probe = MediaProbeStore.shared
     @State private var hint: String?
     @State private var filter = "全部"
+    @State private var sortMode: SortMode = .normal
     @State private var selecting = false
     @State private var selected: Set<String> = []
     /// 视频还是图片；页面只有图片时自动切到图片
@@ -651,9 +652,25 @@ struct SniffResultsPanel: View {
     /// 图片全屏预览
     @State private var previewIndex = 0
     @State private var showPreview = false
+    /// 直接投给电视的远程地址
+    @State private var castTarget: CastTarget?
 
     private enum Mode: Hashable {
         case video, image
+    }
+
+    private enum SortMode: String, CaseIterable, Hashable {
+        case normal = "默认"
+        case quality = "清晰度"
+        case duration = "时长"
+        case size = "体积"
+        case name = "名称"
+    }
+
+    private struct CastTarget: Identifiable {
+        let id = UUID()
+        let url: String
+        let title: String
     }
 
     private let filters = ["全部", "HLS", "MP4", "其他"]
@@ -671,15 +688,45 @@ struct SniffResultsPanel: View {
         }
     }
 
-    /// 同一部片的多清晰度收成一组；已知只有几十秒的广告 / 预告挪到最后
+    /// 同一部片的多清晰度收成一组；默认排序下，已知只有几十秒的广告 / 预告挪到最后
     private var groups: [SniffGroup] {
         let built = SniffGroup.build(from: filtered)
-        return built.enumerated().sorted { a, b in
-            let da = probe.info(for: a.element.primary.url)?.duration ?? .greatestFiniteMagnitude
-            let db = probe.info(for: b.element.primary.url)?.duration ?? .greatestFiniteMagnitude
-            if (da < 25) != (db < 25) { return db < 25 }
-            return a.offset < b.offset
-        }.map { $0.element }
+
+        switch sortMode {
+        case .normal:
+            return built.enumerated().sorted { a, b in
+                let da = probe.info(for: a.element.primary.url)?.duration ?? .greatestFiniteMagnitude
+                let db = probe.info(for: b.element.primary.url)?.duration ?? .greatestFiniteMagnitude
+                if (da < 25) != (db < 25) { return db < 25 }
+                return a.offset < b.offset
+            }.map { $0.element }
+
+        case .quality:
+            return built.sorted { qualityRank($0) > qualityRank($1) }
+
+        case .duration:
+            return built.sorted { durationRank($0) > durationRank($1) }
+
+        case .size:
+            return built.sorted { sizeRank($0) > sizeRank($1) }
+
+        case .name:
+            return built.sorted {
+                $0.primary.displayName.localizedStandardCompare($1.primary.displayName) == .orderedAscending
+            }
+        }
+    }
+
+    private func qualityRank(_ group: SniffGroup) -> Int {
+        probe.info(for: group.best.url)?.height ?? 0
+    }
+
+    private func durationRank(_ group: SniffGroup) -> Double {
+        probe.info(for: group.best.url)?.duration ?? -1
+    }
+
+    private func sizeRank(_ group: SniffGroup) -> Int64 {
+        probe.info(for: group.best.url)?.bytes ?? 0
     }
 
     var body: some View {
@@ -781,6 +828,9 @@ struct SniffResultsPanel: View {
         }
         .fullScreenCover(isPresented: $showPreview) {
             ImagePreviewView(images: tab.images, startIndex: previewIndex)
+        }
+        .sheet(item: $castTarget) { target in
+            DLNASheet(sourceURL: target.url, title: target.title, isLocal: false)
         }
         .presentationDetents([.medium, .large])
         .confirmationDialog("选择清晰度", isPresented: $showQuality, titleVisibility: .visible) {
@@ -1113,6 +1163,39 @@ struct SniffResultsPanel: View {
                     }
                     .buttonStyle(.plain)
                 }
+
+                Divider()
+                    .frame(height: 18)
+                    .padding(.horizontal, 2)
+
+                Menu {
+                    ForEach(SortMode.allCases, id: \.self) { item in
+                        Button {
+                            sortMode = item
+                        } label: {
+                            if sortMode == item {
+                                Label(item.rawValue, systemImage: "checkmark")
+                            } else {
+                                Text(item.rawValue)
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.up.arrow.down")
+                            .font(.system(size: 10, weight: .semibold))
+                        Text(sortMode == .normal ? "排序" : sortMode.rawValue)
+                            .font(.system(size: 12, weight: .semibold))
+                    }
+                    .foregroundStyle(sortMode == .normal ? Color.primary : .white)
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 6)
+                    .background(
+                        Capsule().fill(sortMode == .normal
+                                       ? Color(.secondarySystemBackground)
+                                       : Color(red: 1.0, green: 0.42, blue: 0.31))
+                    )
+                }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
@@ -1339,6 +1422,19 @@ struct SniffResultsPanel: View {
         .padding(.vertical, 3)
         .contentShape(Rectangle())
         .onTapGesture { onPlay(group.best) }
+        .contextMenu {
+            Button {
+                castTarget = CastTarget(url: group.best.url, title: group.best.displayName)
+            } label: {
+                Label("投屏到电视", systemImage: "tv")
+            }
+            Button {
+                UIPasteboard.general.string = group.videos.map(\.url).joined(separator: "\n")
+                showHint(group.isMerged ? "已复制 \(group.videos.count) 条链接" : "链接已复制")
+            } label: {
+                Label("复制链接", systemImage: "doc.on.doc")
+            }
+        }
         .task(id: group.key) {
             for video in group.videos.prefix(4) {
                 probe.request(video.url)
@@ -1433,17 +1529,32 @@ struct SniffResultsPanel: View {
                 onPlay(video)
             }
         }
+        .contextMenu {
+            Button {
+                castTarget = CastTarget(url: video.url, title: video.displayName)
+            } label: {
+                Label("投屏到电视", systemImage: "tv")
+            }
+            Button {
+                UIPasteboard.general.string = video.url
+                showHint("链接已复制")
+            } label: {
+                Label("复制链接", systemImage: "doc.on.doc")
+            }
+        }
         .task(id: video.url) {
             probe.request(video.url)
         }
     }
 
-    /// 第二行：域名 + 时长 + 分辨率，后两项探到才有
+    /// 第二行：域名 + 时长 + 分辨率 + 体积，探到哪项显示哪项
     private func detailText(_ video: SniffedVideo) -> String {
-        guard let summary = probe.info(for: video.url)?.summary, !summary.isEmpty else {
-            return video.host
+        var parts: [String] = []
+        if let info = probe.info(for: video.url) {
+            if !info.summary.isEmpty { parts.append(info.summary) }
+            if let bytes = info.bytesText { parts.append(bytes) }
         }
-        return video.host + " · " + summary
+        return ([video.host] + parts).joined(separator: " · ")
     }
 }
 

@@ -47,6 +47,7 @@ struct SettingsView: View {
     @State private var showPrivateHelp = false
     @State private var showMemos = false
     @State private var showArchive = false
+    @State private var showImageTools = false
     @State private var showLanLibrary = false
     @State private var showMediaServer = false
     @State private var showRemote = false
@@ -131,6 +132,9 @@ struct SettingsView: View {
         }
         .sheet(isPresented: $showArchive) {
             ArchiveView()
+        }
+        .sheet(isPresented: $showImageTools) {
+            ImageToolsView()
         }
         .sheet(isPresented: $showLanLibrary) {
             LanLibraryView()
@@ -655,7 +659,7 @@ struct SettingsView: View {
     private var toolsCard: some View {
         card(id: "tools", title: "实用工具",
              icon: "wrench.and.screwdriver.fill",
-             summary: "备忘录 · 压缩包",
+             summary: "备忘录 · 压缩包 · 图片压缩",
              expanded: false) {
             VStack(spacing: 0) {
                 Button {
@@ -672,7 +676,16 @@ struct SettingsView: View {
                 Button {
                     showArchive = true
                 } label: {
-                    toolRow("压缩包", subtitle: "解开下载的 zip、tar、tar.gz")
+                    toolRow("压缩包", subtitle: "解开 zip、tar；也能打包并设密码")
+                }
+                .buttonStyle(.plain)
+
+                rowDivider
+
+                Button {
+                    showImageTools = true
+                } label: {
+                    toolRow("图片压缩", subtitle: "HEIC 转 JPG、批量压体积、改尺寸")
                 }
                 .buttonStyle(.plain)
             }
