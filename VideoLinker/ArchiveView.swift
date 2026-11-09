@@ -552,6 +552,8 @@ struct ZipCreateSheet: View {
                     dismiss()
                 }
             } catch {
+                // 失败时别把半截 zip 留在下载目录里，不然列表里会多一个打不开的包
+                try? FileManager.default.removeItem(at: output)
                 await MainActor.run {
                     working = false
                     errorText = error.localizedDescription
