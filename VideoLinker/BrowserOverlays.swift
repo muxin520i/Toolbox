@@ -648,6 +648,9 @@ struct SniffResultsPanel: View {
     /// 合并后的多清晰度组，点「N 档」时选
     @State private var groupChoice: SniffGroup?
     @State private var showGroupChoice = false
+    /// 图片全屏预览
+    @State private var previewIndex = 0
+    @State private var showPreview = false
 
     private enum Mode: Hashable {
         case video, image
@@ -775,6 +778,9 @@ struct SniffResultsPanel: View {
                     filter = "全部"
                 }
             }
+        }
+        .fullScreenCover(isPresented: $showPreview) {
+            ImagePreviewView(images: tab.images, startIndex: previewIndex)
         }
         .presentationDetents([.medium, .large])
         .confirmationDialog("选择清晰度", isPresented: $showQuality, titleVisibility: .visible) {
@@ -929,50 +935,66 @@ struct SniffResultsPanel: View {
 
     private var imageContent: some View {
         ScrollView {
-            LazyVGrid(
-                columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 3),
-                spacing: 4
-            ) {
-                ForEach(tab.images) { image in
-                    Button {
-                        if selected.contains(image.url) {
-                            selected.remove(image.url)
-                        } else {
-                            selected.insert(image.url)
-                        }
-                    } label: {
-                        ZStack(alignment: .topTrailing) {
-                            RemoteImage(url: image.url)
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 118)
-                                .clipped()
+            VStack(spacing: 8) {
+                Text("点图片全屏放大，点右上角圆圈多选")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
+                    .padding(.top, 8)
 
-                            Image(systemName: selected.contains(image.url)
-                                  ? "checkmark.circle.fill" : "circle")
-                                .font(.system(size: 18))
-                                .foregroundStyle(selected.contains(image.url)
-                                                 ? Color(red: 1.0, green: 0.45, blue: 0.35)
-                                                 : .white.opacity(0.85))
-                                .background(Circle().fill(.black.opacity(0.25)).padding(1))
-                                .padding(6)
-                        }
-                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                        .overlay(alignment: .bottomLeading) {
-                            if !image.sizeText.isEmpty {
-                                Text(image.sizeText)
-                                    .font(.system(size: 9, weight: .medium))
-                                    .foregroundStyle(.white)
-                                    .padding(.horizontal, 5)
-                                    .padding(.vertical, 2)
-                                    .background(Capsule().fill(.black.opacity(0.45)))
-                                    .padding(5)
+                LazyVGrid(
+                    columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 3),
+                    spacing: 4
+                ) {
+                    ForEach(Array(tab.images.enumerated()), id: \.element.id) { index, image in
+                        ZStack(alignment: .topTrailing) {
+                            Button {
+                                // 已经在多选状态时，点图继续加选，避免误触放大
+                                if selected.isEmpty {
+                                    previewIndex = index
+                                    showPreview = true
+                                } else {
+                                    toggleImage(image.url)
+                                }
+                            } label: {
+                                RemoteImage(url: image.url)
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 118)
+                                    .clipped()
+                                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                    .overlay(alignment: .bottomLeading) {
+                                        if !image.sizeText.isEmpty {
+                                            Text(image.sizeText)
+                                                .font(.system(size: 9, weight: .medium))
+                                                .foregroundStyle(.white)
+                                                .padding(.horizontal, 5)
+                                                .padding(.vertical, 2)
+                                                .background(Capsule().fill(.black.opacity(0.45)))
+                                                .padding(5)
+                                        }
+                                    }
                             }
+                            .buttonStyle(.plain)
+
+                            Button {
+                                toggleImage(image.url)
+                            } label: {
+                                Image(systemName: selected.contains(image.url)
+                                      ? "checkmark.circle.fill" : "circle")
+                                    .font(.system(size: 18))
+                                    .foregroundStyle(selected.contains(image.url)
+                                                     ? Color(red: 1.0, green: 0.45, blue: 0.35)
+                                                     : .white.opacity(0.85))
+                                    .frame(width: 36, height: 36)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
                         }
                     }
-                    .buttonStyle(.plain)
                 }
+                .padding(.horizontal, 10)
             }
-            .padding(.horizontal, 10)
             .padding(.bottom, 12)
         }
         .overlay(alignment: .top) {
@@ -1033,6 +1055,14 @@ struct SniffResultsPanel: View {
 
     private func targetImages() -> [SniffedImage] {
         selected.isEmpty ? tab.images : tab.images.filter { selected.contains($0.url) }
+    }
+
+    private func toggleImage(_ url: String) {
+        if selected.contains(url) {
+            selected.remove(url)
+        } else {
+            selected.insert(url)
+        }
     }
 
     private func saveSelectedImages() {
@@ -1546,7 +1576,7 @@ struct ActivityView: UIViewControllerRepresentable {
 final class HeaderImageLoader: ObservableObject {
     @Published var image: UIImage?
 
-    private static let cache = NSCache<NSString, UIImage>()
+    static let cache = NSCache<NSString, UIImage>()
     private var loading = false
 
     func load(_ urlString: String) {
@@ -1567,6 +1597,34 @@ final class HeaderImageLoader: ObservableObject {
             guard let data, let image = UIImage(data: data) else { return }
             Self.cache.setObject(image, forKey: urlString as NSString)
             DispatchQueue.main.async { self?.image = image }
+        }.resume()
+    }
+
+    /// 预览页用：先看缓存，没有就按同一套请求头下载原图
+    static func cached(_ urlString: String) -> UIImage? {
+        cache.object(forKey: urlString as NSString)
+    }
+
+    static func fetch(_ urlString: String, completion: @escaping (UIImage?) -> Void) {
+        if let hit = cached(urlString) {
+            completion(hit)
+            return
+        }
+        guard let url = URL(string: urlString) else {
+            completion(nil)
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 20
+        HTTPHeaderStore.apply(to: &request, url: url)
+
+        URLSession.shared.dataTask(with: request) { data, _, _ in
+            let image = data.flatMap { UIImage(data: $0) }
+            if let image {
+                cache.setObject(image, forKey: urlString as NSString)
+            }
+            DispatchQueue.main.async { completion(image) }
         }.resume()
     }
 }
@@ -1672,5 +1730,347 @@ enum SniffImageSaver {
         }
         _ = semaphore.wait(timeout: .now() + 20)
         return success
+    }
+}
+
+// MARK: - 图片全屏预览
+
+struct ImagePreviewView: View {
+    let images: [SniffedImage]
+    @State private var index: Int
+    @State private var toast: String?
+    @State private var saving = false
+
+    @Environment(\.dismiss) private var dismiss
+
+    init(images: [SniffedImage], startIndex: Int) {
+        self.images = images
+        let safe = images.isEmpty ? 0 : max(0, min(startIndex, images.count - 1))
+        _index = State(initialValue: safe)
+    }
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+
+            if images.isEmpty {
+                Text("图片已经不在了")
+                    .font(.system(size: 14))
+                    .foregroundStyle(.white.opacity(0.7))
+            } else {
+                TabView(selection: $index) {
+                    ForEach(Array(images.enumerated()), id: \.element.id) { position, item in
+                        ZoomingImage(url: item.url)
+                            .tag(position)
+                            .ignoresSafeArea()
+                    }
+                }
+                .tabViewStyle(.page(indexDisplayMode: .never))
+                .ignoresSafeArea()
+            }
+
+            chrome
+        }
+        .preferredColorScheme(.dark)
+        .overlay(alignment: .bottom) {
+            if let toast {
+                Text(toast)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(Capsule().fill(Color.black.opacity(0.78)))
+                    .padding(.bottom, 108)
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: 0.18), value: toast)
+    }
+
+    private var chrome: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 36, height: 36)
+                        .background(Circle().fill(.white.opacity(0.18)))
+                }
+                .buttonStyle(.plain)
+
+                Spacer(minLength: 4)
+
+                HStack(spacing: 10) {
+                    Button {
+                        step(-1)
+                    } label: {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.white.opacity(index > 0 ? 0.9 : 0.28))
+                            .frame(width: 22, height: 30)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(index <= 0)
+
+                    Text("\(index + 1) / \(images.count)")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.92))
+                        .monospacedDigit()
+
+                    Button {
+                        step(1)
+                    } label: {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.white.opacity(index + 1 < images.count ? 0.9 : 0.28))
+                            .frame(width: 22, height: 30)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(index + 1 >= images.count)
+                }
+
+                Spacer(minLength: 4)
+
+                Button {
+                    saveCurrent()
+                } label: {
+                    Group {
+                        if saving {
+                            ProgressView()
+                                .tint(.white)
+                        } else {
+                            Image(systemName: "square.and.arrow.down")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(.white)
+                        }
+                    }
+                    .frame(width: 36, height: 36)
+                    .background(Circle().fill(.white.opacity(0.18)))
+                }
+                .buttonStyle(.plain)
+                .disabled(saving || images.isEmpty)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 6)
+            .padding(.bottom, 12)
+            .background(
+                LinearGradient(colors: [.black.opacity(0.62), .black.opacity(0)],
+                               startPoint: .top, endPoint: .bottom)
+            )
+
+            Spacer(minLength: 0)
+
+            HStack(spacing: 10) {
+                Text(sizeText)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.62))
+
+                Spacer(minLength: 6)
+
+                Text("双击放大 · 双指缩放")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.white.opacity(0.5))
+
+                Button {
+                    copyCurrent()
+                } label: {
+                    Label("复制链接", systemImage: "doc.on.doc")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
+                        .background(Capsule().fill(.white.opacity(0.16)))
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 18)
+            .padding(.bottom, 24)
+            .background(
+                LinearGradient(colors: [.black.opacity(0), .black.opacity(0.6)],
+                               startPoint: .top, endPoint: .bottom)
+            )
+        }
+    }
+
+    private var sizeText: String {
+        guard index >= 0, index < images.count else { return "" }
+        let text = images[index].sizeText
+        return text.isEmpty ? "" : text
+    }
+
+    private func step(_ delta: Int) {
+        let next = index + delta
+        guard next >= 0, next < images.count else { return }
+        withAnimation(.easeInOut(duration: 0.16)) {
+            index = next
+        }
+    }
+
+    private func saveCurrent() {
+        guard !saving, index >= 0, index < images.count else { return }
+        let item = images[index]
+        saving = true
+        toast = "正在保存…"
+
+        SniffImageSaver.save([item.url]) { ok, _ in
+            saving = false
+            toast = ok > 0 ? "已保存到相册" : "保存失败，可能有防盗链或链接已过期"
+            clearToast(after: 2.0)
+        }
+    }
+
+    private func copyCurrent() {
+        guard index >= 0, index < images.count else { return }
+        UIPasteboard.general.string = images[index].url
+        toast = "链接已复制"
+        clearToast(after: 1.6)
+    }
+
+    private func clearToast(after seconds: Double) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds) {
+            toast = nil
+        }
+    }
+}
+
+/// 单张可缩放图：外包 UIScrollView，支持双指缩放、双击放大
+private struct ZoomingImage: UIViewRepresentable {
+    let url: String
+
+    func makeUIView(context: Context) -> ZoomingScrollView {
+        let view = ZoomingScrollView()
+        view.load(url)
+        return view
+    }
+
+    func updateUIView(_ view: ZoomingScrollView, context: Context) {
+        view.load(url)
+    }
+}
+
+private final class ZoomingScrollView: UIScrollView, UIScrollViewDelegate {
+    private let imageView = UIImageView()
+    private let spinner = UIActivityIndicatorView(style: .medium)
+    private let failLabel = UILabel()
+    private var currentURL: String?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        delegate = self
+        minimumZoomScale = 1
+        maximumZoomScale = 4
+        bouncesZoom = true
+        showsHorizontalScrollIndicator = false
+        showsVerticalScrollIndicator = false
+        backgroundColor = .clear
+        contentInsetAdjustmentBehavior = .never
+        decelerationRate = .fast
+
+        imageView.contentMode = .scaleAspectFit
+        imageView.clipsToBounds = true
+        addSubview(imageView)
+
+        spinner.color = .white
+        spinner.hidesWhenStopped = true
+        addSubview(spinner)
+
+        failLabel.text = "图片加载失败"
+        failLabel.textColor = UIColor.white.withAlphaComponent(0.6)
+        failLabel.font = .systemFont(ofSize: 13)
+        failLabel.textAlignment = .center
+        failLabel.isHidden = true
+        addSubview(failLabel)
+
+        let doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap(_:)))
+        doubleTap.numberOfTapsRequired = 2
+        addGestureRecognizer(doubleTap)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    func load(_ urlString: String) {
+        guard currentURL != urlString else { return }
+        currentURL = urlString
+        setZoomScale(1, animated: false)
+        failLabel.isHidden = true
+
+        if let hit = HeaderImageLoader.cached(urlString) {
+            apply(hit)
+            return
+        }
+
+        imageView.image = nil
+        spinner.startAnimating()
+        HeaderImageLoader.fetch(urlString) { [weak self] image in
+            guard let self, self.currentURL == urlString else { return }
+            if let image {
+                self.apply(image)
+            } else {
+                self.spinner.stopAnimating()
+                self.failLabel.isHidden = false
+            }
+        }
+    }
+
+    private func apply(_ image: UIImage) {
+        spinner.stopAnimating()
+        failLabel.isHidden = true
+        imageView.image = image
+        setZoomScale(1, animated: false)
+        setNeedsLayout()
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        spinner.center = CGPoint(x: bounds.midX, y: bounds.midY)
+        failLabel.frame = CGRect(x: 20, y: bounds.midY + 26, width: max(bounds.width - 40, 0), height: 20)
+
+        if zoomScale <= 1.001 {
+            imageView.frame = CGRect(origin: .zero, size: bounds.size)
+            contentSize = bounds.size
+        }
+    }
+
+    func viewForZooming(in scrollView: UIScrollView) -> UIView? {
+        imageView
+    }
+
+    func scrollViewDidZoom(_ scrollView: UIScrollView) {
+        // 放大后图片小于屏幕时保持居中
+        let offsetX = max((bounds.width - contentSize.width) / 2, 0)
+        let offsetY = max((bounds.height - contentSize.height) / 2, 0)
+        contentInset = UIEdgeInsets(top: offsetY, left: offsetX, bottom: offsetY, right: offsetX)
+    }
+
+    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        // 1 倍时把手势让给外层分页，放大后才允许在图片上拖动
+        if gestureRecognizer === panGestureRecognizer && zoomScale <= 1.001 {
+            return false
+        }
+        return super.gestureRecognizerShouldBegin(gestureRecognizer)
+    }
+
+    @objc private func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
+        if zoomScale > 1.001 {
+            setZoomScale(1, animated: true)
+            return
+        }
+
+        let point = gesture.location(in: imageView)
+        let width = bounds.width / 2.5
+        let height = bounds.height / 2.5
+        zoom(to: CGRect(x: point.x - width / 2,
+                        y: point.y - height / 2,
+                        width: width,
+                        height: height),
+             animated: true)
     }
 }
