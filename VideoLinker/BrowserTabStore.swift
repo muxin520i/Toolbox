@@ -459,7 +459,7 @@ final class TabCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScri
         guard let target = URL(string: url), target.scheme?.hasPrefix("http") == true else { return }
         toast("正在下载脚本…", in: web)
 
-        GreasyForkClient.installFromURL(url) { [weak self] code, error in
+        GreasyForkClient.installFromURL(url) { [weak self] code, resolved, error in
             guard let self = self else { return }
             guard let code = code else {
                 self.toast(error ?? "脚本下载失败", in: web)
@@ -478,10 +478,13 @@ final class TabCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScri
                 matches: meta.matches.isEmpty ? ["*://*/*"] : meta.matches,
                 code: code,
                 enabled: true,
-                documentStart: meta.documentStart
+                documentStart: meta.documentStart,
+                sourceURL: resolved ?? url,
+                version: meta.version ?? ""
             )
             if let existing = UserscriptLibrary.shared.scripts.first(where: { $0.name == name }) {
                 script.id = existing.id
+                if script.sourceURL.isEmpty { script.sourceURL = existing.sourceURL }
             }
 
             UserscriptLibrary.shared.upsert(script)

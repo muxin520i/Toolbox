@@ -201,6 +201,13 @@ enum AppDB {
             try db.execute(sql: "INSERT OR REPLACE INTO meta (key, value) VALUES ('schema.version', 'v4')")
         }
 
+        // v5：用户脚本记住安装来源与版本号，用来检查更新
+        migrator.registerMigration("v5") { db in
+            try db.execute(sql: "ALTER TABLE script ADD COLUMN sourceURL TEXT NOT NULL DEFAULT ''")
+            try db.execute(sql: "ALTER TABLE script ADD COLUMN version TEXT NOT NULL DEFAULT ''")
+            try db.execute(sql: "INSERT OR REPLACE INTO meta (key, value) VALUES ('schema.version', 'v5')")
+        }
+
         return migrator
     }()
 

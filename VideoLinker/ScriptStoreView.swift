@@ -112,20 +112,20 @@ enum GreasyForkClient {
 
     // MARK: 安装
 
-    static func install(_ script: GreasyScript, completion: @escaping (String?, String?) -> Void) {
+    static func install(_ script: GreasyScript, completion: @escaping (String?, String?, String?) -> Void) {
         if !script.codeURL.isEmpty {
             download(script.codeURL, completion: completion)
             return
         }
         guard !script.detailURL.isEmpty else {
-            completion(nil, "这个脚本没有提供下载地址")
+            completion(nil, nil, "这个脚本没有提供下载地址")
             return
         }
         resolve(detailURL: script.detailURL, completion: completion)
     }
 
     /// 用户自己贴的地址：直链直接下，页面地址先找安装链接
-    static func installFromURL(_ urlString: String, completion: @escaping (String?, String?) -> Void) {
+    static func installFromURL(_ urlString: String, completion: @escaping (String?, String?, String?) -> Void) {
         if urlString.contains(".user.js") {
             download(urlString, completion: completion)
         } else {
@@ -133,14 +133,15 @@ enum GreasyForkClient {
         }
     }
 
-    private static func resolve(detailURL: String, completion: @escaping (String?, String?) -> Void) {
+    /// completion 的第二个参数是真正下载到代码的地址，安装时存下来做更新源
+    private static func resolve(detailURL: String, completion: @escaping (String?, String?, String?) -> Void) {
         fetchText(detailURL) { html, error in
             guard let html = html else {
-                completion(nil, error)
+                completion(nil, nil, error)
                 return
             }
             guard let link = findInstallLink(in: html, base: detailURL) else {
-                completion(nil, "页面里没找到安装链接，可以复制脚本的 .user.js 地址后用「粘贴脚本链接安装」")
+                completion(nil, nil, "页面里没找到安装链接，可以复制脚本的 .user.js 地址后用「粘贴脚本链接安装」")
                 return
             }
             download(link, completion: completion)
@@ -199,9 +200,9 @@ enum GreasyForkClient {
         }.resume()
     }
 
-    private static func download(_ urlString: String, completion: @escaping (String?, String?) -> Void) {
+    private static func download(_ urlString: String, completion: @escaping (String?, String?, String?) -> Void) {
         guard let url = URL(string: urlString) else {
-            completion(nil, "下载地址无效")
+            completion(nil, nil, "下载地址无效")
             return
         }
         var request = URLRequest(url: url)
@@ -210,15 +211,15 @@ enum GreasyForkClient {
 
         URLSession.shared.dataTask(with: request) { data, response, error in
             if let error = error {
-                main { completion(nil, "下载失败：\(error.localizedDescription)") }
+                main { completion(nil, nil, "下载失败：\(error.localizedDescription)") }
                 return
             }
             let code = (response as? HTTPURLResponse)?.statusCode ?? 0
             guard code == 200, let data = data, let text = String(data: data, encoding: .utf8) else {
-                main { completion(nil, "下载失败（HTTP \(code)）") }
+                main { completion(nil, nil, "下载失败（HTTP \(code)）") }
                 return
             }
-            main { completion(text, nil) }
+            main { completion(text, urlString, nil) }
         }.resume()
     }
 

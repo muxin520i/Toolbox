@@ -15,6 +15,10 @@ struct Userscript: Identifiable, Codable, Equatable {
     /// 对应 @run-at document-start
     var documentStart: Bool
     var updatedAt: Date
+    /// 安装时实际下载到脚本代码的地址，检查更新就用它
+    var sourceURL: String
+    /// 脚本头里的 @version
+    var version: String
 
     init(
         id: UUID = UUID(),
@@ -23,7 +27,9 @@ struct Userscript: Identifiable, Codable, Equatable {
         code: String = "",
         enabled: Bool = true,
         documentStart: Bool = false,
-        updatedAt: Date = Date()
+        updatedAt: Date = Date(),
+        sourceURL: String = "",
+        version: String = ""
     ) {
         self.id = id
         self.name = name
@@ -32,6 +38,27 @@ struct Userscript: Identifiable, Codable, Equatable {
         self.enabled = enabled
         self.documentStart = documentStart
         self.updatedAt = updatedAt
+        self.sourceURL = sourceURL
+        self.version = version
+    }
+
+    // 老版本把脚本以 JSON 存在 UserDefaults 里，没有后加的两个字段。
+    // 这里全部用 decodeIfPresent，保证升级后旧数据照样读得出来。
+    enum CodingKeys: String, CodingKey {
+        case id, name, matches, code, enabled, documentStart, updatedAt, sourceURL, version
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        matches = try container.decode([String].self, forKey: .matches)
+        code = try container.decode(String.self, forKey: .code)
+        enabled = try container.decode(Bool.self, forKey: .enabled)
+        documentStart = try container.decode(Bool.self, forKey: .documentStart)
+        updatedAt = try container.decode(Date.self, forKey: .updatedAt)
+        sourceURL = try container.decodeIfPresent(String.self, forKey: .sourceURL) ?? ""
+        version = try container.decodeIfPresent(String.self, forKey: .version) ?? ""
     }
 
     var displayName: String {
@@ -40,6 +67,15 @@ struct Userscript: Identifiable, Codable, Equatable {
 
     var matchSummary: String {
         matches.isEmpty ? "没有匹配规则（不会运行）" : matches.joined(separator: "  ")
+    }
+
+    var versionText: String {
+        version.isEmpty ? "" : "v\(version)"
+    }
+
+    /// 没有来源地址的脚本没法检查更新
+    var hasUpdateSource: Bool {
+        !sourceURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     /// 用于判断是否需要重新注入
@@ -55,6 +91,9 @@ enum UserscriptParser {
         var name: String?
         var matches: [String] = []
         var documentStart = false
+        var version: String?
+        var downloadURL: String?
+        var updateURL: String?
         var isEmpty: Bool { name == nil && matches.isEmpty }
     }
 
@@ -100,6 +139,12 @@ enum UserscriptParser {
                 if !value.isEmpty { meta.matches.append(value) }
             case "run-at":
                 if value.contains("document-start") { meta.documentStart = true }
+            case "version":
+                if meta.version == nil, !value.isEmpty { meta.version = value }
+            case "downloadurl":
+                if meta.downloadURL == nil, !value.isEmpty { meta.downloadURL = value }
+            case "updateurl":
+                if meta.updateURL == nil, !value.isEmpty { meta.updateURL = value }
             default:
                 break
             }
@@ -122,6 +167,8 @@ enum UserscriptStore {
         var enabled: Int
         var documentStart: Int
         var updatedAt: Double
+        var sourceURL: String
+        var version: String
     }
 
     static func load() -> [Userscript] {
@@ -129,7 +176,8 @@ enum UserscriptStore {
             try Row.fetchAll(
                 db,
                 sql: """
-                    SELECT id, name, matches, code, enabled, documentStart, updatedAt
+                    SELECT id, name, matches, code, enabled, documentStart, updatedAt,
+                           sourceURL, version
                     FROM script ORDER BY position ASC
                     """
             )
@@ -144,7 +192,9 @@ enum UserscriptStore {
                     code: row.code,
                     enabled: row.enabled != 0,
                     documentStart: row.documentStart != 0,
-                    updatedAt: Date(timeIntervalSince1970: row.updatedAt)
+                    updatedAt: Date(timeIntervalSince1970: row.updatedAt),
+                    sourceURL: row.sourceURL,
+                    version: row.version
                 )
             }
         }
@@ -160,13 +210,15 @@ enum UserscriptStore {
                 try db.execute(
                     sql: """
                         INSERT OR REPLACE INTO script
-                        (id, name, matches, code, enabled, documentStart, updatedAt, position)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        (id, name, matches, code, enabled, documentStart, updatedAt,
+                         sourceURL, version, position)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                     arguments: [
                         script.id.uuidString, script.name, patterns, script.code,
                         script.enabled ? 1 : 0, script.documentStart ? 1 : 0,
-                        script.updatedAt.timeIntervalSince1970, index
+                        script.updatedAt.timeIntervalSince1970,
+                        script.sourceURL, script.version, index
                     ]
                 )
             }
@@ -174,6 +226,23 @@ enum UserscriptStore {
 
         if let data = try? JSONEncoder().encode(scripts) {
             UserDefaults.standard.set(data, forKey: key)
+        }
+    }
+
+    /// 老脚本（这个版本之前装的）没有来源地址，但代码头里通常带着
+    /// @downloadURL / @updateURL，用它们补上，升级完就能直接检查更新。
+    static func backfill(_ scripts: [Userscript]) -> [Userscript] {
+        scripts.map { script in
+            guard script.sourceURL.isEmpty || script.version.isEmpty else { return script }
+            let meta = UserscriptParser.parse(script.code)
+            var copy = script
+            if copy.sourceURL.isEmpty {
+                copy.sourceURL = meta.updateURL ?? meta.downloadURL ?? ""
+            }
+            if copy.version.isEmpty, let value = meta.version {
+                copy.version = value
+            }
+            return copy
         }
     }
 
@@ -193,7 +262,12 @@ final class UserscriptLibrary: ObservableObject {
     @Published private(set) var scripts: [Userscript]
 
     private init() {
-        scripts = UserscriptStore.load()
+        let loaded = UserscriptStore.load()
+        let filled = UserscriptStore.backfill(loaded)
+        scripts = filled
+        if filled != loaded {
+            UserscriptStore.save(filled)
+        }
     }
 
     /// 真正会被注入执行的脚本数量
@@ -226,6 +300,20 @@ final class UserscriptLibrary: ObservableObject {
         var copy = scripts
         guard let index = copy.firstIndex(where: { $0.id == script.id }) else { return }
         copy[index].enabled = enabled
+        commit(copy)
+    }
+
+    /// 检查更新时批量写回，一次落库，不逐条提交
+    func apply(_ updated: [Userscript]) {
+        guard !updated.isEmpty else { return }
+        var copy = scripts
+        for script in updated {
+            if let index = copy.firstIndex(where: { $0.id == script.id }) {
+                copy[index] = script
+            } else {
+                copy.append(script)
+            }
+        }
         commit(copy)
     }
 

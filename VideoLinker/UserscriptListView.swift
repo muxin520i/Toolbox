@@ -28,6 +28,11 @@ struct UserscriptListView: View {
     @State private var busy = false
     @State private var message: String?
 
+    @State private var checking = false
+    @State private var checkTotal = 0
+    @State private var checkDone = 0
+    @State private var checkName = ""
+
     var body: some View {
         NavigationStack {
             List {
@@ -38,8 +43,18 @@ struct UserscriptListView: View {
                                 editing = script
                             } label: {
                                 VStack(alignment: .leading, spacing: 3) {
-                                    Text(script.displayName)
-                                        .font(.system(size: 15, weight: .semibold))
+                                    HStack(spacing: 6) {
+                                        Text(script.displayName)
+                                            .font(.system(size: 15, weight: .semibold))
+                                        if !script.version.isEmpty {
+                                            Text(script.versionText)
+                                                .font(.system(size: 9, weight: .semibold))
+                                                .foregroundStyle(.secondary)
+                                                .padding(.horizontal, 5)
+                                                .padding(.vertical, 1)
+                                                .background(Capsule().fill(Color.secondary.opacity(0.12)))
+                                        }
+                                    }
                                     Text(script.matchSummary)
                                         .font(.system(size: 11))
                                         .foregroundStyle(.secondary)
@@ -60,13 +75,34 @@ struct UserscriptListView: View {
                                 Label("删除", systemImage: "trash")
                             }
                         }
+                        .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                            if script.hasUpdateSource {
+                                Button {
+                                    runCheck([script])
+                                } label: {
+                                    Label("更新", systemImage: "arrow.down.circle")
+                                }
+                                .tint(.blue)
+                            }
+                        }
                     }
                 } header: {
-                    Text("已安装")
+                    HStack {
+                        Text("已安装")
+                        Spacer()
+                        if !library.scripts.isEmpty {
+                            Button("检查更新") {
+                                runCheck(library.scripts)
+                            }
+                            .font(.system(size: 12, weight: .semibold))
+                            .textCase(nil)
+                            .disabled(checking || busy)
+                        }
+                    }
                 } footer: {
                     Text(library.scripts.isEmpty
                          ? "把油猴脚本的代码贴进来，打开匹配的网页就会自动运行。"
-                         : "开关打开后，只要网址匹配就会自动执行。改完脚本要重新载入网页才生效。")
+                         : "开关打开后，只要网址匹配就会自动执行。装脚本时会记下地址，点「检查更新」就能拉到新版；改完脚本要重新载入网页才生效。")
                 }
             }
             .overlay {
@@ -133,14 +169,26 @@ struct UserscriptListView: View {
                 Text(message ?? "")
             }
             .overlay {
-                if busy {
+                if busy || checking {
                     ZStack {
                         Color.black.opacity(0.25).ignoresSafeArea()
                         VStack(spacing: 10) {
-                            ProgressView()
-                            Text("正在安装…")
+                            if checking, checkTotal > 0 {
+                                ProgressView(value: Double(checkDone), total: Double(checkTotal))
+                                    .frame(width: 150)
+                            } else {
+                                ProgressView()
+                            }
+                            Text(overlayTitle)
                                 .font(.system(size: 12))
                                 .foregroundStyle(.secondary)
+                            if checking, !checkName.isEmpty {
+                                Text(checkName)
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.tertiary)
+                                    .lineLimit(1)
+                                    .frame(maxWidth: 170)
+                            }
                         }
                         .padding(22)
                         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -162,6 +210,41 @@ struct UserscriptListView: View {
         )
     }
 
+    private var overlayTitle: String {
+        if busy { return "正在安装…" }
+        if checkTotal > 0 {
+            return "正在检查 \(min(checkDone + 1, checkTotal))/\(checkTotal)"
+        }
+        return "正在检查更新…"
+    }
+
+    /// 检查更新：传全部是批量，传单条用于左滑
+    private func runCheck(_ scripts: [Userscript]) {
+        guard !checking, !busy, !scripts.isEmpty else { return }
+        checking = true
+        checkTotal = scripts.filter { $0.hasUpdateSource }.count
+        checkDone = 0
+        checkName = ""
+
+        Task {
+            let report = await UserscriptUpdater.check(scripts) { index, total, name in
+                DispatchQueue.main.async {
+                    checkTotal = total
+                    checkDone = index
+                    checkName = name
+                }
+            }
+            await MainActor.run {
+                checking = false
+                checkName = ""
+                if !report.updated.isEmpty {
+                    library.apply(report.updated)
+                }
+                message = report.message
+            }
+        }
+    }
+
     /// 手动粘贴链接兜底：镜像站偶尔把安装按钮做成脚本跳转，拦不到时用这个
     private func installFromLink() {
         let text = linkText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -172,7 +255,7 @@ struct UserscriptListView: View {
         guard !busy else { return }
         busy = true
 
-        GreasyForkClient.installFromURL(text) { code, error in
+        GreasyForkClient.installFromURL(text) { code, resolved, error in
             busy = false
             guard let code = code else {
                 message = error ?? "安装失败"
@@ -190,10 +273,13 @@ struct UserscriptListView: View {
                 matches: meta.matches.isEmpty ? ["*://*/*"] : meta.matches,
                 code: code,
                 enabled: true,
-                documentStart: meta.documentStart
+                documentStart: meta.documentStart,
+                sourceURL: resolved ?? text,
+                version: meta.version ?? ""
             )
             if let existing = library.scripts.first(where: { $0.name == name }) {
                 script.id = existing.id
+                if script.sourceURL.isEmpty { script.sourceURL = existing.sourceURL }
             }
             library.upsert(script)
             message = "已安装「\(script.displayName)」，回到嗅探页刷新一下即可生效。"
@@ -244,6 +330,26 @@ struct UserscriptEditorView: View {
             Form {
                 Section("名称") {
                     TextField("例如：视频网站去广告", text: $draft.name)
+                }
+
+                Section {
+                    TextField("https://.../xxx.user.js", text: $draft.sourceURL)
+                        .font(.system(size: 12, design: .monospaced))
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    if !draft.version.isEmpty {
+                        HStack {
+                            Text("当前版本")
+                            Spacer()
+                            Text(draft.version)
+                                .foregroundStyle(.secondary)
+                        }
+                        .font(.system(size: 13))
+                    }
+                } header: {
+                    Text("更新")
+                } footer: {
+                    Text("安装时会自动记下脚本地址，检查更新靠它。手动填的话，脚本详情页地址或 .user.js 直链都行；留空只是没法检查更新。")
                 }
 
                 Section {
@@ -318,6 +424,13 @@ struct UserscriptEditorView: View {
         if meta.documentStart {
             draft.documentStart = true
         }
+        if draft.sourceURL.trimmingCharacters(in: .whitespaces).isEmpty,
+           let url = meta.updateURL ?? meta.downloadURL {
+            draft.sourceURL = url
+        }
+        if draft.version.isEmpty, let version = meta.version {
+            draft.version = version
+        }
     }
 
     private func commit() {
@@ -331,6 +444,7 @@ struct UserscriptEditorView: View {
         if output.name.trimmingCharacters(in: .whitespaces).isEmpty {
             output.name = "未命名脚本"
         }
+        output.sourceURL = output.sourceURL.trimmingCharacters(in: .whitespacesAndNewlines)
         output.updatedAt = Date()
         onSave(output)
         dismiss()
