@@ -265,7 +265,9 @@ struct ZipCrypto {
 
     private mutating func update(_ byte: UInt8) {
         key0 = Self.crc32(key0, byte)
-        key1 = (key1 &+ UInt32(byte)) &* 134_775_813 &+ 1
+        // 标准 ZipCrypto 是加上「key0 的低字节」，不是原始明文字节；
+        // 写错的话自己解自己没问题，但 Windows / macOS 会报密码错误
+        key1 = (key1 &+ UInt32(key0 & 0xFF)) &* 134_775_813 &+ 1
         key2 = Self.crc32(key2, UInt8((key1 >> 24) & 0xFF))
     }
 }
