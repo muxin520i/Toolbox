@@ -28,6 +28,7 @@ final class ZipWriter {
         let name: String
         let crc: UInt32
         let size: UInt32
+        let compressedSize: UInt32
         let offset: UInt32
         let encrypted: Bool
     }
@@ -84,7 +85,10 @@ final class ZipWriter {
 
         let crc = try checksum(url, name: name)
         let size = UInt32(byteSize)
-        let flags: UInt16 = 0x0800 | (password == nil ? 0 : 0x0001)
+        let encrypted = password != nil
+        // 传统加密的「压缩后大小」要把 12 字节加密头算进去，否则系统解压会读少一截
+        let compressedSize = size + (encrypted ? 12 : 0)
+        let flags: UInt16 = 0x0800 | (encrypted ? 0x0001 : 0)
         let headerOffset = offset
 
         // 本地文件头
@@ -95,7 +99,7 @@ final class ZipWriter {
         try write(dosTime)
         try write(dosDate)
         try write(crc)
-        try write(size)               // 压缩后大小 = 原大小
+        try write(compressedSize)
         try write(size)
         let nameData = Data(name.utf8)
         try write(UInt16(nameData.count))
@@ -126,7 +130,8 @@ final class ZipWriter {
         }
 
         entries.append(Entry(name: name, crc: crc, size: size,
-                             offset: headerOffset, encrypted: password != nil))
+                             compressedSize: compressedSize,
+                             offset: headerOffset, encrypted: encrypted))
     }
 
     func finish() throws {
@@ -142,7 +147,7 @@ final class ZipWriter {
             try write(dosTime)
             try write(dosDate)
             try write(entry.crc)
-            try write(entry.size)
+            try write(entry.compressedSize)
             try write(entry.size)
             let nameData = Data(entry.name.utf8)
             try write(UInt16(nameData.count))
