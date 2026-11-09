@@ -212,7 +212,7 @@ struct SettingsView: View {
     // MARK: 外观
 
     private var themeCard: some View {
-        card(title: "外观", icon: "paintbrush.fill") {
+        card(id: "appearance", title: "外观", icon: "paintbrush.fill") {
             VStack(spacing: 12) {
                 HStack(spacing: 8) {
                     ForEach(AppTheme.allCases) { item in
@@ -348,7 +348,7 @@ struct SettingsView: View {
     // MARK: 播放
 
     private var playbackCard: some View {
-        card(title: "播放", icon: "play.circle.fill") {
+        card(id: "playback", title: "播放", icon: "play.circle.fill") {
             VStack(spacing: 0) {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
@@ -434,7 +434,7 @@ struct SettingsView: View {
     // MARK: 下载
 
     private var downloadCard: some View {
-        card(title: "下载", icon: "arrow.down.circle.fill", summary: "保存位置 · 并发 · 巡检") {
+        card(id: "download", title: "下载", icon: "arrow.down.circle.fill", summary: "保存位置 · 并发 · 巡检") {
             VStack(spacing: 0) {
                 HStack {
                     VStack(alignment: .leading, spacing: 3) {
@@ -513,7 +513,7 @@ struct SettingsView: View {
     // MARK: 网络与共享
 
     private var networkShareCard: some View {
-        card(title: "网络与共享",
+        card(id: "network", title: "网络与共享",
              icon: "network",
              summary: "网盘 · 影库 · 投屏 · 互传",
              expanded: false) {
@@ -594,7 +594,7 @@ struct SettingsView: View {
     // MARK: 隐私
 
     private var privacyCard: some View {
-        card(title: "隐私与安全", icon: "lock.shield.fill", summary: "App 锁 · 私密保险箱") {
+        card(id: "privacy", title: "隐私与安全", icon: "lock.shield.fill", summary: "App 锁 · 私密保险箱") {
             VStack(spacing: 0) {
                 Toggle(isOn: $lockEnabled) {
                     VStack(alignment: .leading, spacing: 2) {
@@ -653,7 +653,7 @@ struct SettingsView: View {
     // MARK: 工具
 
     private var toolsCard: some View {
-        card(title: "实用工具",
+        card(id: "tools", title: "实用工具",
              icon: "wrench.and.screwdriver.fill",
              summary: "备忘录 · 压缩包",
              expanded: false) {
@@ -689,7 +689,7 @@ struct SettingsView: View {
     // MARK: 数据
 
     private var dataCard: some View {
-        card(title: "数据", icon: "internaldrive.fill", summary: "统计 · 存储 · 搬家 · 清理", expanded: false) {
+        card(id: "data", title: "数据", icon: "internaldrive.fill", summary: "统计 · 存储 · 搬家 · 清理", expanded: false) {
             VStack(spacing: 0) {
                 Button {
                     showStats = true
@@ -758,7 +758,7 @@ struct SettingsView: View {
     // MARK: 关于
 
     private var aboutCard: some View {
-        card(title: "关于", icon: "info.circle.fill", summary: "版本 \(appVersion) · 更新 · 存储") {
+        card(id: "about", title: "关于", icon: "info.circle.fill", summary: "版本 \(appVersion) · 更新 · 存储") {
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Text("版本")
@@ -851,13 +851,15 @@ struct SettingsView: View {
     // MARK: 组件
 
     private func card<Content: View>(
+        id: String,
         title: String,
         icon: String,
         summary: String? = nil,
         expanded: Bool = true,
         @ViewBuilder content: @escaping () -> Content
     ) -> some View {
-        SettingsCard(title: title,
+        SettingsCard(id: id,
+                     title: title,
                      icon: icon,
                      summary: summary,
                      initiallyExpanded: expanded,
@@ -999,9 +1001,11 @@ private struct SettingsCard<Content: View>: View {
     let summary: String?
     let content: () -> Content
 
-    @State private var expanded: Bool
+    /// 收起 / 展开直接落在 UserDefaults，重开 App 也保持上次的样子
+    @AppStorage private var expanded: Bool
 
-    init(title: String,
+    init(id: String,
+         title: String,
          icon: String,
          summary: String? = nil,
          initiallyExpanded: Bool = true,
@@ -1010,7 +1014,8 @@ private struct SettingsCard<Content: View>: View {
         self.icon = icon
         self.summary = summary
         self.content = content
-        _expanded = State(initialValue: initiallyExpanded)
+        _expanded = AppStorage(wrappedValue: initiallyExpanded,
+                               SettingsKey.cardExpanded(id))
     }
 
     var body: some View {

@@ -177,6 +177,9 @@ enum SettingsKey {
     static let downloadConcurrency = "settings.downloadConcurrency"
     static let subtitleSize = "settings.subtitleSize"
 
+    // 设置页卡片的收起 / 展开状态
+    static func cardExpanded(_ id: String) -> String { "settings.card.\(id)" }
+
     // 手势与手感
     static let gestureHorizontal = "gesture.horizontal"
     static let gestureVertical = "gesture.vertical"
