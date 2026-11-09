@@ -368,7 +368,7 @@ struct ImageToolsView: View {
 
     // MARK: 编码
 
-    private static func resized(_ image: UIImage, longEdge: CGFloat) -> UIImage {
+    private nonisolated static func resized(_ image: UIImage, longEdge: CGFloat) -> UIImage {
         let size = image.size
         let longest = max(size.width, size.height)
         guard longEdge > 0, longest > longEdge, longest > 0 else { return image }
@@ -386,7 +386,7 @@ struct ImageToolsView: View {
         }
     }
 
-    private static func encode(_ image: UIImage,
+    private nonisolated static func encode(_ image: UIImage,
                                format: OutputFormat,
                                quality: Double) -> (data: Data, ext: String)? {
         switch format {
@@ -415,7 +415,7 @@ struct ImageToolsView: View {
         }
     }
 
-    private static func utType(for ext: String) -> String {
+    private nonisolated static func utType(for ext: String) -> String {
         switch ext {
         case "png": return UTType.png.identifier
         case "heic": return UTType.heic.identifier

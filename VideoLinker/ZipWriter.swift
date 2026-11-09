@@ -56,9 +56,16 @@ final class ZipWriter {
 
         let comps = Calendar(identifier: .gregorian)
             .dateComponents([.year, .month, .day, .hour, .minute, .second], from: Date())
-        let year = max(1980, comps.year ?? 1980)
-        dosTime = UInt16((comps.hour ?? 0) << 11 | (comps.minute ?? 0) << 5 | (comps.second ?? 0) / 2)
-        dosDate = UInt16((year - 1980) << 9 | (comps.month ?? 1) << 5 | (comps.day ?? 1))
+
+        let hour = UInt16(comps.hour ?? 0)
+        let minute = UInt16(comps.minute ?? 0)
+        let second = UInt16(comps.second ?? 0)
+        dosTime = (hour << 11) | (minute << 5) | (second / 2)
+
+        let year = UInt16(max(1980, comps.year ?? 1980) - 1980)
+        let month = UInt16(comps.month ?? 1)
+        let day = UInt16(comps.day ?? 1)
+        dosDate = (year << 9) | (month << 5) | day
     }
 
     // MARK: 写入
