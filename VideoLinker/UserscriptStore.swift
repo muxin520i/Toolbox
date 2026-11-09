@@ -369,7 +369,7 @@ enum UserscriptEngine {
         js += "if(!ok){return;}"
 
         js += "var __G=(typeof window.__vlGMFactory==='function')"
-        js += "?window.__vlGMFactory('\(scope)',\(values)):{};"
+        js += "?window.__vlGMFactory('\(scope)',\(values),'\(name)'):{};"
 
         js += "function __vlrun(){try{"
         js += "(function(\(apiNames.joined(separator: ",")),unsafeWindow){"

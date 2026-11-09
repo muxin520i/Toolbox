@@ -217,6 +217,34 @@ enum GMShim {
       var seq = 0;
       var pending = {};
 
+      // 所有脚本共用的菜单注册表：脚本调用 GM_registerMenuCommand 时记在这里，
+      // 原生侧的「脚本菜单」面板通过 __vlMenuList / __vlMenuRun 读写。
+      var menuSeq = 0;
+      var menuItems = {};
+      var menuOrder = [];
+
+      window.__vlMenuList = function () {
+        var list = [];
+        for (var i = 0; i < menuOrder.length; i++) {
+          var item = menuItems[menuOrder[i]];
+          if (item) {
+            list.push({ key: item.key, title: item.title, script: item.script });
+          }
+        }
+        return JSON.stringify(list);
+      };
+
+      window.__vlMenuRun = function (key) {
+        var item = menuItems[key];
+        if (!item) { return 'missing'; }
+        try {
+          if (typeof item.callback === 'function') { item.callback(); }
+          return 'ok';
+        } catch (e) {
+          return 'error: ' + (e && e.message ? e.message : String(e));
+        }
+      };
+
       function post(action, scope, payload) {
         return new Promise(function (resolve, reject) {
           var id = ++seq;
@@ -256,15 +284,15 @@ enum GMShim {
         } catch (e) {}
       }
 
-      window.__vlGMFactory = function (scope, initialValues) {
+      window.__vlGMFactory = function (scope, initialValues, scriptName) {
         var values = initialValues || {};
-        var menus = [];
+        var label = scriptName || scope;
 
         return {
           GM_info: {
             scriptHandler: 'VideoLinker',
             version: '1.4',
-            script: { name: scope, version: '1.0' },
+            script: { name: label, version: '1.0' },
             sandboxMode: 'JavaScript'
           },
           unsafeWindow: window,
@@ -333,12 +361,24 @@ enum GMShim {
             if (text) { toast(text); }
           },
 
-          GM_registerMenuCommand: function (name, fn) {
-            menus.push({ name: name, run: fn });
-            return menus.length;
+          GM_registerMenuCommand: function (name, fn, options) {
+            var key = scope + '::' + (++menuSeq);
+            menuItems[key] = {
+              key: key,
+              title: String(name == null ? '' : name),
+              script: label,
+              callback: fn
+            };
+            menuOrder.push(key);
+            return key;
           },
 
-          GM_unregisterMenuCommand: function () {},
+          GM_unregisterMenuCommand: function (key) {
+            if (!menuItems[key]) { return; }
+            delete menuItems[key];
+            var index = menuOrder.indexOf(key);
+            if (index >= 0) { menuOrder.splice(index, 1); }
+          },
 
           GM_openInTab: function (url) {
             try { window.location.href = url; } catch (e) {}

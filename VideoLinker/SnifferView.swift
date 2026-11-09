@@ -157,7 +157,7 @@ struct SniffGroup: Identifiable {
 // MARK: - 面板
 
 private enum BrowserSheet: String, Identifiable {
-    case tabs, menu, sniff, history, bookmarks, downloads, settings, scripts
+    case tabs, menu, sniff, history, bookmarks, downloads, settings, scripts, scriptMenu
 
     var id: String { rawValue }
 }
@@ -196,6 +196,8 @@ struct BrowserView: View {
     /// 当前 sheet 里正在显示的内容。换面板时只改它，不再“先关再开”
     @State private var renderedSheet: BrowserSheet?
     @State private var pendingSheet: BrowserSheet?
+    /// 当前页面里脚本注册的菜单命令
+    @State private var scriptMenuItems: [ScriptMenuItem] = []
     @State private var draft: ShortcutDraft?
     @State private var pendingDraft: ShortcutDraft?
 
@@ -705,6 +707,10 @@ struct BrowserView: View {
             BrowserSettingsView(library: library)
         case .scripts:
             UserscriptListView(library: library)
+        case .scriptMenu:
+            ScriptMenuSheet(items: scriptMenuItems) { item in
+                runScriptMenu(item)
+            }
         }
     }
 
@@ -799,6 +805,47 @@ struct BrowserView: View {
         present(.menu)
     }
 
+    // MARK: 脚本菜单
+
+    /// 从当前页面取出脚本注册的菜单命令（GM_registerMenuCommand）
+    private func loadScriptMenu(_ tab: BrowserTab) {
+        tab.webView.evaluateJavaScript("window.__vlMenuList ? window.__vlMenuList() : '[]'") { result, _ in
+            DispatchQueue.main.async {
+                let items = ScriptMenuItem.parse((result as? String) ?? "[]")
+                guard !items.isEmpty else {
+                    showToast("当前页面没有可用的脚本菜单")
+                    return
+                }
+                scriptMenuItems = items
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                    present(.scriptMenu)
+                }
+            }
+        }
+    }
+
+    /// 先关面板再执行，脚本自己弹的窗口才不会被挡住
+    private func runScriptMenu(_ item: ScriptMenuItem) {
+        guard let tab = tab else { return }
+        sheet = nil
+        let key = item.id
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "'", with: "\\'")
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            tab.webView.evaluateJavaScript("window.__vlMenuRun ? window.__vlMenuRun('\(key)') : 'missing'") { result, _ in
+                let status = (result as? String) ?? ""
+                DispatchQueue.main.async {
+                    if status == "missing" {
+                        showToast("这条菜单已失效，刷新页面再试")
+                    } else if status.hasPrefix("error: ") {
+                        showToast(String(status.dropFirst("error: ".count)))
+                    }
+                }
+            }
+        }
+    }
+
     private func handle(_ action: BrowserMenuAction) {
         guard let tab = tab else { return }
 
@@ -864,6 +911,10 @@ struct BrowserView: View {
 
         case .scripts:
             openPanel(.scripts)
+
+        case .scriptMenu:
+            sheet = nil
+            loadScriptMenu(tab)
 
         case .sniff:
             openPanel(.sniff)

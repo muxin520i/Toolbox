@@ -135,6 +135,7 @@ enum BrowserMenuAction {
     case history
     case downloads
     case scripts
+    case scriptMenu
     case sniff
     case find
     case settings
@@ -177,6 +178,9 @@ struct BrowserMenuSheet: View {
                         row("嗅探结果", "dot.radiowaves.left.and.right",
                             detail: foundCount > 0 ? "\(foundCount) 个" : "暂无") { onAction(.sniff) }
                         row("油猴脚本", "curlybraces", detail: library.statusText) { onAction(.scripts) }
+                        if !library.scripts.isEmpty {
+                            row("脚本菜单", "list.bullet.rectangle", detail: "当前页") { onAction(.scriptMenu) }
+                        }
                     }
 
                     group {
@@ -302,6 +306,93 @@ struct BrowserMenuSheet: View {
                 .frame(height: 0.5)
                 .padding(.leading, 50)
         }
+    }
+}
+
+// MARK: - 脚本菜单（GM_registerMenuCommand 注册的命令）
+
+struct ScriptMenuItem: Identifiable, Equatable {
+    let id: String
+    let title: String
+    let script: String
+
+    /// 解析页面里 __vlMenuList() 返回的 JSON
+    static func parse(_ json: String) -> [ScriptMenuItem] {
+        guard let data = json.data(using: .utf8),
+              let raw = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] else {
+            return []
+        }
+        return raw.compactMap { item in
+            guard let key = item["key"] as? String, !key.isEmpty else { return nil }
+            let title = (item["title"] as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let script = (item["script"] as? String) ?? ""
+            return ScriptMenuItem(id: key,
+                                  title: title.isEmpty ? "（未命名菜单）" : title,
+                                  script: script)
+        }
+    }
+}
+
+struct ScriptMenuSheet: View {
+    let items: [ScriptMenuItem]
+    var onRun: (ScriptMenuItem) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var scheme
+
+    private var isDark: Bool { scheme == .dark }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(groups) { group in
+                    Section(group.script) {
+                        ForEach(group.items) { item in
+                            Button {
+                                onRun(item)
+                            } label: {
+                                HStack(spacing: 10) {
+                                    Text(item.title)
+                                        .font(.system(size: 15))
+                                        .foregroundStyle(FirefoxStyle.text(isDark))
+                                    Spacer(minLength: 6)
+                                    Image(systemName: "play.circle")
+                                        .font(.system(size: 16))
+                                        .foregroundStyle(FirefoxStyle.sub(isDark))
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("脚本菜单")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("关闭") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private struct Group: Identifiable {
+        let script: String
+        let items: [ScriptMenuItem]
+        var id: String { script }
+    }
+
+    private var groups: [Group] {
+        var order: [String] = []
+        var map: [String: [ScriptMenuItem]] = [:]
+        for item in items {
+            let key = item.script.isEmpty ? "未命名脚本" : item.script
+            if map[key] == nil { order.append(key) }
+            map[key, default: []].append(item)
+        }
+        return order.map { Group(script: $0, items: map[$0] ?? []) }
     }
 }
 

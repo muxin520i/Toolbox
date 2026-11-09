@@ -126,6 +126,7 @@
 
 ## 已做
 
+- 脚本菜单：浏览器菜单 →「脚本菜单」列出当前页 `GM_registerMenuCommand` 注册的命令，按脚本分组、点击执行，支持反注册（v1.9.0）
 - 脚本检查更新：安装时记下代码地址 + `@version`，一键或单条拉新版；老脚本从 `@downloadURL` / `@updateURL` 自动补来源（v1.8.0）
 - 媒体服务器：手机当 DLNA 片源（MediaServer:1 + ContentDirectory Browse），电视浏览 App 内视频点播，流服务按需 Range 读取（v1.7.0）
 - FTP / SFTP 客户端：FTP 被动模式（PASV + MLSD，退回 LIST）+ SFTP（Citadel），列目录、按字节范围读、本地流代理播放（v1.7.0）
