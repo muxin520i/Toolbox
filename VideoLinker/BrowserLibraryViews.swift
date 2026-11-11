@@ -151,6 +151,7 @@ struct BookmarksView: View {
     @State private var keyword = ""
     @State private var editing: Bookmark?
     @State private var editingTitle = ""
+    @State private var toast: String?
 
     private var filtered: [Bookmark] {
         let text = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -212,14 +213,12 @@ struct BookmarksView: View {
                                 .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
-                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                Button(role: .destructive) {
-                                    library.remove(item)
-                                } label: {
-                                    Label("删除", systemImage: "trash")
-                                }
-                            }
                             .contextMenu {
+                                Button {
+                                    addToHome(item)
+                                } label: {
+                                    Label("添加到首页", systemImage: "plus.square.on.square")
+                                }
                                 Button {
                                     editing = item
                                     editingTitle = item.title
@@ -244,9 +243,17 @@ struct BookmarksView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("关闭") { dismiss() }
                 }
-                ToolbarItem(placement: .primaryAction) {
-                    Button("清空") { library.clear() }
-                        .disabled(library.items.isEmpty)
+            }
+            .overlay(alignment: .bottom) {
+                if let toast = toast {
+                    Text(toast)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 9)
+                        .background(Capsule().fill(Color.black.opacity(0.78)))
+                        .padding(.bottom, 24)
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
                 }
             }
             .alert("重命名", isPresented: Binding(
@@ -261,6 +268,27 @@ struct BookmarksView: View {
                     }
                     editing = nil
                 }
+            }
+        }
+    }
+
+    /// 收藏直接放进浏览器首页的快捷方式，省得再手打一遍网址
+    private func addToHome(_ item: Bookmark) {
+        let shortcuts = ShortcutLibrary.shared
+        guard !shortcuts.items.contains(where: { $0.url == item.url }) else {
+            showToast("首页已经有这个网站了")
+            return
+        }
+        let colorIndex = abs(item.url.count * 3 + 1) % 8
+        shortcuts.add(title: item.title, url: item.url, colorIndex: colorIndex)
+        showToast("已添加到首页")
+    }
+
+    private func showToast(_ text: String) {
+        withAnimation(.easeOut(duration: 0.15)) { toast = text }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            if toast == text {
+                withAnimation(.easeIn(duration: 0.2)) { toast = nil }
             }
         }
     }

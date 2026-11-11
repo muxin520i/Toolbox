@@ -201,9 +201,8 @@ final class ShareViewController: UIViewController {
         guard let link, !link.isEmpty else { return }
 
         // 先把链接放进剪贴板：从 iOS 18 起，分享扩展已经拉不起主 App 了，
-        // 这条路才是真正能走通的兜底，主 App 回到前台会自动提示。
-        // 同时写成文本和 URL 两种表示：主 App 用 hasURLs 判断有没有链接（不会弹粘贴授权），
-        // 别的 App 直接粘贴也能拿到文本。
+        // 这条路才是真正能走通的兜底，用户回到 App 首页点剪贴板按钮就能打开。
+        // 同时写成文本和 URL 两种表示，别的 App 直接粘贴也能拿到文本。
         if let url = URL(string: link) {
             UIPasteboard.general.items = [[
                 "public.utf8-plain-text": link,
@@ -262,7 +261,7 @@ final class ShareViewController: UIViewController {
 
     /// 跳不过去时的收尾：说清楚下一步该干什么，别让用户以为没反应
     private func showHandoffHint() {
-        statusLabel.text = "iOS 不允许分享面板直接打开 App。链接已复制，回到桌面打开「工具箱」，首页会弹出提示，点一下就能播。"
+        statusLabel.text = "iOS 不允许分享面板直接打开 App。链接已复制，回到「工具箱」的浏览器首页，点地址栏右边的剪贴板按钮就能打开。"
         playButton.isEnabled = false
         downloadButton.isEnabled = false
         playButton.alpha = 0.5
