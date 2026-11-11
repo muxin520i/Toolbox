@@ -60,6 +60,20 @@ enum BrowserInject {
         } catch (e) {}
       }
 
+      // 能塞进 video 的 http 地址就是媒体地址：有些站点用原生 HLS，
+      // 清单地址没有后缀，只靠 byURL 会漏掉，这里按「正在播」兜底
+      function byElement(el) {
+        try {
+          var u = el.currentSrc || el.src || el.getAttribute('data-src') || '';
+          if (!u || typeof u !== 'string') { return; }
+          if (/^blob:/i.test(u)) { return; }
+          if (!/^https?:/i.test(u)) { return; }
+          if (/\\.(m3u8|mp4|m4v|mov|webm|flv|mpd)(\\?|#|$)/i.test(u)) { post(u, ''); return; }
+          var host = el.tagName === 'SOURCE' ? el.parentElement : el;
+          if (host && (host.readyState > 0 || host.videoWidth > 0)) { post(u, ''); }
+        } catch (e) {}
+      }
+
       function scanShadow(root) {
         try {
           var all = root.querySelectorAll('*');
@@ -68,8 +82,7 @@ enum BrowserInject {
             if (!host.shadowRoot) { continue; }
             var vids = host.shadowRoot.querySelectorAll('video, source');
             for (var j = 0; j < vids.length; j++) {
-              var el = vids[j];
-              byURL(el.currentSrc || el.src || el.getAttribute('data-src') || '');
+              byElement(vids[j]);
             }
             scanShadow(host.shadowRoot);
           }
@@ -80,8 +93,7 @@ enum BrowserInject {
         try {
           var nodes = document.querySelectorAll('video, source');
           for (var i = 0; i < nodes.length; i++) {
-            var el = nodes[i];
-            byURL(el.currentSrc || el.src || el.getAttribute('data-src') || '');
+            byElement(nodes[i]);
           }
           // 自绘播放器可能把 video 关在 shadow DOM 里，document 查不到
           if (nodes.length === 0) { scanShadow(document); }

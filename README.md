@@ -139,7 +139,8 @@ App 用 GRDB 把数据统一存在一个 SQLite 库里：`Application Support/Vi
 
 - **认返回类型，不只看后缀**：以前只认 `.m3u8` / `.mp4` 这类地址；现在 `fetch` / `XHR` 回来时会看 `Content-Type`，`application/vnd.apple.mpegurl`、`dash+xml`、`video/*` 都算，没后缀的接口也能抓到
 - **再认一眼内容**：接口返回 `text/plain` 或 `application/octet-stream` 时，偷看前 64 个字节，开头是 `#EXTM3U` 或 `<MPD` 的当清单收下（只读小于 256 KB 的响应，不会把视频本体拉进内存）
-- **补齐几种藏法**：`HTMLMediaElement` 的 `src` 每次赋值都会检查；`video` 藏在 shadow DOM 里也能翻出来；另外每 3 秒扫一遍 `performance` 资源列表，worker 里发的请求也能捞回来
+- **原生 HLS 也认**：地址没后缀、但确实塞进了 `<video>` 并且在播的，照样收下；`blob:` 开头的跳过（那不是真链接）
+- **补齐几种藏法**：`video` 藏在 shadow DOM 里也能翻出来；每 3 秒扫一遍 `performance` 资源列表，worker 里发的请求也能捞回来
 - **空结果给提示**：0 个视频时列表底部说明「blob 流抓不到真实地址」，并建议刷新后重播一次
 
 ### v2.0.15 收藏加进首页、收藏防误删、去掉剪贴板弹窗
