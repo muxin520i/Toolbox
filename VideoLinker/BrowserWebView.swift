@@ -11,22 +11,80 @@ enum BrowserInject {
       if (window.__vlHooked) { return; }
       window.__vlHooked = true;
 
-      function send(u) {
+      var posted = {};
+
+      function post(u, kind) {
+        try {
+          if (!u || typeof u !== 'string') { return; }
+          if (u.length > 4000) { return; }
+          if (!/^https?:/i.test(u)) { return; }
+          if (posted[u]) { return; }
+          posted[u] = 1;
+          window.webkit.messageHandlers.videoSniffer.postMessage({ url: u, kind: kind || '' });
+        } catch (e) {}
+      }
+
+      // 只凭地址就能认出来的：直链和清单
+      function byURL(u) {
         try {
           if (!u || typeof u !== 'string') { return; }
           if (!/^https?:/i.test(u)) { return; }
-          if (!/\\.(m3u8|mp4|m4v|mov|webm|flv)(\\?|#|$)/i.test(u)) { return; }
-          window.webkit.messageHandlers.videoSniffer.postMessage(u);
+          var s = u.split('#')[0];
+          var p = s.split('?')[0].toLowerCase();
+          if (/\\.(m3u8|mp4|m4v|mov|webm|flv)$/.test(p)) { post(s, ''); return; }
+          if (/\\.mpd$/.test(p)) { post(s, 'DASH'); return; }
+          // 路径里带 m3u8 但没后缀的，多半也是清单
+          if (p.indexOf('m3u8') >= 0) { post(s, 'HLS'); }
+        } catch (e) {}
+      }
+
+      function kindOfType(ct) {
+        ct = (ct || '').toLowerCase();
+        if (ct.indexOf('mpegurl') >= 0) { return 'HLS'; }
+        if (ct.indexOf('dash+xml') >= 0) { return 'DASH'; }
+        if (ct.indexOf('video/') >= 0) { return 'MEDIA'; }
+        return '';
+      }
+
+      // 有的站点把播放地址藏在没后缀的接口里，只能看返回头或前几十个字节
+      function inspect(u, ct, text) {
+        try {
+          var kind = kindOfType(ct);
+          if (kind === 'HLS' || kind === 'DASH') { post(u, kind); return; }
+          if (kind === 'MEDIA') { post(u, ''); return; }
+          if (text && text.length > 8) {
+            var head = text.slice(0, 64);
+            if (head.indexOf('#EXTM3U') >= 0) { post(u, 'HLS'); return; }
+            if (head.indexOf('<MPD') >= 0) { post(u, 'DASH'); }
+          }
+        } catch (e) {}
+      }
+
+      function scanShadow(root) {
+        try {
+          var all = root.querySelectorAll('*');
+          for (var i = 0; i < all.length; i++) {
+            var host = all[i];
+            if (!host.shadowRoot) { continue; }
+            var vids = host.shadowRoot.querySelectorAll('video, source');
+            for (var j = 0; j < vids.length; j++) {
+              var el = vids[j];
+              byURL(el.currentSrc || el.src || el.getAttribute('data-src') || '');
+            }
+            scanShadow(host.shadowRoot);
+          }
         } catch (e) {}
       }
 
       function scan() {
         try {
-          var nodes = document.querySelectorAll('video, source, audio');
+          var nodes = document.querySelectorAll('video, source');
           for (var i = 0; i < nodes.length; i++) {
             var el = nodes[i];
-            send(el.currentSrc || el.src || el.getAttribute('data-src') || '');
+            byURL(el.currentSrc || el.src || el.getAttribute('data-src') || '');
           }
+          // 自绘播放器可能把 video 关在 shadow DOM 里，document 查不到
+          if (nodes.length === 0) { scanShadow(document); }
         } catch (e) {}
         scanImages();
       }
@@ -111,14 +169,24 @@ enum BrowserInject {
       var origFetch = window.fetch;
       if (origFetch) {
         window.fetch = function(input, init) {
-          try {
-            send(typeof input === 'string' ? input : (input && input.url));
-          } catch (e) {}
+          var asked = '';
+          try { asked = typeof input === 'string' ? input : (input && input.url) || ''; } catch (e) {}
+          byURL(asked);
           var promise = origFetch.apply(this, arguments);
           try {
             promise.then(function(res) {
-              try { send(res && res.url); } catch (e) {}
-            });
+              try {
+                var finalURL = (res && res.url) || asked;
+                byURL(finalURL);
+                var ct = (res.headers && res.headers.get('content-type')) || '';
+                if (kindOfType(ct)) { inspect(finalURL, ct, ''); return; }
+                // 没有明确类型时只偷看小响应，别把视频本体读进内存
+                var len = parseInt((res.headers && res.headers.get('content-length')) || '0', 10);
+                if (len && len < 262144) {
+                  res.clone().text().then(function(t) { inspect(finalURL, ct, t); }).catch(function() {});
+                }
+              } catch (e) {}
+            }).catch(function() {});
           } catch (e) {}
           return promise;
         };
@@ -126,9 +194,42 @@ enum BrowserInject {
 
       var origOpen = XMLHttpRequest.prototype.open;
       XMLHttpRequest.prototype.open = function(method, url) {
-        try { send(url); } catch (e) {}
+        try {
+          this.__vlURL = typeof url === 'string' ? url : '';
+          byURL(this.__vlURL);
+        } catch (e) {}
         return origOpen.apply(this, arguments);
       };
+
+      var origSend = XMLHttpRequest.prototype.send;
+      XMLHttpRequest.prototype.send = function() {
+        var xhr = this;
+        try {
+          xhr.addEventListener('load', function() {
+            try {
+              var u = xhr.responseURL || xhr.__vlURL || '';
+              byURL(u);
+              var ct = '';
+              try { ct = xhr.getResponseHeader('content-type') || ''; } catch (e) {}
+              if (kindOfType(ct)) { inspect(u, ct, ''); return; }
+              var type = xhr.responseType;
+              if ((type === '' || type === 'text') && typeof xhr.responseText === 'string') {
+                var text = xhr.responseText;
+                if (text.length < 262144) { inspect(u, ct, text); }
+              }
+            } catch (e) {}
+          });
+        } catch (e) {}
+        return origSend.apply(this, arguments);
+      };
+
+      // 定时扫一遍已经发出去的请求，worker 里发的也能捞回来
+      setInterval(function() {
+        try {
+          var list = performance.getEntriesByType('resource');
+          for (var i = 0; i < list.length; i++) { byURL(list[i].name); }
+        } catch (e) {}
+      }, 3000);
     })();
     """
 

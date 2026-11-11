@@ -957,6 +957,12 @@ struct SniffResultsPanel: View {
                     }
                 } header: {
                     Text(headerText)
+                } footer: {
+                    if filtered.isEmpty {
+                        Text("没抓到视频？有些播放器用的是 blob 流（边下边播的分片），页面里不会出现真实地址。可以先点地址栏刷新，再播一次试试。")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
             .listStyle(.plain)

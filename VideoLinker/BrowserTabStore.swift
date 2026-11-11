@@ -124,14 +124,16 @@ final class BrowserTab: ObservableObject, Identifiable {
             .store(in: &bag)
     }
 
-    func addVideo(_ url: String) {
+    func addVideo(_ url: String, kindHint: String = "") {
         let clean = url.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty, clean.count < 2000 else { return }
         guard clean.lowercased().hasPrefix("http") else { return }
         guard found.count < 40 else { return }
         guard !found.contains(where: { $0.url == clean }) else { return }
         let host = URL(string: clean)?.host ?? ""
-        found.append(SniffedVideo(url: clean, host: host, kind: SniffedVideo.kind(of: clean)))
+        // 脚本按返回类型认出来的清单，地址里可能没有后缀，优先用它的判断
+        let kind = kindHint.isEmpty ? SniffedVideo.kind(of: clean) : kindHint
+        found.append(SniffedVideo(url: clean, host: host, kind: kind))
     }
 
     func addImage(_ url: String, width: Int, height: Int) {
@@ -446,9 +448,21 @@ final class TabCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScri
             }
             return
         }
-        guard message.name == "videoSniffer", let url = message.body as? String else { return }
+        guard message.name == "videoSniffer" else { return }
+
+        // 新脚本发的是 {url, kind}；旧格式是纯字符串，两种都认
+        var address = ""
+        var hint = ""
+        if let text = message.body as? String {
+            address = text
+        } else if let body = message.body as? [String: Any] {
+            address = body["url"] as? String ?? ""
+            hint = body["kind"] as? String ?? ""
+        }
+        guard !address.isEmpty else { return }
+
         DispatchQueue.main.async {
-            self.tab.addVideo(url)
+            self.tab.addVideo(address, kindHint: hint)
         }
     }
 
