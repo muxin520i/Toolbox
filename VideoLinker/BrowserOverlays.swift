@@ -866,6 +866,12 @@ struct SniffResultsPanel: View {
         } message: {
             Text(groupChoice?.primary.displayName ?? "")
         }
+        .overlay {
+            if showRequests {
+                requestOverlay
+                    .transition(.opacity)
+            }
+        }
         .overlay(alignment: .bottom) {
             if let hint = hint {
                 Text(hint)
@@ -876,12 +882,6 @@ struct SniffResultsPanel: View {
                     .padding(.vertical, 9)
                     .background(Capsule().fill(Color.black.opacity(0.8)))
                     .padding(.bottom, selecting ? 70 : 22)
-                    .transition(.opacity)
-            }
-        }
-        .overlay {
-            if showRequests {
-                requestOverlay
                     .transition(.opacity)
             }
         }
