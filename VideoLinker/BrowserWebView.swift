@@ -40,18 +40,24 @@ enum BrowserInject {
       }
 
       // src 说明地址是从哪发现的：element 最可信（播放器真的在用它），
-      // text 最不可信（可能只是接口 JSON 里的一句话），交给原生侧分级处理
+      // text 最不可信（可能只是接口 JSON 里的一句话），交给原生侧分级处理。
+      // 同一个地址会被多条线抓到，只报一次，保留最可信的那个来源
+      var srcRank = { element: 4, type: 3, json: 2, url: 2, text: 1 };
       function post(u, kind, src) {
         try {
           u = abs(u);
           if (!u || u.length > 4000) { return; }
-          var key = u + '|' + (src || '');
-          if (posted[key]) { return; }
-          posted[key] = 1;
+          var old = posted[u];
+          if (old && (srcRank[old.src] || 0) >= (srcRank[src] || 0)) { return; }
+          posted[u] = { src: src || '', kind: kind || '' };
           note(u, src);
           window.webkit.messageHandlers.videoSniffer.postMessage({ url: u, kind: kind || '', src: src || '' });
         } catch (e) {}
       }
+
+      // 播放接口常见的路径名：这站把清单挂在 /api/hls/<id> 上，既没后缀、
+      // 也不返回清单类型，光看地址只能靠这一段认
+      var MEDIA_PATH = /\\/(hls|dash|stream|playlist|manifest|play|vod)(\\/|$)/i;
 
       // 只凭地址就能认出来的：直链和清单
       function byURL(u) {
@@ -63,23 +69,27 @@ enum BrowserInject {
           if (/\\.(m3u8|mp4|m4v|mov|webm|flv)$/.test(p)) { post(s, '', 'url'); return; }
           if (/\\.mpd$/.test(p)) { post(s, 'DASH', 'url'); return; }
           // 路径里带 m3u8 但没后缀的，多半也是清单
-          if (p.indexOf('m3u8') >= 0) { post(s, 'HLS', 'url'); }
+          if (p.indexOf('m3u8') >= 0) { post(s, 'HLS', 'url'); return; }
+          if (MEDIA_PATH.test(p)) { post(s, 'HLS', 'url'); }
         } catch (e) {}
       }
 
-      // 从接口文本里挖出来的地址：明显是图片 / 样式 / 脚本的先跳过，
-      // 剩下的都报给原生侧——那里能带 Referer 再问一次服务器
+      // 从接口文本里挖出来的地址：明显是图片 / 样式 / 脚本的先跳过。
+      // 这里不能再「什么链接都上报」——满页的推荐位、站点首页、统计脚本
+      // 都会被当成视频，列表里全是点开不对的东西。只认确实像媒体的
       function byText(u) {
         try {
           u = abs(u);
           if (!u) { return; }
+          // 同一个接口换个参数就是缩略图 / 预览图，不能当视频收
+          if (/[?&](kind|type|format)=(thumbs?|sprite|vtt|images?|poster)/i.test(u)) { return; }
           var s = u.split('#')[0];
           var p = s.split('?')[0].toLowerCase();
           if (/\\.(jpe?g|png|gif|webp|avif|svg|ico|css|js|woff2?|ttf|otf|json|html?|vtt|srt|ass)$/.test(p)) { return; }
           if (p.indexOf('m3u8') >= 0) { post(s, 'HLS', 'text'); return; }
           if (/\\.(mp4|m4v|mov|webm|flv)$/.test(p)) { post(s, '', 'text'); return; }
           if (/\\.mpd$/.test(p)) { post(s, 'DASH', 'text'); return; }
-          post(s, '', 'text');
+          if (MEDIA_PATH.test(p)) { post(s, 'HLS', 'text'); }
         } catch (e) {}
       }
 
@@ -169,6 +179,8 @@ enum BrowserInject {
           if (!/^https?:/i.test(u)) { return; }
           // 播放器真的在用这个地址，可信度最高：不再做 HEAD 校验，直接收
           if (/\\.(m3u8|mp4|m4v|mov|webm|flv|mpd)(\\?|#|$)/i.test(u)) { post(u, '', 'element'); return; }
+          // 没后缀的播放接口（/api/hls/xxx 这种）也是清单，别等它返回 #EXTM3U
+          if (MEDIA_PATH.test(u.split('?')[0])) { post(u, 'HLS', 'element'); return; }
           var host = el || {};
           if (host.readyState > 0 || host.videoWidth > 0) { post(u, '', 'element'); }
         } catch (e) {}
