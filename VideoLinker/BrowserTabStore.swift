@@ -124,7 +124,7 @@ final class BrowserTab: ObservableObject, Identifiable {
             .store(in: &bag)
     }
 
-    func addVideo(_ url: String, kindHint: String = "", unverified: Bool = false) {
+    func addVideo(_ url: String, kindHint: String = "", unverified: Bool = false, first: Bool = false) {
         let clean = url.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty, clean.count < 2000 else { return }
         guard clean.lowercased().hasPrefix("http") else { return }
@@ -133,20 +133,33 @@ final class BrowserTab: ObservableObject, Identifiable {
         let host = URL(string: clean)?.host ?? ""
         // 脚本按返回类型认出来的清单，地址里可能没有后缀，优先用它的判断
         let kind = kindHint.isEmpty ? SniffedVideo.kind(of: clean) : kindHint
-        found.append(SniffedVideo(url: clean, host: host, kind: kind, unverified: unverified))
+        let video = SniffedVideo(url: clean, host: host, kind: kind, unverified: unverified)
+        // 播放器正在用的那条放最前面，别被接口里挖出来的可疑地址挤到后面
+        if first {
+            found.insert(video, at: 0)
+        } else {
+            found.append(video)
+        }
     }
+
+    /// 同时在跑的校验任务上限，接口里的地址一口气全去问会把站点惹毛
+    private var verifyingCount = 0
 
     /// 脚本报上来的地址按来源分级：
     /// 播放器正在用的（element）、响应头认出来的（type）、带后缀的直链都算确认过；
     /// 只有从接口文本里挖出来的（text）才需要问服务器，问不出来也先收下。
+    @MainActor
     func acceptVideo(_ url: String, kindHint: String = "", source: String = "") {
         if !kindHint.isEmpty || source == "element" || source == "type"
             || SniffURLValidator.hasMediaSuffix(url) {
-            addVideo(url, kindHint: kindHint)
+            addVideo(url, kindHint: kindHint, first: source == "element")
             return
         }
+        guard verifyingCount < 6 else { return }
+        verifyingCount += 1
         let referer = urlString
         Task { @MainActor [weak self] in
+            defer { self?.verifyingCount -= 1 }
             guard let self else { return }
             let cookie = await self.cookieHeader(for: URL(string: url))
             switch await SniffURLValidator.verify(url, referer: referer, cookie: cookie) {
@@ -524,7 +537,7 @@ final class TabCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScri
         }
         guard !address.isEmpty else { return }
 
-        DispatchQueue.main.async {
+        Task { @MainActor in
             self.tab.acceptVideo(address, kindHint: hint, source: source)
         }
     }

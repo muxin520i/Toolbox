@@ -134,16 +134,43 @@ enum BrowserInject {
       // 清单地址没有后缀，只靠 byURL 会漏掉，这里按「正在播」兜底
       function byElement(el) {
         try {
-          var u = el.currentSrc || el.src || el.getAttribute('data-src') || '';
+          var host = el.tagName === 'SOURCE' ? el.parentElement : el;
+          byElementValue(el.currentSrc || el.src || el.getAttribute('data-src') || '', host);
+        } catch (e) {}
+      }
+
+      function byElementValue(raw, el) {
+        try {
+          var u = raw;
           if (!u || typeof u !== 'string') { return; }
           if (/^blob:/i.test(u)) { return; }
           if (!/^https?:/i.test(u)) { return; }
           // 播放器真的在用这个地址，可信度最高：不再做 HEAD 校验，直接收
           if (/\\.(m3u8|mp4|m4v|mov|webm|flv|mpd)(\\?|#|$)/i.test(u)) { post(u, '', 'element'); return; }
-          var host = el.tagName === 'SOURCE' ? el.parentElement : el;
-          if (host && (host.readyState > 0 || host.videoWidth > 0)) { post(u, '', 'element'); }
+          var host = el || {};
+          if (host.readyState > 0 || host.videoWidth > 0) { post(u, '', 'element'); }
         } catch (e) {}
       }
+
+      // 有些播放器把地址赋给 src 后很快换掉，2 秒轮询可能一次都扫不到；
+      // 这里直接盯住 src 的 setter，赋值 1.5 秒后确认还在播就收
+      try {
+        var srcDesc = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'src');
+        if (srcDesc && srcDesc.set) {
+          Object.defineProperty(HTMLMediaElement.prototype, 'src', {
+            configurable: true,
+            enumerable: srcDesc.enumerable,
+            get: srcDesc.get,
+            set: function(value) {
+              try {
+                var el = this;
+                setTimeout(function() { byElementValue(value, el); }, 1500);
+              } catch (e) {}
+              return srcDesc.set.call(this, value);
+            }
+          });
+        }
+      } catch (e) {}
 
       function scanShadow(root) {
         try {
