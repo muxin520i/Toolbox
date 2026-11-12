@@ -654,6 +654,10 @@ struct SniffResultsPanel: View {
     @State private var showPreview = false
     /// 直接投给电视的远程地址
     @State private var castTarget: CastTarget?
+    /// 页面请求诊断：抓不到东西时看这一页到底发了哪些请求
+    @State private var showRequests = false
+    @State private var requests: [String] = []
+    @State private var loadingRequests = false
 
     private enum Mode: Hashable {
         case video, image
@@ -786,6 +790,12 @@ struct SniffResultsPanel: View {
                                 Label("多选", systemImage: "checkmark.circle")
                             }
 
+                            Button {
+                                Task { await loadRequests() }
+                            } label: {
+                                Label("页面请求", systemImage: "list.bullet.rectangle")
+                            }
+
                             Button(role: .destructive) {
                                 tab.found.removeAll()
                                 tab.images.removeAll()
@@ -796,7 +806,6 @@ struct SniffResultsPanel: View {
                         } label: {
                             Text("操作")
                         }
-                        .disabled(tab.found.isEmpty && tab.images.isEmpty)
                     }
                 }
             }
@@ -867,6 +876,12 @@ struct SniffResultsPanel: View {
                     .padding(.vertical, 9)
                     .background(Capsule().fill(Color.black.opacity(0.8)))
                     .padding(.bottom, selecting ? 70 : 22)
+                    .transition(.opacity)
+            }
+        }
+        .overlay {
+            if showRequests {
+                requestOverlay
                     .transition(.opacity)
             }
         }
@@ -969,6 +984,98 @@ struct SniffResultsPanel: View {
         }
     }
 
+    /// 页面请求诊断：把注入脚本记下的所有请求列出来，抓不到视频时用
+    private var requestOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.32)
+                .ignoresSafeArea()
+                .onTapGesture { showRequests = false }
+
+            VStack(spacing: 0) {
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("页面请求")
+                            .font(.system(size: 14, weight: .semibold))
+                        Text("共 \(requests.count) 条，看有没有 m3u8 / mp4")
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button {
+                        UIPasteboard.general.string = requests.joined(separator: "\n")
+                        showHint("已复制 \(requests.count) 条请求")
+                    } label: {
+                        Image(systemName: "doc.on.doc")
+                            .font(.system(size: 14))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(requests.isEmpty)
+
+                    Button {
+                        Task { await loadRequests(keepOpen: true) }
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 14))
+                    }
+                    .buttonStyle(.plain)
+
+                    Button("关闭") { showRequests = false }
+                        .font(.system(size: 13, weight: .medium))
+                        .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+
+                Divider()
+
+                if loadingRequests {
+                    ProgressView("正在读取…")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if requests.isEmpty {
+                    VStack(spacing: 7) {
+                        Image(systemName: "list.bullet.rectangle")
+                            .font(.system(size: 24))
+                            .foregroundStyle(.secondary)
+                        Text("这一页还没有记录到请求")
+                            .font(.system(size: 12.5, weight: .medium))
+                        Text("先点地址栏刷新，播几秒再回来看看")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 7) {
+                            ForEach(requests.indices, id: \.self) { index in
+                                Text(requests[index])
+                                    .font(.system(size: 10.5, design: .monospaced))
+                                    .foregroundStyle(.primary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .textSelection(.enabled)
+                            }
+                        }
+                        .padding(.horizontal, 13)
+                        .padding(.vertical, 10)
+                    }
+                }
+            }
+            .frame(maxWidth: 560, maxHeight: 470)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.7)
+            )
+            .padding(.horizontal, 20)
+        }
+    }
+
+    @MainActor
+    private func loadRequests(keepOpen: Bool = false) async {
+        loadingRequests = true
+        if !keepOpen { showRequests = true }
+        requests = await tab.pageRequests()
+        loadingRequests = false
+    }
     private var headerText: String {
         if selecting { return "已选 \(selected.count) 个" }
         if groups.count < filtered.count {
@@ -1457,6 +1564,7 @@ struct SniffResultsPanel: View {
             if !token.isEmpty { parts.append(token) }
         }
         parts.append(video.kind)
+        if video.unverified { parts.append("未校验") }
         return parts.joined(separator: " · ")
     }
 

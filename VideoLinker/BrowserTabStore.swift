@@ -124,7 +124,7 @@ final class BrowserTab: ObservableObject, Identifiable {
             .store(in: &bag)
     }
 
-    func addVideo(_ url: String, kindHint: String = "") {
+    func addVideo(_ url: String, kindHint: String = "", unverified: Bool = false) {
         let clean = url.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty, clean.count < 2000 else { return }
         guard clean.lowercased().hasPrefix("http") else { return }
@@ -133,13 +133,15 @@ final class BrowserTab: ObservableObject, Identifiable {
         let host = URL(string: clean)?.host ?? ""
         // 脚本按返回类型认出来的清单，地址里可能没有后缀，优先用它的判断
         let kind = kindHint.isEmpty ? SniffedVideo.kind(of: clean) : kindHint
-        found.append(SniffedVideo(url: clean, host: host, kind: kind))
+        found.append(SniffedVideo(url: clean, host: host, kind: kind, unverified: unverified))
     }
 
-    /// 脚本报上来的地址如果没后缀、也没有类型提示，很可能是接口或页面。
-    /// 先问一下服务器它到底是什么，别把整页 HTML 当成视频播出去。
-    func acceptVideo(_ url: String, kindHint: String = "") {
-        if !kindHint.isEmpty || SniffURLValidator.hasMediaSuffix(url) {
+    /// 脚本报上来的地址按来源分级：
+    /// 播放器正在用的（element）、响应头认出来的（type）、带后缀的直链都算确认过；
+    /// 只有从接口文本里挖出来的（text）才需要问服务器，问不出来也先收下。
+    func acceptVideo(_ url: String, kindHint: String = "", source: String = "") {
+        if !kindHint.isEmpty || source == "element" || source == "type"
+            || SniffURLValidator.hasMediaSuffix(url) {
             addVideo(url, kindHint: kindHint)
             return
         }
@@ -147,8 +149,33 @@ final class BrowserTab: ObservableObject, Identifiable {
         Task { @MainActor [weak self] in
             guard let self else { return }
             let cookie = await self.cookieHeader(for: URL(string: url))
-            guard let verified = await SniffURLValidator.verify(url, referer: referer, cookie: cookie) else { return }
-            self.addVideo(verified.url, kindHint: verified.kind)
+            switch await SniffURLValidator.verify(url, referer: referer, cookie: cookie) {
+            case .video(let verified):
+                self.addVideo(verified.url, kindHint: verified.kind)
+            case .notVideo:
+                break
+            case .unknown:
+                // 403、超时、服务器不认 HEAD 都说明不了它不是视频，
+                // 宁可多一条让用户自己点，也别把真地址丢掉
+                self.addVideo(url, kindHint: "", unverified: true)
+            }
+        }
+    }
+
+    /// 注入脚本记下的「这一页发过的全部请求」，抓不到东西时用来定位
+    @MainActor
+    func pageRequests() async -> [String] {
+        let js = "JSON.stringify(window.__vlReqs||[])"
+        guard let value = try? await webView.evaluateJavaScript(js),
+              let raw = value as? String,
+              let data = raw.data(using: .utf8),
+              let list = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            return []
+        }
+        return list.compactMap { item in
+            guard let address = item["u"] as? String else { return nil }
+            let how = item["t"] as? String ?? ""
+            return how.isEmpty ? address : "[\(how)] \(address)"
         }
     }
 
@@ -484,19 +511,21 @@ final class TabCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScri
         }
         guard message.name == "videoSniffer" else { return }
 
-        // 新脚本发的是 {url, kind}；旧格式是纯字符串，两种都认
+        // 新脚本发的是 {url, kind, src}；旧格式是纯字符串，两种都认
         var address = ""
         var hint = ""
+        var source = ""
         if let text = message.body as? String {
             address = text
         } else if let body = message.body as? [String: Any] {
             address = body["url"] as? String ?? ""
             hint = body["kind"] as? String ?? ""
+            source = body["src"] as? String ?? ""
         }
         guard !address.isEmpty else { return }
 
         DispatchQueue.main.async {
-            self.tab.acceptVideo(address, kindHint: hint)
+            self.tab.acceptVideo(address, kindHint: hint, source: source)
         }
     }
 
@@ -754,22 +783,35 @@ enum SniffURLValidator {
         return ["m3u8", "mp4", "m4v", "mov", "webm", "flv", "mpd"].contains(ext)
     }
 
-    static func verify(_ raw: String, referer: String?, cookie: String?) async -> Verified? {
-        guard var comps = URLComponents(string: raw) else { return nil }
+    /// 校验结论分三种。只有「明确不是」才该丢，问不出来就交给用户判断——
+    /// 上一版把 403 和超时都当成「不是视频」，结果整页一条都不剩。
+    enum Verdict {
+        case video(Verified)
+        case notVideo
+        case unknown
+    }
+
+    static func verify(_ raw: String, referer: String?, cookie: String?) async -> Verdict {
+        guard var comps = URLComponents(string: raw) else { return .unknown }
         comps.fragment = nil
         guard let url = comps.url,
               let scheme = url.scheme?.lowercased(),
-              scheme == "http" || scheme == "https" else { return nil }
+              scheme == "http" || scheme == "https" else { return .notVideo }
 
-        if let reply = try? await send(url, method: "HEAD", referer: referer, cookie: cookie),
-           let ok = judge(url, reply, body: nil) {
-            return ok
+        if let reply = try? await send(url, method: "HEAD", referer: referer, cookie: cookie) {
+            // 类型说不清时再走一次 GET，别急着下结论
+            switch judge(url, reply, body: nil) {
+            case .unknown:
+                break
+            case let verdict:
+                return verdict
+            }
         }
         // HEAD 被拒、或不给类型时，只读前 2 KB，足够认出 #EXTM3U
         if let reply = try? await send(url, method: "GET", referer: referer, cookie: cookie, limit: 2048) {
             return judge(url, reply, body: reply.data)
         }
-        return nil
+        return .unknown
     }
 
     private static func send(_ url: URL,
@@ -807,8 +849,8 @@ enum SniffURLValidator {
         return Reply(response: http, data: data)
     }
 
-    private static func judge(_ original: URL, _ reply: Reply, body: Data?) -> Verified? {
-        guard (200..<400).contains(reply.response.statusCode) else { return nil }
+    private static func judge(_ original: URL, _ reply: Reply, body: Data?) -> Verdict {
+        guard (200..<400).contains(reply.response.statusCode) else { return .unknown }
         let final = reply.response.url ?? original
         let address = final.absoluteString
         let type = (reply.response.value(forHTTPHeaderField: "Content-Type") ?? "").lowercased()
@@ -820,26 +862,26 @@ enum SniffURLValidator {
                 .lowercased()
             if head.hasPrefix("<!doctype") || head.hasPrefix("<html")
                 || head.hasPrefix("{") || head.hasPrefix("[") {
-                return nil
+                return .notVideo
             }
-            if head.contains("#extm3u") { return Verified(url: address, kind: "HLS") }
-            if head.contains("<mpd") { return Verified(url: address, kind: "DASH") }
+            if head.contains("#extm3u") { return .video(Verified(url: address, kind: "HLS")) }
+            if head.contains("<mpd") { return .video(Verified(url: address, kind: "DASH")) }
         }
 
-        if type.contains("mpegurl") { return Verified(url: address, kind: "HLS") }
-        if type.contains("dash+xml") { return Verified(url: address, kind: "DASH") }
+        if type.contains("mpegurl") { return .video(Verified(url: address, kind: "HLS")) }
+        if type.contains("dash+xml") { return .video(Verified(url: address, kind: "DASH")) }
         if type.contains("text/html") || type.contains("json") || type.contains("image/")
             || type.contains("javascript") || type.contains("css") {
-            return nil
+            return .notVideo
         }
-        if type.contains("video/") { return Verified(url: address, kind: "MEDIA") }
+        if type.contains("video/") { return .video(Verified(url: address, kind: "MEDIA")) }
         if type.contains("octet-stream") {
             let length = Int64(reply.response.value(forHTTPHeaderField: "Content-Length") ?? "") ?? 0
             // 又小又没正文，先别信，等 GET 那段确认
-            if body == nil, length > 0, length < 2048 { return nil }
-            return Verified(url: address, kind: "MEDIA")
+            if body == nil, length > 0, length < 2048 { return .unknown }
+            return .video(Verified(url: address, kind: "MEDIA"))
         }
-        if hasMediaSuffix(address) { return Verified(url: address, kind: "") }
-        return nil
+        if hasMediaSuffix(address) { return .video(Verified(url: address, kind: "")) }
+        return .unknown
     }
 }

@@ -48,6 +48,8 @@ struct SniffedVideo: Identifiable, Hashable {
     let url: String
     let host: String
     let kind: String
+    /// 服务器没能确认（403 / 超时 / 不认 HEAD），但播放器确实在用它
+    var unverified: Bool = false
 
     var displayName: String {
         guard let u = URL(string: url) else { return url }

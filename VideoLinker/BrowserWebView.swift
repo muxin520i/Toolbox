@@ -26,13 +26,30 @@ enum BrowserInject {
         } catch (e) { return ''; }
       }
 
-      function post(u, kind) {
+      // 页面发过的全部请求，诊断用，只留最近 400 条
+      var reqs = [];
+      window.__vlReqs = reqs;
+      function note(u, how) {
+        try {
+          u = abs(u);
+          if (!u) { return; }
+          if (reqs.length > 400) { return; }
+          for (var i = 0; i < reqs.length; i++) { if (reqs[i].u === u) { return; } }
+          reqs.push({ u: u, t: how || '' });
+        } catch (e) {}
+      }
+
+      // src 说明地址是从哪发现的：element 最可信（播放器真的在用它），
+      // text 最不可信（可能只是接口 JSON 里的一句话），交给原生侧分级处理
+      function post(u, kind, src) {
         try {
           u = abs(u);
           if (!u || u.length > 4000) { return; }
-          if (posted[u]) { return; }
-          posted[u] = 1;
-          window.webkit.messageHandlers.videoSniffer.postMessage({ url: u, kind: kind || '' });
+          var key = u + '|' + (src || '');
+          if (posted[key]) { return; }
+          posted[key] = 1;
+          note(u, src);
+          window.webkit.messageHandlers.videoSniffer.postMessage({ url: u, kind: kind || '', src: src || '' });
         } catch (e) {}
       }
 
@@ -43,10 +60,26 @@ enum BrowserInject {
           if (!u) { return; }
           var s = u.split('#')[0];
           var p = s.split('?')[0].toLowerCase();
-          if (/\\.(m3u8|mp4|m4v|mov|webm|flv)$/.test(p)) { post(s, ''); return; }
-          if (/\\.mpd$/.test(p)) { post(s, 'DASH'); return; }
+          if (/\\.(m3u8|mp4|m4v|mov|webm|flv)$/.test(p)) { post(s, '', 'url'); return; }
+          if (/\\.mpd$/.test(p)) { post(s, 'DASH', 'url'); return; }
           // 路径里带 m3u8 但没后缀的，多半也是清单
-          if (p.indexOf('m3u8') >= 0) { post(s, 'HLS'); }
+          if (p.indexOf('m3u8') >= 0) { post(s, 'HLS', 'url'); }
+        } catch (e) {}
+      }
+
+      // 从接口文本里挖出来的地址：明显是图片 / 样式 / 脚本的先跳过，
+      // 剩下的都报给原生侧——那里能带 Referer 再问一次服务器
+      function byText(u) {
+        try {
+          u = abs(u);
+          if (!u) { return; }
+          var s = u.split('#')[0];
+          var p = s.split('?')[0].toLowerCase();
+          if (/\\.(jpe?g|png|gif|webp|avif|svg|ico|css|js|woff2?|ttf|otf|json|html?)$/.test(p)) { return; }
+          if (p.indexOf('m3u8') >= 0) { post(s, 'HLS', 'text'); return; }
+          if (/\\.(mp4|m4v|mov|webm|flv)$/.test(p)) { post(s, '', 'text'); return; }
+          if (/\\.mpd$/.test(p)) { post(s, 'DASH', 'text'); return; }
+          post(s, '', 'text');
         } catch (e) {}
       }
 
@@ -71,12 +104,12 @@ enum BrowserInject {
           var re = /https?:\\/\\/[^\\s"'<>\\\\]+/g;
           var m;
           while ((m = re.exec(t)) !== null && hits < 32) {
-            byURL(m[0]);
+            byText(m[0]);
             hits++;
           }
           var rel = /["'](\\/[^"'\\s<>\\\\]{2,300}?(?:m3u8|\\.mp4|\\.mpd|\\.m4v|\\.flv)(?:\\?[^"']*)?)["']/gi;
           while ((m = rel.exec(t)) !== null && hits < 48) {
-            try { byURL(new URL(m[1], base).href); } catch (e) {}
+            try { byText(new URL(m[1], base).href); } catch (e) {}
             hits++;
           }
         } catch (e) {}
@@ -87,12 +120,12 @@ enum BrowserInject {
         try {
           if (text) { scanText(u, text); }
           var kind = kindOfType(ct);
-          if (kind === 'HLS' || kind === 'DASH') { post(u, kind); return; }
-          if (kind === 'MEDIA') { post(u, ''); return; }
+          if (kind === 'HLS' || kind === 'DASH') { post(u, kind, 'type'); return; }
+          if (kind === 'MEDIA') { post(u, '', 'type'); return; }
           if (text && text.length > 8) {
             var head = text.slice(0, 64);
-            if (head.indexOf('#EXTM3U') >= 0) { post(u, 'HLS'); return; }
-            if (head.indexOf('<MPD') >= 0) { post(u, 'DASH'); }
+            if (head.indexOf('#EXTM3U') >= 0) { post(u, 'HLS', 'type'); return; }
+            if (head.indexOf('<MPD') >= 0) { post(u, 'DASH', 'type'); }
           }
         } catch (e) {}
       }
@@ -105,9 +138,10 @@ enum BrowserInject {
           if (!u || typeof u !== 'string') { return; }
           if (/^blob:/i.test(u)) { return; }
           if (!/^https?:/i.test(u)) { return; }
-          if (/\\.(m3u8|mp4|m4v|mov|webm|flv|mpd)(\\?|#|$)/i.test(u)) { post(u, ''); return; }
+          // 播放器真的在用这个地址，可信度最高：不再做 HEAD 校验，直接收
+          if (/\\.(m3u8|mp4|m4v|mov|webm|flv|mpd)(\\?|#|$)/i.test(u)) { post(u, '', 'element'); return; }
           var host = el.tagName === 'SOURCE' ? el.parentElement : el;
-          if (host && (host.readyState > 0 || host.videoWidth > 0)) { post(u, ''); }
+          if (host && (host.readyState > 0 || host.videoWidth > 0)) { post(u, '', 'element'); }
         } catch (e) {}
       }
 
@@ -281,12 +315,14 @@ enum BrowserInject {
         window.fetch = function(input, init) {
           var asked = '';
           try { asked = typeof input === 'string' ? input : (input && input.url) || ''; } catch (e) {}
+          note(asked, 'fetch');
           byURL(asked);
           var promise = origFetch.apply(this, arguments);
           try {
             promise.then(function(res) {
               try {
                 var finalURL = (res && res.url) || asked;
+                note(finalURL, 'fetch');
                 byURL(finalURL);
                 var ct = (res.headers && res.headers.get('content-type')) || '';
                 if (kindOfType(ct)) { inspect(finalURL, ct, ''); return; }
@@ -312,6 +348,7 @@ enum BrowserInject {
       XMLHttpRequest.prototype.open = function(method, url) {
         try {
           this.__vlURL = typeof url === 'string' ? url : '';
+          note(this.__vlURL, 'xhr');
           byURL(this.__vlURL);
         } catch (e) {}
         return origOpen.apply(this, arguments);
@@ -324,6 +361,7 @@ enum BrowserInject {
           xhr.addEventListener('load', function() {
             try {
               var u = xhr.responseURL || xhr.__vlURL || '';
+              note(u, 'xhr');
               byURL(u);
               var ct = '';
               try { ct = xhr.getResponseHeader('content-type') || ''; } catch (e) {}
@@ -334,6 +372,19 @@ enum BrowserInject {
                 if (text.length < 1048576 && /json|text\\/|xml/i.test(ct)) { inspect(u, ct, text); }
               } else if (type === 'json' && xhr.response) {
                 try { inspect(u, ct, JSON.stringify(xhr.response)); } catch (e) {}
+              } else if (type === 'arraybuffer') {
+                // hls.js / shaka 取清单常走 arraybuffer，类型头又给个 octet-stream，
+                // 只能自己看开头几个字节
+                try {
+                  var buf = xhr.response;
+                  if (buf && buf.byteLength > 8 && buf.byteLength < 262144) {
+                    var head = new Uint8Array(buf, 0, Math.min(80, buf.byteLength));
+                    var txt = '';
+                    for (var i = 0; i < head.length; i++) { txt += String.fromCharCode(head[i]); }
+                    if (txt.indexOf('#EXTM3U') >= 0) { post(u, 'HLS', 'type'); return; }
+                    if (txt.indexOf('<MPD') >= 0) { post(u, 'DASH', 'type'); return; }
+                  }
+                } catch (e) {}
               }
             } catch (e) {}
           });
@@ -345,7 +396,10 @@ enum BrowserInject {
       setInterval(function() {
         try {
           var list = performance.getEntriesByType('resource');
-          for (var i = 0; i < list.length; i++) { byURL(list[i].name); }
+          for (var i = 0; i < list.length; i++) {
+            note(list[i].name, 'net');
+            byURL(list[i].name);
+          }
         } catch (e) {}
       }, 3000);
     })();
