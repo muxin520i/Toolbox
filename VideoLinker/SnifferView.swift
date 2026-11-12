@@ -1024,9 +1024,24 @@ struct BrowserView: View {
 
     private func play(_ video: SniffedVideo) {
         guard let url = URL(string: video.url) else { return }
+        let page = tab?.urlString
+        let browser = tab
         sheet = nil
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.32) {
-            request = PlayRequest(url: url)
+        Task { @MainActor in
+            // 带上页面的 Referer 与登录态：不少站的源离开页面就会给错片
+            let cookie = await browser?.cookieHeader(for: url)
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            if page == nil, cookie == nil {
+                request = PlayRequest(url: url)
+            } else {
+                request = PlayRequest(
+                    items: [PlaybackItem(url: video.url,
+                                         title: video.displayName,
+                                         referer: page,
+                                         cookie: cookie)],
+                    startIndex: 0
+                )
+            }
         }
     }
 

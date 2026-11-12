@@ -136,11 +136,45 @@ final class BrowserTab: ObservableObject, Identifiable {
         found.append(SniffedVideo(url: clean, host: host, kind: kind))
     }
 
+    /// 脚本报上来的地址如果没后缀、也没有类型提示，很可能是接口或页面。
+    /// 先问一下服务器它到底是什么，别把整页 HTML 当成视频播出去。
+    func acceptVideo(_ url: String, kindHint: String = "") {
+        if !kindHint.isEmpty || SniffURLValidator.hasMediaSuffix(url) {
+            addVideo(url, kindHint: kindHint)
+            return
+        }
+        let referer = urlString
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let cookie = await self.cookieHeader(for: URL(string: url))
+            guard let verified = await SniffURLValidator.verify(url, referer: referer, cookie: cookie) else { return }
+            self.addVideo(verified.url, kindHint: verified.kind)
+        }
+    }
+
+    /// 播放/校验时带上页面登录态：有些站的清单地址要 Cookie 才给正确的片源
+    @MainActor
+    func cookieHeader(for url: URL?) async -> String? {
+        guard let url, let host = url.host?.lowercased(), !host.isEmpty else { return nil }
+        let store = webView.configuration.websiteDataStore.httpCookieStore
+        let cookies = await store.allCookies()
+        let now = Date()
+        let matched = cookies.filter { cookie in
+            if let expires = cookie.expiresDate, expires < now { return false }
+            let domain = cookie.domain.lowercased()
+                .trimmingCharacters(in: CharacterSet(charactersIn: "."))
+            return !domain.isEmpty && (host == domain || host.hasSuffix("." + domain))
+        }
+        guard !matched.isEmpty else { return nil }
+        return matched.map { "\($0.name)=\($0.value)" }.joined(separator: "; ")
+    }
+
     func addImage(_ url: String, width: Int, height: Int) {
         let clean = url.trimmingCharacters(in: .whitespacesAndNewlines)
         guard clean.count > 8, clean.count < 2000 else { return }
         guard clean.lowercased().hasPrefix("http") else { return }
-        guard images.count < 80 else { return }
+        // 图集站一条帖子几十上百张，80 张明显不够；上限放宽到 600，边滑边补
+        guard images.count < 600 else { return }
         guard !images.contains(where: { $0.url == clean }) else { return }
         let host = URL(string: clean)?.host ?? ""
         images.append(SniffedImage(url: clean, host: host, width: width, height: height))
@@ -462,7 +496,7 @@ final class TabCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScri
         guard !address.isEmpty else { return }
 
         DispatchQueue.main.async {
-            self.tab.addVideo(address, kindHint: hint)
+            self.tab.acceptVideo(address, kindHint: hint)
         }
     }
 
@@ -695,5 +729,117 @@ final class TabCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScri
             controller = presented
         }
         return controller
+    }
+}
+
+// MARK: - 嗅探地址校验
+
+/// 脚本只能看到「这个地址塞进了 video」，看不到它到底是视频还是页面。
+/// 这里补一次轻量请求：按返回头 / 开头几十字节判断，顺便把重定向后的真实地址取回来。
+enum SniffURLValidator {
+
+    struct Verified {
+        let url: String
+        let kind: String
+    }
+
+    private struct Reply {
+        let response: HTTPURLResponse
+        let data: Data
+    }
+
+    static func hasMediaSuffix(_ raw: String) -> Bool {
+        guard let url = URL(string: raw) else { return false }
+        let ext = url.pathExtension.lowercased()
+        return ["m3u8", "mp4", "m4v", "mov", "webm", "flv", "mpd"].contains(ext)
+    }
+
+    static func verify(_ raw: String, referer: String?, cookie: String?) async -> Verified? {
+        guard var comps = URLComponents(string: raw) else { return nil }
+        comps.fragment = nil
+        guard let url = comps.url,
+              let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https" else { return nil }
+
+        if let reply = try? await send(url, method: "HEAD", referer: referer, cookie: cookie),
+           let ok = judge(url, reply, body: nil) {
+            return ok
+        }
+        // HEAD 被拒、或不给类型时，只读前 2 KB，足够认出 #EXTM3U
+        if let reply = try? await send(url, method: "GET", referer: referer, cookie: cookie, limit: 2048) {
+            return judge(url, reply, body: reply.data)
+        }
+        return nil
+    }
+
+    private static func send(_ url: URL,
+                             method: String,
+                             referer: String?,
+                             cookie: String?,
+                             limit: Int = 0) async throws -> Reply {
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.timeoutInterval = 6
+        request.setValue(HLSDownloader.userAgent, forHTTPHeaderField: "User-Agent")
+        if let referer, !referer.isEmpty, URL(string: referer)?.host != nil {
+            request.setValue(referer, forHTTPHeaderField: "Referer")
+        }
+        if let cookie, !cookie.isEmpty {
+            request.setValue(cookie, forHTTPHeaderField: "Cookie")
+        }
+        if limit > 0 {
+            request.setValue("bytes=0-\(limit - 1)", forHTTPHeaderField: "Range")
+        }
+
+        if method == "HEAD" {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+            return Reply(response: http, data: Data())
+        }
+
+        let (bytes, response) = try await URLSession.shared.bytes(for: request)
+        guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+        var data = Data()
+        for try await byte in bytes {
+            data.append(byte)
+            if data.count >= limit { break }
+        }
+        return Reply(response: http, data: data)
+    }
+
+    private static func judge(_ original: URL, _ reply: Reply, body: Data?) -> Verified? {
+        guard (200..<400).contains(reply.response.statusCode) else { return nil }
+        let final = reply.response.url ?? original
+        let address = final.absoluteString
+        let type = (reply.response.value(forHTTPHeaderField: "Content-Type") ?? "").lowercased()
+
+        // 先看正文开头：错误页、JSON、HTML 一律不算视频
+        if let body, !body.isEmpty {
+            let head = String(decoding: body.prefix(800), as: UTF8.self)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+            if head.hasPrefix("<!doctype") || head.hasPrefix("<html")
+                || head.hasPrefix("{") || head.hasPrefix("[") {
+                return nil
+            }
+            if head.contains("#extm3u") { return Verified(url: address, kind: "HLS") }
+            if head.contains("<mpd") { return Verified(url: address, kind: "DASH") }
+        }
+
+        if type.contains("mpegurl") { return Verified(url: address, kind: "HLS") }
+        if type.contains("dash+xml") { return Verified(url: address, kind: "DASH") }
+        if type.contains("text/html") || type.contains("json") || type.contains("image/")
+            || type.contains("javascript") || type.contains("css") {
+            return nil
+        }
+        if type.contains("video/") { return Verified(url: address, kind: "MEDIA") }
+        if type.contains("octet-stream") {
+            let length = Int64(reply.response.value(forHTTPHeaderField: "Content-Length") ?? "") ?? 0
+            // 又小又没正文，先别信，等 GET 那段确认
+            if body == nil, length > 0, length < 2048 { return nil }
+            return Verified(url: address, kind: "MEDIA")
+        }
+        if hasMediaSuffix(address) { return Verified(url: address, kind: "") }
+        return nil
     }
 }

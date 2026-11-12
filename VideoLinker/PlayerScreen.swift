@@ -14,6 +14,9 @@ struct PlaybackItem: Identifiable, Hashable {
     let title: String?
     /// WebDAV 这类需要认证的源，传 "用户名:密码"，播放器自己转成请求头
     var credential: String? = nil
+    /// 从浏览器里直接播时带上页面地址和登录态：防盗链站点才肯给对的片源
+    var referer: String? = nil
+    var cookie: String? = nil
 }
 
 /// 一次播放请求：单条链接，或者一个带起始位置的队列
@@ -137,6 +140,14 @@ struct PlayerScreen: View {
 
     private var currentItem: PlaybackItem? {
         request.items.indices.contains(index) ? request.items[index] : nil
+    }
+
+    /// 页面带来的 Referer / Cookie，交给 AVPlayer 与 VLC 两条路
+    private var currentExtraHeaders: [String: String] {
+        var extra: [String: String] = [:]
+        if let referer = currentItem?.referer, !referer.isEmpty { extra["Referer"] = referer }
+        if let cookie = currentItem?.cookie, !cookie.isEmpty { extra["Cookie"] = cookie }
+        return extra
     }
 
     private var currentURL: URL? {
@@ -1300,6 +1311,7 @@ struct PlayerScreen: View {
             model.rate = currentRate
             model.load(url, startAt: startAt,
                        credential: currentItem?.credential,
+                       extra: currentExtraHeaders,
                        forceVLC: AudioSyncStore.offset() != 0)
             if let saved = startAt {
                 showHint("从上次的 \(Fmt.time(saved)) 继续")
@@ -1328,6 +1340,7 @@ struct PlayerScreen: View {
         let position = model.currentTime
         model.load(url, startAt: position,
                    credential: currentItem?.credential,
+                   extra: currentExtraHeaders,
                    forceVLC: AudioSyncStore.offset() != 0)
     }
 
@@ -1857,7 +1870,8 @@ final class PlayerModel: ObservableObject {
         }
     }
 
-    func load(_ url: URL, startAt: Double? = nil, credential: String? = nil, forceVLC: Bool = false) {
+    func load(_ url: URL, startAt: Double? = nil, credential: String? = nil,
+              extra: [String: String] = [:], forceVLC: Bool = false) {
         configureAudioSession()
 
         teardownVLC()
@@ -1868,16 +1882,16 @@ final class PlayerModel: ObservableObject {
         // 设了音画偏移也一样：系统播放器没有延迟接口，只能走 VLC
         if VLCPlayback.isAvailable,
            (forceVLC || Self.vlcOnlyExtensions.contains(url.pathExtension.lowercased())) {
-            startVLC(url: url, startAt: startAt, credential: credential)
+            startVLC(url: url, startAt: startAt, credential: credential, extra: extra)
             return
         }
 
-        let item = AVPlayerItem(asset: Self.makeAsset(url: url, credential: credential))
+        let item = AVPlayerItem(asset: Self.makeAsset(url: url, credential: credential, extra: extra))
         item.preferredForwardBufferDuration = 4
 
         player.removeAllItems()
         player.insert(item, after: nil)
-        bind(item, url: url, credential: credential)
+        bind(item, url: url, credential: credential, extra: extra)
 
         player.play()
         player.rate = Float(rate)
@@ -1885,7 +1899,7 @@ final class PlayerModel: ObservableObject {
         let workItem = DispatchWorkItem { [weak self] in
             guard let self = self, self.isLoading else { return }
             // 超时不直接判死，VLC 对某些流更宽容
-            self.switchToVLC(url: url, startAt: self.pendingSeek, credential: credential)
+            self.switchToVLC(url: url, startAt: self.pendingSeek, credential: credential, extra: extra)
         }
         timeoutWorkItem = workItem
         DispatchQueue.main.asyncAfter(deadline: .now() + 20, execute: workItem)
@@ -1895,8 +1909,8 @@ final class PlayerModel: ObservableObject {
     /// AVPlayer 请求主文件和各分片时都会带上。
     /// 防盗链站点同理：Referer / Cookie / UA 由 HTTPHeaderStore 统一给，
     /// 这里只负责把它们塞进 AVURLAsset 的私有头字段。
-    private static func makeAsset(url: URL, credential: String?) -> AVURLAsset {
-        var extra: [String: String] = [:]
+    private static func makeAsset(url: URL, credential: String?, extra: [String: String] = [:]) -> AVURLAsset {
+        var extra = extra
         if let credential, !credential.isEmpty {
             extra["Authorization"] = "Basic " + Data(credential.utf8).base64EncodedString()
         }
@@ -1929,7 +1943,8 @@ final class PlayerModel: ObservableObject {
     }
 
     /// 把状态观察和结束通知挂到当前这条上
-    private func bind(_ item: AVPlayerItem, url: URL, credential: String?) {
+    private func bind(_ item: AVPlayerItem, url: URL, credential: String?,
+                      extra: [String: String] = [:]) {
         statusObserver?.invalidate()
         removeEndObserver()
 
@@ -1953,7 +1968,7 @@ final class PlayerModel: ObservableObject {
                         print("AVPlayer failed:", failureReason!.localizedDescription)
                     }
                     // 系统播放器不认这个容器，换 VLC 再试一次
-                    self.switchToVLC(url: url, startAt: self.pendingSeek, credential: credential)
+                    self.switchToVLC(url: url, startAt: self.pendingSeek, credential: credential, extra: extra)
                 default:
                     break
                 }
@@ -2140,7 +2155,8 @@ final class PlayerModel: ObservableObject {
         "m2ts", "mts", "ts", "mpg", "mpeg", "ogv", "3gp", "asf", "vob", "f4v"
     ]
 
-    private func switchToVLC(url: URL, startAt: Double?, credential: String? = nil) {
+    private func switchToVLC(url: URL, startAt: Double?, credential: String? = nil,
+                             extra: [String: String] = [:]) {
         guard VLCPlayback.isAvailable else {
             isLoading = false
             errorMessage = "视频格式不受支持，或链接不是可直接播放的媒体地址。"
@@ -2156,10 +2172,11 @@ final class PlayerModel: ObservableObject {
         statusObserver = nil
         player.pause()
         player.removeAllItems()
-        startVLC(url: url, startAt: startAt, credential: credential)
+        startVLC(url: url, startAt: startAt, credential: credential, extra: extra)
     }
 
-    private func startVLC(url: URL, startAt: Double?, credential: String? = nil) {
+    private func startVLC(url: URL, startAt: Double?, credential: String? = nil,
+                          extra: [String: String] = [:]) {
         isLoading = true
         errorMessage = nil
         duration = 0
@@ -2195,7 +2212,7 @@ final class PlayerModel: ObservableObject {
 
         vlcEngine = engine
         usingVLC = true
-        engine.load(url, rate: rate, startAt: startAt, credential: credential)
+        engine.load(url, rate: rate, startAt: startAt, credential: credential, extra: extra)
     }
 
     private func teardownVLC() {

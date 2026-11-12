@@ -26,7 +26,8 @@ final class VLCPlayback: NSObject, VLCMediaPlayerDelegate {
 
     private var pendingSeek: Double?
 
-    func load(_ url: URL, rate: Double, startAt: Double?, credential: String? = nil) {
+    func load(_ url: URL, rate: Double, startAt: Double?, credential: String? = nil,
+              extra: [String: String] = [:]) {
         stop()
 
         let engine = VLCMediaPlayer()
@@ -45,7 +46,8 @@ final class VLCPlayback: NSObject, VLCMediaPlayerDelegate {
 
         // 防盗链：AVPlayer 那条路靠 AVURLAsset 的私有头字段，
         // VLC 走自己的 HTTP 模块，得逐项转成它的 option
-        let headers = HTTPHeaderStore.headers(for: url)
+        var headers = HTTPHeaderStore.headers(for: url)
+        for (key, value) in extra where !value.isEmpty { headers[key] = value }
         if let referer = headers["Referer"], !referer.isEmpty {
             media.addOption(":http-referrer=\(referer)")
         }
@@ -181,7 +183,8 @@ final class VLCPlayback {
     var onEnded: (() -> Void)?
     var onFailed: ((String) -> Void)?
 
-    func load(_ url: URL, rate: Double, startAt: Double?, credential: String? = nil) {}
+    func load(_ url: URL, rate: Double, startAt: Double?, credential: String? = nil,
+              extra: [String: String] = [:]) {}
     func play() {}
     func pause() {}
     func togglePlay() {}

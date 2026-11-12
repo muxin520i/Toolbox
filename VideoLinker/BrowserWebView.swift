@@ -13,11 +13,23 @@ enum BrowserInject {
 
       var posted = {};
 
+      // 相对地址、协议相对地址都补全；blob / data 不是能下载的链接
+      function abs(u) {
+        try {
+          if (!u || typeof u !== 'string') { return ''; }
+          u = u.trim();
+          if (!u) { return ''; }
+          if (/^(blob|data|javascript|about|mailto):/i.test(u)) { return ''; }
+          var a = new URL(u, location.href);
+          if (a.protocol !== 'http:' && a.protocol !== 'https:') { return ''; }
+          return a.href;
+        } catch (e) { return ''; }
+      }
+
       function post(u, kind) {
         try {
-          if (!u || typeof u !== 'string') { return; }
-          if (u.length > 4000) { return; }
-          if (!/^https?:/i.test(u)) { return; }
+          u = abs(u);
+          if (!u || u.length > 4000) { return; }
           if (posted[u]) { return; }
           posted[u] = 1;
           window.webkit.messageHandlers.videoSniffer.postMessage({ url: u, kind: kind || '' });
@@ -27,8 +39,8 @@ enum BrowserInject {
       // 只凭地址就能认出来的：直链和清单
       function byURL(u) {
         try {
-          if (!u || typeof u !== 'string') { return; }
-          if (!/^https?:/i.test(u)) { return; }
+          u = abs(u);
+          if (!u) { return; }
           var s = u.split('#')[0];
           var p = s.split('?')[0].toLowerCase();
           if (/\\.(m3u8|mp4|m4v|mov|webm|flv)$/.test(p)) { post(s, ''); return; }
@@ -46,9 +58,34 @@ enum BrowserInject {
         return '';
       }
 
+      // 接口返回的 JSON 里常常直接写着播放地址（还可能是转义过的、相对路径的），
+      // 只认 Content-Type 会漏掉一大半，这里把整段文本里的媒体链接捞出来
+      function scanText(base, text) {
+        try {
+          if (!text || text.length < 8 || text.length > 600000) { return; }
+          var t = text.split('\\\\/').join('/')
+            .replace(/\\\\u002f/gi, '/')
+            .replace(/\\\\u003a/gi, ':')
+            .replace(/&amp;/g, '&');
+          var hits = 0;
+          var re = /https?:\\/\\/[^\\s"'<>\\\\]+/g;
+          var m;
+          while ((m = re.exec(t)) !== null && hits < 32) {
+            byURL(m[0]);
+            hits++;
+          }
+          var rel = /["'](\\/[^"'\\s<>\\\\]{2,300}?(?:m3u8|\\.mp4|\\.mpd|\\.m4v|\\.flv)(?:\\?[^"']*)?)["']/gi;
+          while ((m = rel.exec(t)) !== null && hits < 48) {
+            try { byURL(new URL(m[1], base).href); } catch (e) {}
+            hits++;
+          }
+        } catch (e) {}
+      }
+
       // 有的站点把播放地址藏在没后缀的接口里，只能看返回头或前几十个字节
       function inspect(u, ct, text) {
         try {
+          if (text) { scanText(u, text); }
           var kind = kindOfType(ct);
           if (kind === 'HLS' || kind === 'DASH') { post(u, kind); return; }
           if (kind === 'MEDIA') { post(u, ''); return; }
@@ -101,13 +138,20 @@ enum BrowserInject {
         scanImages();
       }
 
+      var sentImages = {};
+
       function sendImage(u, w, h) {
         try {
-          if (!u || typeof u !== 'string') { return; }
-          if (!/^https?:/i.test(u)) { return; }
-          if (u.length > 2000) { return; }
+          u = abs(u);
+          if (!u || u.length > 2000) { return; }
+          if (sentImages[u]) { return; }
+          sentImages[u] = 1;
           window.webkit.messageHandlers.imageSniffer.postMessage({ url: u, width: w || 0, height: h || 0 });
         } catch (e) {}
+      }
+
+      function attr(el, name) {
+        try { return el.getAttribute(name) || ''; } catch (e) { return ''; }
       }
 
       // srcset 里挑最大的那张，图集站常常 1x / 2x 各一份
@@ -135,6 +179,32 @@ enum BrowserInject {
         } catch (e) { return ''; }
       }
 
+      // 同一张图可能同时有占位图、懒加载地址、srcset、原图属性，按优先级挑真的那个
+      function pickImage(el) {
+        var list = [];
+        try {
+          list.push(bestFromSrcset(el));
+          list.push(el.currentSrc);
+          list.push(el.src);
+          var attrs = ['data-src', 'data-original', 'data-lazy-src', 'data-url',
+                       'data-echo', 'data-actualsrc', 'data-lazyload'];
+          for (var i = 0; i < attrs.length; i++) { list.push(attr(el, attrs[i])); }
+          var pic = el.parentElement;
+          if (pic && pic.tagName === 'PICTURE') {
+            var srcs = pic.querySelectorAll('source');
+            for (var j = 0; j < srcs.length; j++) {
+              list.push(bestFromSrcset(srcs[j]));
+              list.push(attr(srcs[j], 'src'));
+            }
+          }
+        } catch (e) {}
+        for (var k = 0; k < list.length; k++) {
+          var a = abs(list[k]);
+          if (a) { return a; }
+        }
+        return '';
+      }
+
       function scanImages() {
         try {
           var imgs = document.querySelectorAll('img');
@@ -142,10 +212,11 @@ enum BrowserInject {
             var el = imgs[i];
             var w = el.naturalWidth || 0;
             var h = el.naturalHeight || 0;
-            // 已知尺寸的小图多半是图标 / 表情
-            if (w && h && (w < 220 || h < 220)) { continue; }
-            var u = bestFromSrcset(el) || el.currentSrc || el.src
-              || el.getAttribute('data-src') || el.getAttribute('data-original') || '';
+            var u = pickImage(el);
+            if (!u) { continue; }
+            var bigger = attr(el, 'data-src') || attr(el, 'data-original') || attr(el, 'data-lazy-src');
+            // 已知尺寸特别小的多半是图标 / 表情；挂着原图地址的另算
+            if (w && h && (w < 140 || h < 140) && !bigger) { continue; }
             sendImage(u, w, h);
           }
 
@@ -161,6 +232,25 @@ enum BrowserInject {
           for (var k = 0; k < metas.length; k++) {
             sendImage(metas[k].getAttribute('content') || '', 0, 0);
           }
+
+          // 背景图 / 懒加载占位
+          var bgs = document.querySelectorAll('[style*="background-image"], [data-bg], [data-background-image]');
+          var limit = Math.min(bgs.length, 300);
+          for (var b = 0; b < limit; b++) {
+            var node = bgs[b];
+            var raw = attr(node, 'data-bg') || attr(node, 'data-background-image');
+            if (!raw) {
+              var bg = '';
+              try { bg = node.style.backgroundImage || ''; } catch (e) {}
+              var mm = bg.match(/url\\(["']?(.*?)["']?\\)/);
+              raw = mm ? mm[1] : '';
+            }
+            if (!raw) { continue; }
+            var cw = node.clientWidth || 0;
+            var ch = node.clientHeight || 0;
+            if (cw && ch && (cw < 160 || ch < 160)) { continue; }
+            sendImage(raw, cw, ch);
+          }
         } catch (e) {}
       }
 
@@ -169,12 +259,20 @@ enum BrowserInject {
       scan();
       setInterval(scan, 2000);
 
+      // 往下滑才加载的图，滑完立刻补一遍；只认 http(s)，不会冒出一堆 base64
+      var scrollTimer = null;
+      window.addEventListener('scroll', function() {
+        if (scrollTimer) { return; }
+        scrollTimer = setTimeout(function() { scrollTimer = null; scanImages(); }, 500);
+      }, true);
+      window.addEventListener('resize', function() { scanImages(); });
+
       try {
         new MutationObserver(scan).observe(document.documentElement, {
           childList: true,
           subtree: true,
           attributes: true,
-          attributeFilter: ['src']
+          attributeFilter: ['src', 'srcset', 'data-src', 'data-original', 'style']
         });
       } catch (e) {}
 
@@ -192,9 +290,15 @@ enum BrowserInject {
                 byURL(finalURL);
                 var ct = (res.headers && res.headers.get('content-type')) || '';
                 if (kindOfType(ct)) { inspect(finalURL, ct, ''); return; }
-                // 没有明确类型时只偷看小响应，别把视频本体读进内存
+                // 接口返回的 JSON 里可能就写着播放地址；文本类响应才读，
+                // 视频本体一律不碰，避免把几百兆读进内存
+                var texty = /json|text\\/plain|text\\/html|xml/i.test(ct);
                 var len = parseInt((res.headers && res.headers.get('content-length')) || '0', 10);
-                if (len && len < 262144) {
+                if (texty && (!len || len < 1048576)) {
+                  res.clone().text().then(function(t) {
+                    if (t && t.length < 1048576) { inspect(finalURL, ct, t); }
+                  }).catch(function() {});
+                } else if (len && len < 262144) {
                   res.clone().text().then(function(t) { inspect(finalURL, ct, t); }).catch(function() {});
                 }
               } catch (e) {}
@@ -227,7 +331,9 @@ enum BrowserInject {
               var type = xhr.responseType;
               if ((type === '' || type === 'text') && typeof xhr.responseText === 'string') {
                 var text = xhr.responseText;
-                if (text.length < 262144) { inspect(u, ct, text); }
+                if (text.length < 1048576 && /json|text\\/|xml/i.test(ct)) { inspect(u, ct, text); }
+              } else if (type === 'json' && xhr.response) {
+                try { inspect(u, ct, JSON.stringify(xhr.response)); } catch (e) {}
               }
             } catch (e) {}
           });
