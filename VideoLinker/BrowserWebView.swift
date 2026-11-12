@@ -75,7 +75,7 @@ enum BrowserInject {
           if (!u) { return; }
           var s = u.split('#')[0];
           var p = s.split('?')[0].toLowerCase();
-          if (/\\.(jpe?g|png|gif|webp|avif|svg|ico|css|js|woff2?|ttf|otf|json|html?)$/.test(p)) { return; }
+          if (/\\.(jpe?g|png|gif|webp|avif|svg|ico|css|js|woff2?|ttf|otf|json|html?|vtt|srt|ass)$/.test(p)) { return; }
           if (p.indexOf('m3u8') >= 0) { post(s, 'HLS', 'text'); return; }
           if (/\\.(mp4|m4v|mov|webm|flv)$/.test(p)) { post(s, '', 'text'); return; }
           if (/\\.mpd$/.test(p)) { post(s, 'DASH', 'text'); return; }
@@ -111,6 +111,28 @@ enum BrowserInject {
           while ((m = rel.exec(t)) !== null && hits < 48) {
             try { byText(new URL(m[1], base).href); } catch (e) {}
             hits++;
+          }
+          scanJSON(base, t);
+        } catch (e) {}
+      }
+
+      // 不少接口的字段就叫 videoUrl / playUrl / hls，值里的地址没有 .m3u8 后缀，
+      // 甚至只是相对路径。这类只靠「像链接」判断不出来，得看字段名
+      function scanJSON(base, text) {
+        try {
+          if (!text || text.length > 600000) { return; }
+          var re = /"([A-Za-z0-9_\\-]{2,28})"\\s*:\\s*"([^"\\\\]{6,600})"/g;
+          var m, n = 0;
+          while ((m = re.exec(text)) !== null && n < 24) {
+            var k = m[1].toLowerCase();
+            if (!/(url|src|play|video|hls|stream|manifest|m3u8|file|path|link)/.test(k)) { continue; }
+            var v = m[2].split('\\\\/').join('/')
+              .replace(/\\\\u002f/gi, '/')
+              .replace(/\\\\u003a/gi, ':');
+            if (/^(blob|data|javascript|about):/i.test(v)) { continue; }
+            if (v.charAt(0) !== '/' && !/^https?:/i.test(v)) { continue; }
+            try { byText(new URL(v, base).href); } catch (e) {}
+            n++;
           }
         } catch (e) {}
       }
@@ -196,7 +218,22 @@ enum BrowserInject {
           // 自绘播放器可能把 video 关在 shadow DOM 里，document 查不到
           if (nodes.length === 0) { scanShadow(document); }
         } catch (e) {}
+        scanInlineScripts();
         scanImages();
+      }
+
+      // SSR 会把首屏数据直接内联在 script 里，播放地址可能就在其中
+      var inlineScanned = false;
+      function scanInlineScripts() {
+        if (inlineScanned) { return; }
+        inlineScanned = true;
+        try {
+          var list = document.querySelectorAll('script:not([src])');
+          for (var i = 0; i < list.length && i < 60; i++) {
+            var t = list[i].textContent || '';
+            if (t.length > 16 && t.length < 400000) { scanText(location.href, t); }
+          }
+        } catch (e) {}
       }
 
       var sentImages = {};
@@ -335,6 +372,79 @@ enum BrowserInject {
           attributes: true,
           attributeFilter: ['src', 'srcset', 'data-src', 'data-original', 'style']
         });
+      } catch (e) {}
+
+      // 有的站把播放地址 base64 混淆后放进接口，页面自己解密再交给播放器。
+      // 这类地址既不产生可识别的请求、也不进 DOM，只能盯住解密过程。
+      // 一般的套路是 atob 完再做一次整体位移，最后 JSON.parse 出明文
+      function mostlyPrintable(s) {
+        try {
+          var n = Math.min(s.length, 200), ok = 0;
+          for (var i = 0; i < n; i++) {
+            var c = s.charCodeAt(i);
+            if (c >= 32 && c < 127) { ok++; }
+          }
+          return n > 0 && ok / n > 0.6;
+        } catch (e) { return false; }
+      }
+
+      function tryShifted(s) {
+        try {
+          if (!s || s.length < 24 || s.length > 300000 || !mostlyPrintable(s)) { return; }
+          if (s.indexOf('http') >= 0 || s.indexOf('{') >= 0) { return; }
+          for (var k = 1; k <= 64; k++) {
+            var head = '';
+            for (var i = 0; i < Math.min(24, s.length); i++) {
+              head += String.fromCharCode(s.charCodeAt(i) - k);
+            }
+            if (head.indexOf('{') < 0 && head.indexOf('http') < 0) { continue; }
+            var out = '';
+            for (var j = 0; j < s.length; j++) { out += String.fromCharCode(s.charCodeAt(j) - k); }
+            if (out.indexOf('http') >= 0 || out.indexOf('m3u8') >= 0 || out.indexOf('hls') >= 0) {
+              scanText(location.href, out);
+            }
+            return;
+          }
+        } catch (e) {}
+      }
+
+      try {
+        var origAtob = window.atob;
+        if (origAtob) {
+          var seenAtob = {};
+          window.atob = function(s) {
+            var out = origAtob.apply(window, arguments);
+            try {
+              if (typeof out === 'string' && out.length > 16 && out.length < 300000) {
+                var key = out.slice(0, 64);
+                if (!seenAtob[key]) {
+                  seenAtob[key] = 1;
+                  if (out.indexOf('http') >= 0 || out.indexOf('hls') >= 0 || out.indexOf('{') >= 0) {
+                    scanText(location.href, out);
+                  }
+                  tryShifted(out);
+                }
+              }
+            } catch (e) {}
+            return out;
+          };
+        }
+      } catch (e) {}
+
+      // 解密后一般会 JSON.parse 一次，这里拿到的是明文，比猜编码可靠得多
+      try {
+        var origParse = JSON.parse;
+        if (origParse) {
+          JSON.parse = function(text, reviver) {
+            try {
+              if (typeof text === 'string' && text.length > 16 && text.length < 400000
+                  && (text.indexOf('http') >= 0 || text.indexOf('Url') >= 0 || text.indexOf('hls') >= 0)) {
+                scanText(location.href, text);
+              }
+            } catch (e) {}
+            return origParse.apply(JSON, arguments);
+          };
+        }
       } catch (e) {}
 
       var origFetch = window.fetch;

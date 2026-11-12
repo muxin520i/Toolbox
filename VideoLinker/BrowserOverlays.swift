@@ -996,7 +996,7 @@ struct SniffResultsPanel: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("页面请求")
                             .font(.system(size: 14, weight: .semibold))
-                        Text("共 \(requests.count) 条，看有没有 m3u8 / mp4")
+                        Text("共 \(requests.count) 条 · 带 m3u8 / mp4 的才是视频")
                             .font(.system(size: 10.5))
                             .foregroundStyle(.secondary)
                     }
@@ -1046,10 +1046,14 @@ struct SniffResultsPanel: View {
                 } else {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 7) {
+                            Text("这些是网页发出去的请求，不是下载地址；只有带 m3u8 / mp4 的那几条才是视频本体")
+                                .font(.system(size: 10.5))
+                                .foregroundStyle(.secondary)
+                                .padding(.bottom, 2)
                             ForEach(requests.indices, id: \.self) { index in
                                 Text(requests[index])
                                     .font(.system(size: 10.5, design: .monospaced))
-                                    .foregroundStyle(.primary)
+                                    .foregroundStyle(isMediaRequest(requests[index]) ? Color.accentColor : .primary)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                     .textSelection(.enabled)
                             }
@@ -1067,6 +1071,13 @@ struct SniffResultsPanel: View {
             )
             .padding(.horizontal, 20)
         }
+    }
+
+    /// 面板里把真正的视频清单高亮出来，省得一条条去认
+    private func isMediaRequest(_ line: String) -> Bool {
+        let lower = line.lowercased()
+        return lower.contains(".m3u8") || lower.contains(".mp4")
+            || lower.contains(".mpd") || lower.contains(".m4v")
     }
 
     @MainActor

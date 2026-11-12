@@ -168,6 +168,13 @@ final class BrowserTab: ObservableObject, Identifiable {
             case .notVideo:
                 break
             case .unknown:
+                // 同域的 /api/ 地址又问不出结论，多半是「取播放数据的接口」，
+                // 本身不是媒体，收进来只会多一条点开内容不对的假视频
+                if source == "text", !SniffURLValidator.hasMediaSuffix(url),
+                   let comps = URL(string: url), comps.path.contains("/api/"),
+                   comps.host == URL(string: self.urlString)?.host {
+                    break
+                }
                 // 403、超时、服务器不认 HEAD 都说明不了它不是视频，
                 // 宁可多一条让用户自己点，也别把真地址丢掉
                 self.addVideo(url, kindHint: "", unverified: true)
