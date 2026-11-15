@@ -59,6 +59,59 @@ enum BrowserInject {
       // 也不返回清单类型，光看地址只能靠这一段认
       var MEDIA_PATH = /\\/(hls|dash|stream|playlist|manifest|play|vod)(\\/|$)/i;
 
+      // 这种接口还要看登录态：未登录给一张封面图或十秒试看，登录了才 302 到
+      // 真清单。原生播放器拿不到 WebView 的 Cookie，只能在这里先跟一次 302 ——
+      // 请求由页面发出，Cookie 自然带上，回来的是签名后的 CDN 地址，
+      // 原生播这个地址才不会错
+      var probing = {};
+      function probeMedia(u, kind, src) {
+        try {
+          u = abs(u);
+          if (!u || probing[u]) { return; }
+          probing[u] = 1;
+          var asked = u;
+          var fallback = function () { post(asked, kind, src); };
+          var req = window.fetch(asked, { credentials: 'include' });
+          if (!req || !req.then) { fallback(); return; }
+          req.then(function (r) {
+            try {
+              var finalURL = (r && r.url) || asked;
+              if (!r || !r.ok) { fallback(); return; }
+              var ct = '', len = 0;
+              try {
+                if (r.headers && r.headers.get) {
+                  ct = (r.headers.get('content-type') || '').toLowerCase();
+                  len = parseInt(r.headers.get('content-length') || '0', 10) || 0;
+                }
+              } catch (e) {}
+              // 类型已经说明是清单或直链的，不用再读正文
+              if (ct.indexOf('mpegurl') >= 0) { post(finalURL, 'HLS', src === 'text' ? 'type' : src); return; }
+              if (ct.indexOf('video/') === 0) { post(finalURL, '', src === 'text' ? 'type' : src); return; }
+              // 封面图 / 错误页：这条接口拿不到视频，保留原地址让用户自己判断
+              if (ct.indexOf('image/') === 0) { fallback(); return; }
+              // 大文件不往内存里读，按直链处理
+              if (len > 1048576) { post(finalURL, '', src === 'text' ? 'type' : src); return; }
+              return r.text().then(function (t) {
+                // 真清单：用跳转后的地址，里面的分片是相对路径也能对得上
+                if (t && t.indexOf('#EXTM3U') >= 0) {
+                  post(finalURL, 'HLS', src === 'text' ? 'type' : src);
+                } else {
+                  fallback();
+                }
+              }).catch(function () {
+                // 跨域跳转后正文可能被 CORS 挡住读不到；地址本身带着签名，
+                // 只要确实跳到了别的域名，就直接交给原生去播
+                if (finalURL && finalURL !== asked && finalURL.indexOf(asked) < 0) {
+                  post(finalURL, 'HLS', src === 'text' ? 'type' : src);
+                } else {
+                  fallback();
+                }
+              });
+            } catch (e) { fallback(); }
+          }).catch(fallback);
+        } catch (e) {}
+      }
+
       // 只凭地址就能认出来的：直链和清单
       function byURL(u) {
         try {
@@ -70,7 +123,7 @@ enum BrowserInject {
           if (/\\.mpd$/.test(p)) { post(s, 'DASH', 'url'); return; }
           // 路径里带 m3u8 但没后缀的，多半也是清单
           if (p.indexOf('m3u8') >= 0) { post(s, 'HLS', 'url'); return; }
-          if (MEDIA_PATH.test(p)) { post(s, 'HLS', 'url'); }
+          if (MEDIA_PATH.test(p)) { probeMedia(s, 'HLS', 'url'); }
         } catch (e) {}
       }
 
@@ -89,7 +142,7 @@ enum BrowserInject {
           if (p.indexOf('m3u8') >= 0) { post(s, 'HLS', 'text'); return; }
           if (/\\.(mp4|m4v|mov|webm|flv)$/.test(p)) { post(s, '', 'text'); return; }
           if (/\\.mpd$/.test(p)) { post(s, 'DASH', 'text'); return; }
-          if (MEDIA_PATH.test(p)) { post(s, 'HLS', 'text'); }
+          if (MEDIA_PATH.test(p)) { probeMedia(s, 'HLS', 'text'); }
         } catch (e) {}
       }
 
@@ -180,7 +233,7 @@ enum BrowserInject {
           // 播放器真的在用这个地址，可信度最高：不再做 HEAD 校验，直接收
           if (/\\.(m3u8|mp4|m4v|mov|webm|flv|mpd)(\\?|#|$)/i.test(u)) { post(u, '', 'element'); return; }
           // 没后缀的播放接口（/api/hls/xxx 这种）也是清单，别等它返回 #EXTM3U
-          if (MEDIA_PATH.test(u.split('?')[0])) { post(u, 'HLS', 'element'); return; }
+          if (MEDIA_PATH.test(u.split('?')[0])) { probeMedia(u, 'HLS', 'element'); return; }
           var host = el || {};
           if (host.readyState > 0 || host.videoWidth > 0) { post(u, '', 'element'); }
         } catch (e) {}
@@ -464,6 +517,8 @@ enum BrowserInject {
         window.fetch = function(input, init) {
           var asked = '';
           try { asked = typeof input === 'string' ? input : (input && input.url) || ''; } catch (e) {}
+          // 自己发出去的探测请求不再走一遍嗅探，否则 probe → fetch → probe 打转
+          if (probing[abs(asked)]) { return origFetch.apply(this, arguments); }
           note(asked, 'fetch');
           byURL(asked);
           var promise = origFetch.apply(this, arguments);
