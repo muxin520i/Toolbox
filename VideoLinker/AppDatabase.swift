@@ -38,7 +38,7 @@ enum AppDB {
     }
 
     private static func open() -> DatabaseQueue? {
-        // 上次导入的搬家包，在这里换上（此刻数据库还没打开，替换文件是安全的）
+        // 上次导入的备份包，在这里换上（此刻数据库还没打开，替换文件是安全的）
         TransferStore.applyPendingIfNeeded()
 
         do {

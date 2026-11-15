@@ -1,16 +1,24 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-// MARK: - 换机搬家
+// MARK: - 换机备份
 
 struct TransferView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.theme) private var theme
 
+    @State private var usePassword = false
     @State private var password = ""
     @State private var confirmPassword = ""
+
+    @State private var includeWebData = true
+    @State private var siteCount = 0
+    @State private var loadingSites = true
+
     @State private var exportURL: URL?
+    @State private var exportSummary: String?
     @State private var busy = false
+    @State private var busyText = "正在打包…"
     @State private var toast: String?
     @State private var errorText: String?
 
@@ -40,10 +48,16 @@ struct TransferView: View {
 
                 if busy {
                     Color.black.opacity(0.25).ignoresSafeArea()
-                    ProgressView()
-                        .tint(.white)
-                        .padding(22)
-                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    VStack(spacing: 10) {
+                        ProgressView()
+                            .tint(.white)
+                        Text(busyText)
+                            .font(.system(size: 12.5, weight: .medium))
+                            .foregroundStyle(.white)
+                    }
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 20)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                 }
 
                 if let toast {
@@ -61,7 +75,7 @@ struct TransferView: View {
                     .allowsHitTesting(false)
                 }
             }
-            .navigationTitle("换机搬家")
+            .navigationTitle("换机备份")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -77,7 +91,14 @@ struct TransferView: View {
                         guard let url = urls.first else { return }
                         pendingFile = url
                         importPassword = ""
-                        showImportSheet = true
+                        importError = nil
+
+                        // 不加密的包直接导入，不再拦一道密码框
+                        if TransferStore.isEncrypted(at: url) {
+                            showImportSheet = true
+                        } else {
+                            runImport(file: url)
+                        }
                     },
                     onCancel: { _ in
                         showPicker = false
@@ -88,6 +109,10 @@ struct TransferView: View {
             .sheet(isPresented: $showImportSheet) {
                 importSheet
             }
+            .task {
+                siteCount = await WebDataBackup.siteCount()
+                loadingSites = false
+            }
         }
     }
 
@@ -95,6 +120,9 @@ struct TransferView: View {
         var types: [UTType] = [.data]
         if let custom = UTType(filenameExtension: TransferStore.fileExtension) {
             types.insert(custom, at: 0)
+        }
+        if let legacy = UTType(filenameExtension: TransferStore.legacyFileExtension) {
+            types.insert(legacy, at: 1)
         }
         return types
     }
@@ -110,10 +138,10 @@ struct TransferView: View {
                     .frame(width: 28)
 
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("把整台设备的数据搬过去")
+                    Text("把整台设备的数据备份下来")
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(theme.text)
-                    Text("播放列表、观看进度、备忘、书签、脚本和设置都会打包。视频文件本身不在包里，换机后用「本机视频」重新导入即可。")
+                    Text("播放列表、观看进度、备忘、书签、脚本、设置，以及内置浏览器的网站数据（登录状态、本地存储）都会打包。视频文件本身不在包里，换机后用「本机视频」重新导入即可。")
                         .font(.system(size: 12.5))
                         .foregroundStyle(theme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -127,18 +155,50 @@ struct TransferView: View {
             VStack(alignment: .leading, spacing: 12) {
                 sectionTitle("导出", symbol: "square.and.arrow.up")
 
-                Text("设一个密码，换机时在新设备上输入同一个密码才能打开。密码忘了包就解不开，没有找回入口。")
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(theme.textTertiary)
-                    .fixedSize(horizontal: false, vertical: true)
+                Toggle(isOn: $includeWebData) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("包含网站数据")
+                            .font(.system(size: 13.5, weight: .medium))
+                            .foregroundStyle(theme.text)
+                        Text(webDataSummary)
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(theme.textTertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .toggleStyle(.switch)
+                .tint(theme.accent)
 
-                secureField("密码（至少 6 位）", text: $password)
-                secureField("再输一次", text: $confirmPassword)
+                Divider().overlay(theme.cardStroke)
+
+                Toggle(isOn: $usePassword) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("用密码保护")
+                            .font(.system(size: 13.5, weight: .medium))
+                            .foregroundStyle(theme.text)
+                        Text(usePassword ? "换机时输入同一个密码才能打开" : "不设密码，拿到文件就能直接导入")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(theme.textTertiary)
+                    }
+                }
+                .toggleStyle(.switch)
+                .tint(theme.accent)
+
+                if usePassword {
+                    secureField("密码（至少 6 位）", text: $password)
+                    secureField("再输一次", text: $confirmPassword)
+                    Text("密码忘了包就解不开，没有找回入口。")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(theme.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else if includeWebData {
+                    warningRow("不设密码时，包里的登录 Cookie 是明文，谁拿到文件都能看到。请只通过可信方式传输。")
+                }
 
                 Button {
                     exportPackage()
                 } label: {
-                    Text("生成搬家包")
+                    Text("生成备份包")
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
@@ -152,13 +212,19 @@ struct TransferView: View {
                     ShareLink(item: exportURL) {
                         HStack(spacing: 6) {
                             Image(systemName: "doc.badge.arrow.up")
-                            Text("分享搬家包")
+                            Text("分享备份包")
                         }
                         .font(.system(size: 14, weight: .medium))
                         .foregroundStyle(theme.accent)
                         .frame(maxWidth: .infinity)
                         .frame(height: 40)
                         .background(theme.field, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                    }
+
+                    if let exportSummary {
+                        Text(exportSummary)
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(theme.textTertiary)
                     }
                 }
 
@@ -201,7 +267,7 @@ struct TransferView: View {
                     }
                     .buttonStyle(.plain)
                 } else {
-                    Text("选一个搬家包，输入导出时设的密码。导入不会立刻覆盖，重启后才会生效，出错还能退回。")
+                    Text("选一个备份包。设了密码的会要求输入，没设密码的直接导入。导入不会立刻覆盖，重启后才会生效，出错还能退回。")
                         .font(.system(size: 12.5))
                         .foregroundStyle(theme.textTertiary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -212,7 +278,7 @@ struct TransferView: View {
                     } label: {
                         HStack(spacing: 6) {
                             Image(systemName: "folder")
-                            Text("选择搬家包")
+                            Text("选择备份包")
                         }
                         .font(.system(size: 14, weight: .medium))
                         .foregroundStyle(theme.text)
@@ -238,9 +304,10 @@ struct TransferView: View {
             VStack(alignment: .leading, spacing: 8) {
                 sectionTitle("注意", symbol: "exclamationmark.triangle")
 
-                bullet("导入会在下次启动时替换当前数据，替换前会自动留一份 restore-backup.sqlite")
+                bullet("导入会在下次启动时替换当前数据，替换前会自动留一份 restore-backup.sqlite 和 WebKit.restore-backup")
                 bullet("换机后新设备上的旧数据会被覆盖，先导出自己的一份再做")
-                bullet("搬家包只含数据，不含视频文件，也不含 WebDAV 密码（它存在系统钥匙串里）")
+                bullet("备份包只含数据，不含视频文件，也不含 WebDAV 密码（它存在系统钥匙串里）")
+                bullet("网站数据里有各站的登录 Cookie，备份包请像密码一样保管")
             }
         }
     }
@@ -255,7 +322,7 @@ struct TransferView: View {
                         Image(systemName: "lock.doc")
                             .font(.system(size: 30, weight: .light))
                             .foregroundStyle(theme.accent)
-                        Text("输入搬家包密码")
+                        Text("输入备份包密码")
                             .font(.system(size: 16, weight: .semibold))
                             .foregroundStyle(theme.text)
                         Text(pendingFile?.lastPathComponent ?? "")
@@ -278,7 +345,7 @@ struct TransferView: View {
                             .background(theme.gradient, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                     }
                     .buttonStyle(.plain)
-                    .disabled(importPassword.count < TransferStore.minPasswordLength || busy)
+                    .disabled(importPassword.isEmpty || busy)
 
                     Spacer()
                 }
@@ -300,29 +367,46 @@ struct TransferView: View {
 
     // MARK: 动作
 
+    private var webDataSummary: String {
+        if loadingSites {
+            return "正在读取站点…"
+        }
+        if siteCount == 0 {
+            return "浏览器还没产生网站数据"
+        }
+        return "\(siteCount) 个站点的登录状态、本地存储与 IndexedDB"
+    }
+
     private func exportPackage() {
         errorText = nil
-        guard password.count >= TransferStore.minPasswordLength else {
-            errorText = "密码至少 6 位"
-            return
-        }
-        guard password == confirmPassword else {
-            errorText = "两次输入的密码不一样"
-            return
+
+        if usePassword {
+            guard password.count >= TransferStore.minPasswordLength else {
+                errorText = "密码至少 6 位"
+                return
+            }
+            guard password == confirmPassword else {
+                errorText = "两次输入的密码不一样"
+                return
+            }
         }
 
         busy = true
-        let pwd = password
-        DispatchQueue.global(qos: .userInitiated).async {
+        busyText = includeWebData ? "正在打包数据与网站数据…" : "正在打包数据…"
+        let pwd = usePassword ? password : ""
+        let withWeb = includeWebData
+
+        Task.detached(priority: .userInitiated) {
             do {
-                let url = try TransferStore.writePackage(password: pwd)
-                DispatchQueue.main.async {
+                let result = try await TransferStore.writePackage(password: pwd, includeWebData: withWeb)
+                await MainActor.run {
                     busy = false
-                    exportURL = url
-                    showToast("搬家包已生成")
+                    exportURL = result.url
+                    exportSummary = result.summaryText
+                    showToast("备份包已生成")
                 }
             } catch {
-                DispatchQueue.main.async {
+                await MainActor.run {
                     busy = false
                     errorText = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
                 }
@@ -330,15 +414,16 @@ struct TransferView: View {
         }
     }
 
-    private func runImport() {
-        guard let file = pendingFile else { return }
+    private func runImport(file: URL? = nil) {
+        guard let file = file ?? pendingFile else { return }
         busy = true
+        busyText = "正在导入…"
         let pwd = importPassword
 
-        DispatchQueue.global(qos: .userInitiated).async {
+        Task.detached(priority: .userInitiated) {
             do {
                 try TransferStore.stageImport(from: file, password: pwd)
-                DispatchQueue.main.async {
+                await MainActor.run {
                     busy = false
                     showImportSheet = false
                     pendingFile = nil
@@ -346,10 +431,11 @@ struct TransferView: View {
                     showToast("导入完成，重启后生效")
                 }
             } catch {
-                DispatchQueue.main.async {
+                let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                await MainActor.run {
                     busy = false
-                    importError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-                    showToast(importError ?? "导入失败")
+                    importError = message
+                    showToast(message)
                 }
             }
         }
@@ -388,6 +474,18 @@ struct TransferView: View {
             .padding(.horizontal, 12)
             .frame(height: 42)
             .background(theme.field, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+    }
+
+    private func warningRow(_ text: String) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 10.5))
+                .padding(.top, 1.5)
+            Text(text)
+                .font(.system(size: 11.5))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .foregroundStyle(Color(red: 0.90, green: 0.58, blue: 0.16))
     }
 
     private func bullet(_ text: String) -> some View {

@@ -126,6 +126,8 @@
 
 ## 已做
 
+- 换机备份带上网站数据：Cookie 用 `WKHTTPCookieStore` 导出并在导入后逐条回写，LocalStorage / IndexedDB / Service Worker 按相对路径归档，缓存目录跳过；导入时自动把旧 WebKit 目录留成 `WebKit.restore-backup`（v2.0.23）
+- 备份密码可选：包格式 v2 用第 9 字节标记是否加密，不设密码直接生成明文包，设了密码仍是 AES-GCM；旧 `.vlmove` 包保持可导入（v2.0.23）
 - 播放接口跟 302：`/api/hls/<id>` 这类地址在网页上下文里请求一次（自带 Cookie），拿到跳转后的签名 CDN 清单地址再交给播放器，不再出现「十秒预览」；跨域读不到正文时按跳转地址收（v2.0.22）
 - 无后缀播放接口：路径含 `hls` / `dash` / `stream` / `playlist` / `manifest` / `vod` 的地址按清单收录并标 HLS，不再发 HEAD（`/api/hls/<id>` 这类接口问过去只会拿到封面图）（v2.0.21）
 - 来源过滤收紧：文本里挖出的链接必须是媒体后缀或播放接口路径才收，推广位、站点首页、残缺串不再进列表；`?kind=thumbs` 这类缩略图接口排除（v2.0.21）

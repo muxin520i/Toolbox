@@ -702,7 +702,7 @@ struct SettingsView: View {
     // MARK: 数据
 
     private var dataCard: some View {
-        card(id: "data", title: "数据", icon: "internaldrive.fill", summary: "统计 · 存储 · 搬家 · 清理", expanded: false) {
+        card(id: "data", title: "数据", icon: "internaldrive.fill", summary: "统计 · 存储 · 备份 · 清理", expanded: false) {
             VStack(spacing: 0) {
                 Button {
                     showStats = true
@@ -734,7 +734,7 @@ struct SettingsView: View {
                 Button {
                     showTransfer = true
                 } label: {
-                    actionRow("换机搬家", symbol: "shippingbox")
+                    actionRow("换机备份", symbol: "shippingbox")
                 }
                 .buttonStyle(.plain)
 
