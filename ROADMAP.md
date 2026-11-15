@@ -126,6 +126,8 @@
 
 ## 已做
 
+- 换机备份页闪退：去掉 `Toggle` 与 `WKWebsiteDataStore.fetchDataRecords`，改自绘开关与磁盘站点统计（v2.0.24）
+- 崩溃自记录：`NSSetUncaughtExceptionHandler` + 信号处理写 `last-crash.log`，阶段标记写 `last-stage.log`，设置页「上次异常记录」可查看与复制（v2.0.24）
 - 换机备份带上网站数据：Cookie 用 `WKHTTPCookieStore` 导出并在导入后逐条回写，LocalStorage / IndexedDB / Service Worker 按相对路径归档，缓存目录跳过；导入时自动把旧 WebKit 目录留成 `WebKit.restore-backup`（v2.0.23）
 - 备份密码可选：包格式 v2 用第 9 字节标记是否加密，不设密码直接生成明文包，设了密码仍是 AES-GCM；旧 `.vlmove` 包保持可导入（v2.0.23）
 - 播放接口跟 302：`/api/hls/<id>` 这类地址在网页上下文里请求一次（自带 Cookie），拿到跳转后的签名 CDN 清单地址再交给播放器，不再出现「十秒预览」；跨域读不到正文时按跳转地址收（v2.0.22）

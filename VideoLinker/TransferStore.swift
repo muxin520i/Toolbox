@@ -133,7 +133,8 @@ enum TransferStore {
         }
 
         if includeWebData {
-            let sites = await WebDataBackup.siteCount()
+            // 站点数只看磁盘目录与 Cookie 域名，不为一个数字去拉起 WebKit
+            let diskSites = WebDataBackup.siteCountOnDisk()
 
             // WebKit 的落盘是异步的，先跟 cookie 库对一次话，再留一点时间让它写完
             let cookies = await WebDataBackup.collectCookies()
@@ -142,7 +143,8 @@ enum TransferStore {
             if !cookies.isEmpty {
                 payload["cookies"] = cookies
             }
-            info.siteCount = sites
+            let cookieSites = Set(cookies.compactMap { $0["domain"] as? String }).count
+            info.siteCount = max(diskSites, cookieSites)
 
             let collected = WebDataBackup.collect()
             if let collected {
