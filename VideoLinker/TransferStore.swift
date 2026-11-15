@@ -707,21 +707,36 @@ enum WebDataBackup {
         guard fm.fileExists(atPath: pendingDirectory.path) else { return }
 
         // 先留旧数据，出问题还能手工退回去
-        try? fm.removeItem(at: backupDirectory)
         if fm.fileExists(atPath: webKitDirectory.path) {
-            try? fm.moveItem(at: webKitDirectory, to: backupDirectory)
+            try? fm.removeItem(at: backupDirectory)
+            do {
+                try fm.moveItem(at: webKitDirectory, to: backupDirectory)
+            } catch {
+                // 旧目录挪不动（被系统占着），这次先放弃，包留在 pending 里下次再试
+                print("[Transfer] 旧网站数据挪不动：\(error)")
+                return
+            }
         }
 
+        var webKitApplied = false
         for name in ["WebKit", "Cookies"] {
             let source = pendingDirectory.appendingPathComponent(name, isDirectory: true)
             guard fm.fileExists(atPath: source.path) else { continue }
             let destination = libraryDirectory.appendingPathComponent(name, isDirectory: true)
             try? fm.removeItem(at: destination)
-            try? fm.moveItem(at: source, to: destination)
+            do {
+                try fm.moveItem(at: source, to: destination)
+                if name == "WebKit" { webKitApplied = true }
+            } catch {
+                print("[Transfer] 换上 \(name) 失败：\(error)")
+            }
         }
 
-        try? fm.removeItem(at: pendingDirectory)
-        print("[Transfer] 已换上导入的网站数据")
+        // 主目录没换成功就保留 pending，别把唯一一份数据删了
+        if webKitApplied || !fm.fileExists(atPath: pendingDirectory.appendingPathComponent("WebKit").path) {
+            try? fm.removeItem(at: pendingDirectory)
+            print("[Transfer] 已换上导入的网站数据")
+        }
     }
 
     static func discardPending() {
