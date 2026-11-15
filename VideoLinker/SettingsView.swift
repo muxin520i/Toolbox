@@ -44,6 +44,8 @@ struct SettingsView: View {
     @State private var showGestures = false
     @State private var showAudioSync = false
     @State private var showDiagnostics = false
+    @State private var showCrashLog = false
+    @State private var crashAvailable = false
     @State private var showPrivateHelp = false
     @State private var showMemos = false
     @State private var showArchive = false
@@ -157,6 +159,9 @@ struct SettingsView: View {
         .sheet(isPresented: $showDiagnostics) {
             NetworkDiagnosticsView()
         }
+        .sheet(isPresented: $showCrashLog) {
+            crashLogSheet
+        }
         .alert("私密保险箱", isPresented: $showPrivateHelp) {
             Button("知道了", role: .cancel) {}
         } message: {
@@ -184,6 +189,7 @@ struct SettingsView: View {
         .onAppear {
             reloadDownloadTargets()
             updateChecker.checkIfNeeded()
+            crashAvailable = CrashLog.hasRecord
         }
         .alert("新建播放列表", isPresented: $showNewList) {
             TextField("列表名称", text: $newListName)
@@ -199,6 +205,65 @@ struct SettingsView: View {
             }
         } message: {
             Text("新建后会自动设为下载保存位置。")
+        }
+    }
+
+    /// 崩溃记录放在设置页而不是备份页：备份页本身可能一打开就崩，
+    /// 记录必须留在一个确定能打开的地方
+    private var crashLogSheet: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    Text("最后动作能说明崩在哪一步；崩溃内容里有具体函数名。复制后发给我即可。")
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(theme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Text(CrashLog.report)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(theme.text)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(12)
+                        .background(theme.field, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                    Button {
+                        UIPasteboard.general.string = CrashLog.report
+                        showToast("已复制，发给我就行")
+                    } label: {
+                        Text("复制全文")
+                            .font(.system(size: 14.5, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 44)
+                            .background(theme.gradient, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+
+                    Button {
+                        CrashLog.clear()
+                        crashAvailable = false
+                        showCrashLog = false
+                    } label: {
+                        Text("清除记录")
+                            .font(.system(size: 13.5))
+                            .foregroundStyle(theme.textSecondary)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 40)
+                            .background(theme.field, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(20)
+            }
+            .background(theme.bg)
+            .navigationTitle("上次异常记录")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("完成") { showCrashLog = false }
+                }
+            }
         }
     }
 
@@ -732,11 +797,23 @@ struct SettingsView: View {
                 Divider().overlay(theme.cardStroke)
 
                 Button {
+                    CrashLog.mark("点击：换机备份")
                     showTransfer = true
                 } label: {
                     actionRow("换机备份", symbol: "shippingbox")
                 }
                 .buttonStyle(.plain)
+
+                if crashAvailable {
+                    Divider().overlay(theme.cardStroke)
+
+                    Button {
+                        showCrashLog = true
+                    } label: {
+                        actionRow("上次异常记录", symbol: "exclamationmark.octagon")
+                    }
+                    .buttonStyle(.plain)
+                }
 
                 Divider().overlay(theme.cardStroke)
 

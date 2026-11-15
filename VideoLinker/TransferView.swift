@@ -109,9 +109,12 @@ struct TransferView: View {
             .sheet(isPresented: $showImportSheet) {
                 importSheet
             }
-            .task {
-                siteCount = await WebDataBackup.siteCount()
-                loadingSites = false
+            .onAppear {
+                CrashLog.mark("备份页 onAppear")
+                loadSiteCount()
+                DispatchQueue.main.async {
+                    CrashLog.mark("备份页首帧完成")
+                }
             }
         }
     }
@@ -155,34 +158,19 @@ struct TransferView: View {
             VStack(alignment: .leading, spacing: 12) {
                 sectionTitle("导出", symbol: "square.and.arrow.up")
 
-                Toggle(isOn: $includeWebData) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("包含网站数据")
-                            .font(.system(size: 13.5, weight: .medium))
-                            .foregroundStyle(theme.text)
-                        Text(webDataSummary)
-                            .font(.system(size: 11.5))
-                            .foregroundStyle(theme.textTertiary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                .toggleStyle(.switch)
-                .tint(theme.accent)
+                settingSwitch(
+                    title: "包含网站数据",
+                    subtitle: webDataSummary,
+                    isOn: $includeWebData
+                )
 
                 Divider().overlay(theme.cardStroke)
 
-                Toggle(isOn: $usePassword) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("用密码保护")
-                            .font(.system(size: 13.5, weight: .medium))
-                            .foregroundStyle(theme.text)
-                        Text(usePassword ? "换机时输入同一个密码才能打开" : "不设密码，拿到文件就能直接导入")
-                            .font(.system(size: 11.5))
-                            .foregroundStyle(theme.textTertiary)
-                    }
-                }
-                .toggleStyle(.switch)
-                .tint(theme.accent)
+                settingSwitch(
+                    title: "用密码保护",
+                    subtitle: usePassword ? "换机时输入同一个密码才能打开" : "不设密码，拿到文件就能直接导入",
+                    isOn: $usePassword
+                )
 
                 if usePassword {
                     secureField("密码（至少 6 位）", text: $password)
@@ -367,6 +355,17 @@ struct TransferView: View {
 
     // MARK: 动作
 
+    private func loadSiteCount() {
+        guard loadingSites else { return }
+        DispatchQueue.global(qos: .utility).async {
+            let count = WebDataBackup.siteCountOnDisk()
+            DispatchQueue.main.async {
+                siteCount = count
+                loadingSites = false
+            }
+        }
+    }
+
     private var webDataSummary: String {
         if loadingSites {
             return "正在读取站点…"
@@ -442,6 +441,50 @@ struct TransferView: View {
     }
 
     // MARK: 组件
+
+    /// 自己画开关，不用系统 Toggle：这一页之前一打开就闪退，
+    /// 换成纯 SwiftUI 基础图形后彻底避开系统控件的布局路径
+    private func settingSwitch(title: String, subtitle: String, isOn: Binding<Bool>) -> some View {
+        Button {
+            withAnimation(.easeOut(duration: 0.16)) {
+                isOn.wrappedValue.toggle()
+            }
+        } label: {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .font(.system(size: 13.5, weight: .medium))
+                        .foregroundStyle(theme.text)
+                    Text(subtitle)
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(theme.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 8)
+
+                switchBadge(isOn.wrappedValue)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func switchBadge(_ on: Bool) -> some View {
+        HStack(spacing: 0) {
+            if on { Spacer(minLength: 0) }
+            Circle()
+                .fill(Color.white)
+                .frame(width: 20, height: 20)
+                .shadow(color: Color.black.opacity(0.14), radius: 1, y: 1)
+            if !on { Spacer(minLength: 0) }
+        }
+        .padding(3)
+        .frame(width: 46, height: 26)
+        .background(
+            Capsule().fill(on ? theme.accent : theme.field)
+        )
+    }
 
     private func card<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
         content()

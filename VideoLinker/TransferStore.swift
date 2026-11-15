@@ -499,14 +499,33 @@ enum WebDataBackup {
 
     // MARK: 站点统计
 
-    static func siteCount() async -> Int {
-        await withCheckedContinuation { (continuation: CheckedContinuation<Int, Never>) in
-            WKWebsiteDataStore.default().fetchDataRecords(
-                ofTypes: WKWebsiteDataStore.allWebsiteDataTypes()
-            ) { records in
-                continuation.resume(returning: records.count)
+    /// 直接数磁盘上的站点目录，不碰 WebKit。
+    /// 备份页一打开就要显示这个数字，用 `WKWebsiteDataStore` 去问会拉起网络进程，
+    /// 在还没建过 WebView 的场景里没有意义，也可能把界面卡住。
+    static func siteCountOnDisk() -> Int {
+        let fm = FileManager.default
+        let base = webKitDirectory.appendingPathComponent("WebsiteData", isDirectory: true)
+        var hosts = Set<String>()
+
+        for name in ["LocalStorage", "IndexedDB", "ServiceWorkers", "Databases"] {
+            let dir = base.appendingPathComponent(name, isDirectory: true)
+            guard let items = try? fm.contentsOfDirectory(atPath: dir.path) else { continue }
+            for item in items where !item.hasPrefix(".") {
+                hosts.insert(item)
             }
         }
+
+        // 老系统把本地存储直接放在 WebKit/LocalStorage 下
+        if hosts.isEmpty {
+            let legacy = webKitDirectory.appendingPathComponent("LocalStorage", isDirectory: true)
+            if let items = try? fm.contentsOfDirectory(atPath: legacy.path) {
+                for item in items where !item.hasPrefix(".") {
+                    hosts.insert(item)
+                }
+            }
+        }
+
+        return hosts.count
     }
 
     // MARK: Cookie

@@ -8,6 +8,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     /// 后台巡检必须在启动完成前注册，晚于启动会直接崩
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        CrashLog.install()
         PatrolStore.registerBackgroundTask()
         return true
     }
@@ -25,6 +26,102 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
                      completionHandler: @escaping () -> Void) {
         DownloadManager.shared.handleBackgroundEvents(completionHandler)
     }
+}
+
+/// 记下最近一次崩溃/异常，供「换机备份」页显示。
+/// 崩溃发生在用户手机上，拿不到 Xcode 日志，只能自己留一份。
+enum CrashLog {
+    private static var fileURL: URL {
+        let base = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        return base.appendingPathComponent("last-crash.log")
+    }
+
+    static func install() {
+        NSSetUncaughtExceptionHandler { exception in
+            let text = """
+            \(Date())
+            异常：\(exception.name.rawValue)
+            原因：\(exception.reason ?? "无")
+            \(exception.callStackSymbols.joined(separator: "\n"))
+            """
+            writeCrashLog(text)
+        }
+
+        for sig in [SIGABRT, SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGTRAP] {
+            signal(sig) { code in
+                let text = """
+                \(Date())
+                信号：\(code)
+                \(Thread.callStackSymbols.joined(separator: "\n"))
+                """
+                writeCrashLog(text)
+                // 写完恢复系统默认处理，保持真实的崩溃行为
+                signal(code, SIG_DFL)
+                raise(code)
+            }
+        }
+    }
+
+    static var last: String? {
+        guard let data = try? Data(contentsOf: fileURL),
+              let text = String(data: data, encoding: .utf8),
+              !text.isEmpty
+        else { return nil }
+        return text
+    }
+
+    static func clear() {
+        try? FileManager.default.removeItem(at: fileURL)
+        try? FileManager.default.removeItem(at: stageURL)
+    }
+
+    private static var stageURL: URL {
+        let base = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        return base.appendingPathComponent("last-stage.log")
+    }
+
+    /// 打一个阶段标记。崩溃日志可能是空的，阶段标记能说明崩在哪一步。
+    static func mark(_ stage: String) {
+        let line = "\(Date().formatted(date: .omitted, time: .standard)) \(stage)\n"
+        if let handle = try? FileHandle(forWritingTo: stageURL) {
+            handle.seekToEndOfFile()
+            handle.write(Data(line.utf8))
+            try? handle.close()
+        } else {
+            try? line.write(to: stageURL, atomically: true, encoding: .utf8)
+        }
+    }
+
+    static var lastStage: String? {
+        guard let data = try? Data(contentsOf: stageURL),
+              let text = String(data: data, encoding: .utf8)
+        else { return nil }
+        let lines = text.split(separator: "\n").filter { !$0.isEmpty }
+        return lines.suffix(3).joined(separator: "\n")
+    }
+
+    static var hasRecord: Bool {
+        last != nil || lastStage != nil
+    }
+
+    static var report: String {
+        var parts: [String] = []
+        if let stage = lastStage {
+            parts.append("【最后动作】\n" + stage)
+        }
+        if let crash = last {
+            parts.append("【崩溃内容】\n" + crash)
+        }
+        return parts.isEmpty ? "没有记录" : parts.joined(separator: "\n\n")
+    }
+}
+
+/// 信号处理器里只能调全局函数，不能碰类型元数据
+private func writeCrashLog(_ text: String) {
+    let base = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+    let url = base.appendingPathComponent("last-crash.log")
+    guard let data = String(text.prefix(12000)).data(using: .utf8) else { return }
+    try? data.write(to: url, options: .atomic)
 }
 
 enum OrientationLock {
