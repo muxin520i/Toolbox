@@ -8,7 +8,9 @@
 
 ## 安装
 
-**最新版下载**：[Releases](https://github.com/muxin520i/Toolbox/releases/latest) 页面里的 `VideoLinker-unsigned.ipa`，点开即下，不用等 Actions 构建。
+**下载页**：<https://muxin520i.github.io/Toolbox/> —— 最新版本号、更新内容、下载按钮和安装步骤都在这一页，手机也能直接打开。
+
+也可以去 [Releases](https://github.com/muxin520i/Toolbox/releases/latest) 直接取 `VideoLinker-unsigned.ipa`，不用等 Actions 构建。
 
 准备一台 Windows 或 Mac、一根数据线、一个 Apple ID，加上 `VideoLinker-unsigned.ipa`（安装包文件名沿用了旧名，装好后桌面显示「工具箱」）。
 
@@ -137,7 +139,7 @@ App 用 GRDB 把数据统一存在一个 SQLite 库里：`Application Support/Vi
 
 **版本号规则（2026-11-09 起生效）**：版本号写成 `x.y.z`，每次发版在最后一段加 `0.0.1`–`0.0.7`，改动多就多加、改动少就少加。`x` 最多到 9、`y` 最多到 99；`1.9.99` 的下一版直接是 `2.0.1`，`2.9.99` 的下一版直接是 `3.0.1`，不再出现 `1.10.0` 这种第二段进位的写法。括号里的 build 号每版 +1。
 
-**发版流程**：构建通过后给这一版打一个 `v<版本号>` 的 Release，把 `VideoLinker-unsigned.ipa` 和 `VideoLinker-source.zip` 一起挂上去，再把 `README.md` 与 `/workspace` 下的两个产物同步更新。
+**发版流程**：构建通过后给这一版打一个 `v<版本号>` 的 Release，把 `VideoLinker-unsigned.ipa` 和 `VideoLinker-source.zip` 一起挂上去，再把 `README.md` 与 `/workspace` 下的两个产物同步更新。下载页 <https://muxin520i.github.io/Toolbox/> 会自动读取最新 Release，不需要改 `docs/index.html`。
 
 ### v2.0.26 修「勾选网站数据后生成备份包闪退」
 
