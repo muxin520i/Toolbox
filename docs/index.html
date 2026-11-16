@@ -255,7 +255,7 @@
         <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
           <path d="M9 18l-5-6 5-6M15 6l5 6-5 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
-        源码
+        <span id="srcLabel">源码</span>
       </a>
     </div>
     <p class="hint">未签名包，需用 Sideloadly 配合自己的 Apple ID 签名，免费</p>
@@ -315,6 +315,7 @@
 (function () {
   var API = "https://api.github.com/repos/muxin520i/Toolbox/releases/latest";
   var REPO = "https://github.com/muxin520i/Toolbox";
+  var CACHE_KEY = "vl-release-v1";
 
   function fmtSize(bytes) {
     if (!bytes) return "—";
@@ -370,7 +371,53 @@
 
   function setText(id, text) {
     var el = document.getElementById(id);
-    if (el) el.textContent = text;
+    if (!el) return;
+    if (!text) { el.style.display = "none"; return; }
+    el.textContent = text;
+    el.style.display = "";
+  }
+
+  function applyRelease(rel, fromCache) {
+    var assets = rel.assets || [];
+    var ipa = assets.filter(function (a) { return /\.ipa$/i.test(a.name); })[0];
+    var src = assets.filter(function (a) { return /source\.zip$/i.test(a.name); })[0];
+
+    var ver = document.getElementById("verChip");
+    ver.innerHTML = "<strong>" + escapeHTML(rel.tag_name) + "</strong>" +
+      (fromCache ? " · 缓存" : " 最新版");
+    setText("sizeChip", ipa ? fmtSize(ipa.size) : "");
+    setText("dateChip", fmtDate(rel.published_at || rel.created_at));
+
+    if (ipa) {
+      var dl = document.getElementById("dl");
+      dl.href = ipa.browser_download_url;
+      dl.setAttribute("download", "");
+    }
+    if (src) {
+      var s = document.getElementById("src");
+      var label = document.getElementById("srcLabel");
+      s.href = src.browser_download_url;
+      if (label) label.textContent = "源码包";
+      s.setAttribute("download", "");
+    }
+
+    var notes = renderMarkdown(rel.body);
+    document.getElementById("notes").innerHTML = notes ||
+      '<p style="color:var(--muted)">这一版没有写更新说明，可以在 <a href="' + REPO +
+      '/releases" target="_blank" rel="noopener">Releases</a> 里查看历史。</p>';
+  }
+
+  function fallback() {
+    var cache = null;
+    try { cache = JSON.parse(localStorage.getItem(CACHE_KEY) || "null"); } catch (e) {}
+    if (cache && cache.tag_name) { applyRelease(cache, true); return; }
+
+    document.getElementById("verChip").innerHTML = "<strong>最新版</strong>";
+    document.getElementById("sizeChip").style.display = "none";
+    document.getElementById("dateChip").style.display = "none";
+    document.getElementById("notes").innerHTML =
+      '<p style="color:var(--muted)">更新说明没读到（可能是网络或接口限流）。直接去 <a href="' +
+      REPO + '/releases" target="_blank" rel="noopener">Releases 页面</a> 查看并下载。</p>';
   }
 
   fetch(API, { headers: { Accept: "application/vnd.github+json" } })
@@ -379,36 +426,10 @@
       return r.json();
     })
     .then(function (rel) {
-      var assets = rel.assets || [];
-      var ipa = assets.filter(function (a) { return /\.ipa$/i.test(a.name); })[0];
-      var src = assets.filter(function (a) { return /source\.zip$/i.test(a.name); })[0];
-
-      document.getElementById("verChip").innerHTML = "<strong>" + escapeHTML(rel.tag_name) + "</strong> 最新版";
-      setText("sizeChip", ipa ? fmtSize(ipa.size) : "—");
-      setText("dateChip", fmtDate(rel.published_at || rel.created_at));
-
-      if (ipa) {
-        document.getElementById("dl").href = ipa.browser_download_url;
-        document.getElementById("dl").setAttribute("download", "");
-      }
-      if (src) {
-        var s = document.getElementById("src");
-        s.href = src.browser_download_url;
-        s.textContent = "源码包";
-        s.setAttribute("download", "");
-      }
-
-      var notes = renderMarkdown(rel.body);
-      document.getElementById("notes").innerHTML = notes ||
-        '<p style="color:var(--muted)">这一版没有写更新说明，可以在 <a href="' + REPO + '/releases" target="_blank" rel="noopener">Releases</a> 里查看历史。</p>';
+      try { localStorage.setItem(CACHE_KEY, JSON.stringify(rel)); } catch (e) {}
+      applyRelease(rel, false);
     })
-    .catch(function () {
-      document.getElementById("verChip").innerHTML = "<strong>最新版</strong>";
-      setText("sizeChip", "见 Releases");
-      setText("dateChip", "");
-      document.getElementById("notes").innerHTML =
-        '<p style="color:var(--muted)">更新说明没读到（可能是网络或接口限流）。直接去 <a href="' + REPO + '/releases" target="_blank" rel="noopener">Releases 页面</a> 查看并下载。</p>';
-    });
+    .catch(fallback);
 })();
 </script>
 </body>
