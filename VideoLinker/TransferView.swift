@@ -308,6 +308,7 @@ struct TransferView: View {
                 bullet("换机后新设备上的旧数据会被覆盖，先导出自己的一份再做")
                 bullet("备份包只含数据，不含视频文件，也不含 WebDAV 密码（它存在系统钥匙串里）")
                 bullet("网站数据里有各站的登录 Cookie，备份包请像密码一样保管")
+                bullet("网站数据按 64MB 封顶打包，单个超过 12MB 的缓存文件会跳过，登录状态不受影响")
             }
         }
     }
@@ -385,7 +386,7 @@ struct TransferView: View {
         if siteCount == 0 {
             return "浏览器还没产生网站数据"
         }
-        return "\(siteCount) 个站点的登录状态、本地存储与 IndexedDB"
+        return "\(siteCount) 个站点的登录状态与本地存储（最多打包 64MB）"
     }
 
     private func exportPackage() {

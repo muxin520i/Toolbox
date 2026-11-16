@@ -23,6 +23,7 @@ enum MoveError: LocalizedError {
     case damaged
     case emptyPassword
     case shortPassword
+    case noSpace
 
     var errorDescription: String? {
         switch self {
@@ -32,6 +33,7 @@ enum MoveError: LocalizedError {
         case .damaged: return "包内容不完整，重新导出一份试试"
         case .emptyPassword: return "这个备份包设了密码，需要输入密码才能打开"
         case .shortPassword: return "密码至少 6 位"
+        case .noSpace: return "存储空间不够，先清理一些文件再试"
         }
     }
 }
@@ -129,6 +131,10 @@ enum TransferStore {
         }
 
         var info = PackageInfo(encrypted: !password.isEmpty)
+        var webArchive: URL?
+        defer {
+            if let webArchive { try? FileManager.default.removeItem(at: webArchive) }
+        }
 
         var payload: [String: Any] = [
             "version": 2,
@@ -144,6 +150,7 @@ enum TransferStore {
             let diskSites = WebDataBackup.siteCountOnDisk()
 
             // WebKit 的落盘是异步的，先跟 cookie 库对一次话，再留一点时间让它写完
+            CrashLog.mark("备份：读取登录 Cookie")
             let cookies = await WebDataBackup.collectCookies()
             try? await Task.sleep(nanoseconds: 350_000_000)
 
@@ -153,14 +160,18 @@ enum TransferStore {
             let cookieSites = Set(cookies.compactMap { $0["domain"] as? String }).count
             info.siteCount = max(diskSites, cookieSites)
 
-            let collected = WebDataBackup.collect()
-            if let collected {
-                payload["webData"] = collected.data
-                payload["webDataFiles"] = collected.fileCount
-                payload["webDataBytes"] = collected.originalBytes
-                info.webFiles = collected.fileCount
-                info.webBytes = collected.originalBytes
+            CrashLog.mark("备份：收集网站文件")
+            if let collected = WebDataBackup.collect() {
+                webArchive = collected.url
+                if let blob = WebDataBackup.readSnapshot(collected) {
+                    payload["webData"] = blob
+                    payload["webDataFiles"] = collected.fileCount
+                    payload["webDataBytes"] = collected.originalBytes
+                    info.webFiles = collected.fileCount
+                    info.webBytes = collected.originalBytes
+                }
             }
+            CrashLog.mark("备份：网站数据 \(info.webFiles) 个文件")
         }
 
         let plain = try PropertyListSerialization.data(
@@ -198,6 +209,13 @@ enum TransferStore {
             try fm.createDirectory(at: dir, withIntermediateDirectories: true)
         } catch {
             throw MoveError.badFile
+        }
+
+        // 空间不够时提前说清楚，别写一半失败
+        if let free = try? dir.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+            .volumeAvailableCapacityForImportantUsage,
+           free < Int64(built.data.count) + 32 * 1024 * 1024 {
+            throw MoveError.noSpace
         }
 
         let url = dir.appendingPathComponent(suggestedFileName)
@@ -511,12 +529,16 @@ enum TransferStore {
 
 enum WebDataBackup {
     static let archiveMagic = Data("VLWD01".utf8)
-    /// 网站数据上限，超过的部分不再打包，避免备份包失控
-    static let maxBytes = 512 * 1024 * 1024
+    /// 总量上限。登录态真正靠的是 Cookie 和小体积 LocalStorage，
+    /// 定得越小越安全：整个归档最后要进 plist、再参与加密，都是整块内存操作。
+    static let maxBytes = 64 * 1024 * 1024
+    /// 单文件上限。IndexedDB 里会有几十上百 MB 的 blob，一次性读进来就是闪退。
+    static let maxFileBytes = 12 * 1024 * 1024
 
     private static let skippedNames: Set<String> = [
         "Cache.db", "Cache.db-shm", "Cache.db-wal",
         "NetworkCache", "CacheStorage", "WebKitCache", "MediaCache",
+        "ResourceLoadStatistics", "AlternativeServices",
         ".DS_Store"
     ]
 
@@ -578,25 +600,72 @@ enum WebDataBackup {
 
     // MARK: Cookie
 
+    /// 读 Cookie。`WKWebsiteDataStore` 属于 WebKit 的 UI 侧对象，要在主线程访问；
+    /// 后台线程直接拿可能崩，且不会留下异常日志。
     static func collectCookies() async -> [[String: Any]] {
-        await withCheckedContinuation { (continuation: CheckedContinuation<[[String: Any]], Never>) in
-            WKWebsiteDataStore.default().httpCookieStore.getAllCookies { cookies in
-                let list: [[String: Any]] = cookies.compactMap { cookie in
-                    guard !cookie.name.isEmpty, !cookie.domain.isEmpty else { return nil }
-                    var dict: [String: Any] = [
-                        "name": cookie.name,
-                        "value": cookie.value,
-                        "domain": cookie.domain,
-                        "path": cookie.path.isEmpty ? "/" : cookie.path,
-                        "secure": cookie.isSecure
-                    ]
-                    if let expires = cookie.expiresDate {
-                        dict["expires"] = expires.timeIntervalSince1970
+        let box = CookieBox()
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let once = ResumeGuard()
+            Task { @MainActor in
+                WKWebsiteDataStore.default().httpCookieStore.getAllCookies { cookies in
+                    let list: [[String: Any]] = cookies.compactMap { cookie in
+                        guard !cookie.name.isEmpty, !cookie.domain.isEmpty else { return nil }
+                        var dict: [String: Any] = [
+                            "name": cookie.name,
+                            "value": cookie.value,
+                            "domain": cookie.domain,
+                            "path": cookie.path.isEmpty ? "/" : cookie.path,
+                            "secure": cookie.isSecure
+                        ]
+                        if let expires = cookie.expiresDate {
+                            dict["expires"] = expires.timeIntervalSince1970
+                        }
+                        return dict
                     }
-                    return dict
+                    box.set(list)
+                    once.once { continuation.resume() }
                 }
-                continuation.resume(returning: list)
             }
+            // 回调万一不来，也不要让打包界面一直转圈
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
+                once.once { continuation.resume() }
+            }
+        }
+        return box.list
+    }
+
+    /// 跨线程带回 Cookie 结果
+    private final class CookieBox: @unchecked Sendable {
+        private var value: [[String: Any]] = []
+        private let lock = NSLock()
+
+        var list: [[String: Any]] {
+            lock.lock()
+            defer { lock.unlock() }
+            return value
+        }
+
+        func set(_ newValue: [[String: Any]]) {
+            lock.lock()
+            value = newValue
+            lock.unlock()
+        }
+    }
+
+    /// 保证 continuation 只恢复一次，重复 resume 会直接崩
+    private final class ResumeGuard: @unchecked Sendable {
+        private var done = false
+        private let lock = NSLock()
+
+        func once(_ body: () -> Void) {
+            lock.lock()
+            if done {
+                lock.unlock()
+                return
+            }
+            done = true
+            lock.unlock()
+            body()
         }
     }
 
@@ -630,34 +699,54 @@ enum WebDataBackup {
     // MARK: 打包
 
     struct Snapshot {
-        let data: Data
+        /// 归档写在临时文件里，不再整块攒在内存中
+        let url: URL
         let fileCount: Int
         let originalBytes: Int
     }
 
+    /// 逐条读、逐条压缩、逐条写盘。
+    /// 以前是把所有内容 append 进一个 Data，碰到大 IndexedDB 会把内存顶穿，
+    /// 系统直接杀进程，表现就是点一下闪退、也留不下崩溃日志。
     static func collect() -> Snapshot? {
         let fm = FileManager.default
-        var body = Data()
-        body.reserveCapacity(512 * 1024)
-        body.append(archiveMagic)
-        appendU32(0, to: &body)   // 文件数占位
+        let archive = fm.temporaryDirectory
+            .appendingPathComponent("vl-webdata-\(UUID().uuidString).bin")
+        guard fm.createFile(atPath: archive.path, contents: nil),
+              let handle = try? FileHandle(forWritingTo: archive)
+        else { return nil }
+
+        var finished = false
+        defer {
+            try? handle.close()
+            if !finished { try? fm.removeItem(at: archive) }
+        }
+
+        do {
+            try handle.write(contentsOf: archiveMagic)
+            try handle.write(contentsOf: u32Data(0))   // 文件数占位
+        } catch {
+            return nil
+        }
 
         var count = 0
         var total = 0
         let roots: [(URL, String)] = [(webKitDirectory, "WebKit"), (cookiesDirectory, "Cookies")]
 
-        for (root, prefix) in roots {
+        outer: for (root, prefix) in roots {
             guard fm.fileExists(atPath: root.path),
                   let enumerator = fm.enumerator(
                     at: root,
-                    includingPropertiesForKeys: [.isDirectoryKey, .fileSizeKey],
+                    includingPropertiesForKeys: [.isDirectoryKey, .isRegularFileKey, .fileSizeKey],
                     options: []
                   )
             else { continue }
 
             for case let url as URL in enumerator {
                 let name = url.lastPathComponent
-                let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .fileSizeKey])
+                let values = try? url.resourceValues(
+                    forKeys: [.isDirectoryKey, .isRegularFileKey, .fileSizeKey]
+                )
                 let isDirectory = values?.isDirectory ?? false
 
                 if skippedNames.contains(name) {
@@ -665,8 +754,10 @@ enum WebDataBackup {
                     continue
                 }
                 if isDirectory { continue }
-                guard let size = values?.fileSize, size > 0 else { continue }
-                guard total + size <= maxBytes else { continue }
+                // 只收普通文件，避免读到管道、套接字这类东西时卡死
+                guard values?.isRegularFile == true else { continue }
+                guard let size = values?.fileSize, size > 0, size <= maxFileBytes else { continue }
+                if total + size > maxBytes { break outer }
                 guard let raw = try? Data(contentsOf: url), !raw.isEmpty else { continue }
 
                 var relative = prefix
@@ -679,28 +770,55 @@ enum WebDataBackup {
                 let packed = lzfseCompress(raw)
                 let flag: UInt8 = packed != nil ? 1 : 0
                 let payload = packed ?? raw
-                guard payload.count <= Int(UInt32.max) else { continue }
-
                 let pathData = Data(relative.utf8)
-                guard pathData.count <= Int(UInt16.max) else { continue }
+                guard payload.count <= Int(UInt32.max),
+                      pathData.count > 0, pathData.count <= Int(UInt16.max)
+                else { continue }
 
-                appendU16(UInt16(pathData.count), to: &body)
-                body.append(pathData)
-                appendU64(UInt64(raw.count), to: &body)
-                body.append(flag)
-                appendU32(UInt32(payload.count), to: &body)
-                body.append(payload)
+                var head = Data()
+                appendU16(UInt16(pathData.count), to: &head)
+                head.append(pathData)
+                appendU64(UInt64(raw.count), to: &head)
+                head.append(flag)
+                appendU32(UInt32(payload.count), to: &head)
+
+                do {
+                    try handle.write(contentsOf: head)
+                    try handle.write(contentsOf: payload)
+                } catch {
+                    break outer
+                }
 
                 count += 1
                 total += raw.count
+                // 每个文件读完立刻释放，内存峰值只跟单个文件有关
             }
         }
 
         guard count > 0 else { return nil }
 
-        let header = withUnsafeBytes(of: UInt32(count).littleEndian) { Data($0) }
-        body.replaceSubrange(6..<10, with: header)
-        return Snapshot(data: body, fileCount: count, originalBytes: total)
+        // 回填文件数
+        do {
+            let end = try handle.offset()
+            try handle.seek(toOffset: 6)
+            try handle.write(contentsOf: u32Data(UInt32(count)))
+            try handle.seek(toOffset: end)
+        } catch {
+            return nil
+        }
+
+        finished = true
+        return Snapshot(url: archive, fileCount: count, originalBytes: total)
+    }
+
+    /// 归档文件有多大就映射多大，序列化时由 plist 自己复制，不必先整块读进来
+    static func readSnapshot(_ snapshot: Snapshot) -> Data? {
+        try? Data(contentsOf: snapshot.url, options: .mappedIfSafe)
+    }
+
+    private static func u32Data(_ value: UInt32) -> Data {
+        var v = value.littleEndian
+        return withUnsafeBytes(of: &v) { Data($0) }
     }
 
     // MARK: 还原
