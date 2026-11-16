@@ -126,6 +126,7 @@
 
 ## 已做
 
+- 备份包落文稿目录：`Documents/工具箱备份/`，文件 App 直接可见；文件名带时分，自动保留最近 5 份（v2.0.25）
 - 换机备份页闪退：去掉 `Toggle` 与 `WKWebsiteDataStore.fetchDataRecords`，改自绘开关与磁盘站点统计（v2.0.24）
 - 崩溃自记录：`NSSetUncaughtExceptionHandler` + 信号处理写 `last-crash.log`，阶段标记写 `last-stage.log`，设置页「上次异常记录」可查看与复制（v2.0.24）
 - 换机备份带上网站数据：Cookie 用 `WKHTTPCookieStore` 导出并在导入后逐条回写，LocalStorage / IndexedDB / Service Worker 按相对路径归档，缓存目录跳过；导入时自动把旧 WebKit 目录留成 `WebKit.restore-backup`（v2.0.23）

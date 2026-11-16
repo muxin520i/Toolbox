@@ -209,10 +209,22 @@ struct TransferView: View {
                         .background(theme.field, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
                     }
 
-                    if let exportSummary {
-                        Text(exportSummary)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(exportURL.lastPathComponent)
+                            .font(.system(size: 11.5, weight: .medium))
+                            .foregroundStyle(theme.textSecondary)
+                            .lineLimit(1)
+
+                        if let exportSummary {
+                            Text(exportSummary)
+                                .font(.system(size: 11.5))
+                                .foregroundStyle(theme.textTertiary)
+                        }
+
+                        Text("位置：「文件」App → 我的 iPhone → 工具箱 → 工具箱备份")
                             .font(.system(size: 11.5))
                             .foregroundStyle(theme.textTertiary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
 
@@ -402,12 +414,16 @@ struct TransferView: View {
                     busy = false
                     exportURL = result.url
                     exportSummary = result.summaryText
-                    showToast("备份包已生成")
+                    CrashLog.mark("备份包已写入 \(result.url.lastPathComponent)")
+                    showToast("已生成，位置写在按钮下方")
                 }
             } catch {
+                let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
                 await MainActor.run {
                     busy = false
-                    errorText = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                    errorText = message
+                    CrashLog.mark("生成备份包失败：\(message)")
+                    showToast("生成失败：\(message)")
                 }
             }
         }

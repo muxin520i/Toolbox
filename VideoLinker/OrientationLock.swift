@@ -82,6 +82,13 @@ enum CrashLog {
 
     /// 打一个阶段标记。崩溃日志可能是空的，阶段标记能说明崩在哪一步。
     static func mark(_ stage: String) {
+        // 长期使用会累积，超过 32 KB 就重开一份
+        if let attrs = try? FileManager.default.attributesOfItem(atPath: stageURL.path),
+           let size = attrs[.size] as? NSNumber,
+           size.intValue > 32 * 1024 {
+            try? FileManager.default.removeItem(at: stageURL)
+        }
+
         let line = "\(Date().formatted(date: .omitted, time: .standard)) \(stage)\n"
         if let handle = try? FileHandle(forWritingTo: stageURL) {
             handle.seekToEndOfFile()

@@ -71,10 +71,17 @@ enum TransferStore {
         FileManager.default.fileExists(atPath: pendingDatabase.path)
     }
 
+    /// 备份包落在文稿目录下：App 开了文件共享，这里对应
+    /// 「文件」App → 我的 iPhone → 工具箱 → 工具箱备份，用户能直接看到
+    static var exportsDirectory: URL {
+        let base = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        return base.appendingPathComponent("工具箱备份", isDirectory: true)
+    }
+
     /// 用户导出时用的默认文件名
     static var suggestedFileName: String {
         let formatter = DateFormatter()
-        formatter.dateFormat = "yyyyMMdd"
+        formatter.dateFormat = "yyyyMMdd-HHmm"
         return "工具箱备份-\(formatter.string(from: Date())).\(fileExtension)"
     }
 
@@ -178,16 +185,55 @@ enum TransferStore {
         return (magic + Data([1]) + salt + combined, info)
     }
 
-    /// 写到临时目录，返回可分享的地址
+    /// 写到「文件」App 可见的目录，返回地址
     static func writePackage(
         password: String,
         includeWebData: Bool = true
     ) async throws -> PackageResult {
         let built = try await makePackage(password: password, includeWebData: includeWebData)
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent(suggestedFileName)
-        try? FileManager.default.removeItem(at: url)
+
+        let fm = FileManager.default
+        let dir = exportsDirectory
+        do {
+            try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        } catch {
+            throw MoveError.badFile
+        }
+
+        let url = dir.appendingPathComponent(suggestedFileName)
+        try? fm.removeItem(at: url)
         try built.data.write(to: url, options: .atomic)
+
+        // 备份包本身没必要再进 iCloud 备份，避免占两份空间
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        var mutable = url
+        try? mutable.setResourceValues(values)
+
+        pruneOldExports(keeping: 5)
         return PackageResult(url: url, info: built.info)
+    }
+
+    /// 只留最近几份，避免反复导出把设备撑满
+    private static func pruneOldExports(keeping limit: Int) {
+        let fm = FileManager.default
+        guard let items = try? fm.contentsOfDirectory(
+            at: exportsDirectory,
+            includingPropertiesForKeys: [.contentModificationDateKey]
+        ) else { return }
+
+        let packages = items
+            .filter { $0.pathExtension == fileExtension || $0.pathExtension == legacyFileExtension }
+            .sorted { lhs, rhs in
+                let l = (try? lhs.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+                let r = (try? rhs.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+                return l > r
+            }
+
+        guard packages.count > limit else { return }
+        for url in packages.dropFirst(limit) {
+            try? fm.removeItem(at: url)
+        }
     }
 
     /// 取一份一致的数据库快照。VACUUM INTO 不支持时退回直接复制。
