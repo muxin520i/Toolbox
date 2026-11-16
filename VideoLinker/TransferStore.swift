@@ -731,7 +731,8 @@ enum WebDataBackup {
 
         var count = 0
         var total = 0
-        let roots: [(URL, String)] = [(webKitDirectory, "WebKit"), (cookiesDirectory, "Cookies")]
+        // Cookie 优先，配额被大文件吃满时也不至于丢掉登录态
+        let roots: [(URL, String)] = [(cookiesDirectory, "Cookies"), (webKitDirectory, "WebKit")]
 
         outer: for (root, prefix) in roots {
             guard fm.fileExists(atPath: root.path),
@@ -800,9 +801,9 @@ enum WebDataBackup {
         // 回填文件数
         do {
             let end = try handle.offset()
-            try handle.seek(toOffset: 6)
+            _ = try handle.seek(toOffset: 6)
             try handle.write(contentsOf: u32Data(UInt32(count)))
-            try handle.seek(toOffset: end)
+            _ = try handle.seek(toOffset: end)
         } catch {
             return nil
         }
