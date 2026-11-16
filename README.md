@@ -8,6 +8,8 @@
 
 ## 安装
 
+**最新版下载**：[Releases](https://github.com/muxin520i/Toolbox/releases/latest) 页面里的 `VideoLinker-unsigned.ipa`，点开即下，不用等 Actions 构建。
+
 准备一台 Windows 或 Mac、一根数据线、一个 Apple ID，加上 `VideoLinker-unsigned.ipa`（安装包文件名沿用了旧名，装好后桌面显示「工具箱」）。
 
 用 Sideloadly 签名装进手机，全程免费。免费账号签的包 **7 天有效**，到期重签一次即可，数据不会丢。
@@ -134,6 +136,8 @@ App 用 GRDB 把数据统一存在一个 SQLite 库里：`Application Support/Vi
 > 只保留最近 5 条。发新版时把第 6 条起删掉，更早的记录看 git 历史。
 
 **版本号规则（2026-11-09 起生效）**：版本号写成 `x.y.z`，每次发版在最后一段加 `0.0.1`–`0.0.7`，改动多就多加、改动少就少加。`x` 最多到 9、`y` 最多到 99；`1.9.99` 的下一版直接是 `2.0.1`，`2.9.99` 的下一版直接是 `3.0.1`，不再出现 `1.10.0` 这种第二段进位的写法。括号里的 build 号每版 +1。
+
+**发版流程**：构建通过后给这一版打一个 `v<版本号>` 的 Release，把 `VideoLinker-unsigned.ipa` 和 `VideoLinker-source.zip` 一起挂上去，再把 `README.md` 与 `/workspace` 下的两个产物同步更新。
 
 ### v2.0.26 修「勾选网站数据后生成备份包闪退」
 
